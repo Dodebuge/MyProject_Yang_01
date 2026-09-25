@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Tomcat 10.1 (Jakarta Servlet 6.0). Python 없이 Java만으로 동작하는 버전. -->
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
+         version="6.0">
+
+  <display-name>KB OpenAPI (Java)</display-name>
+
+  <context-param>
+    <!-- .env(appKey/appSecret)와 etf_snapshot.json을 두는 폴더. Tomcat 실행 사용자에게 쓰기 권한 필요.
+         환경변수 KB_DATA_DIR가 있으면 그 값이 우선입니다. -->
+    <param-name>dataDir</param-name>
+    <param-value>/opt/kb_openapi_sample</param-value>
+  </context-param>
+
+  <servlet>
+    <servlet-name>app</servlet-name>
+    <servlet-class>kb.app.AppServlet</servlet-class>
+    <load-on-startup>1</load-on-startup>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>app</servlet-name>
+    <url-pattern>/*</url-pattern>
+  </servlet-mapping>
+
+  <!-- 접근 제한 없음(요청대로). 로그인이 필요하면 deploy/tomcat-proxy/WEB-INF/web.xml의 주석과 같은 방법으로 추가하세요. -->
+</web-app>

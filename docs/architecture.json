@@ -2,43 +2,371 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "KB증권 OpenAPI 샘플 구조",
+    "title": "KB증권 OpenAPI 샘플 구조 (리눅스 서버 배포)",
     "output": "architecture.html",
     "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Dodebuge/MyProject_Yang_01",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "8476481e4d8140f1e1211c8ca7709cf51e0ed483"
+    },
     "views": [
-      { "id": "heatmap-path", "label": "히트맵 화면", "focus": ["browser", "server", "heatmap", "client", "kbapi", "snapshot"], "note": "/api/heatmap·/api/quarters: 섹터 시세와 분기별 거래대금을 모으고 ETF 스냅숏과 비교합니다." },
-      { "id": "me-path", "label": "내정보 화면", "focus": ["browser", "server", "heatmap", "dividends", "client", "kbapi"], "note": "/api/holdings는 잔고 TR, /api/dividends는 거래내역(SWQA2301)을 조회합니다. 파일로 저장하지 않습니다." },
-      { "id": "auth", "label": "인증과 비밀값", "focus": ["env", "client", "kbapi"], "note": "appKey/appSecret은 서버 쪽 .env에만 있고, kb_client가 토큰 캐싱과 5xx 재시도를 맡습니다." }
+      {
+        "id": "heatmap-path",
+        "label": "히트맵 화면",
+        "focus": [
+          "browser",
+          "tomcat",
+          "server",
+          "heatmap",
+          "client",
+          "kbapi",
+          "snapshot"
+        ],
+        "note": "/kb/api/heatmap·quarters: Tomcat이 Python 서버로 넘기고, 섹터 시세와 분기별 거래대금을 모읍니다."
+      },
+      {
+        "id": "me-path",
+        "label": "내정보 화면",
+        "focus": [
+          "browser",
+          "tomcat",
+          "server",
+          "heatmap",
+          "dividends",
+          "client",
+          "kbapi"
+        ],
+        "note": "/kb/api/holdings는 잔고 TR, /kb/api/dividends는 거래내역(SWQA2301)을 조회합니다. 파일로 저장하지 않습니다."
+      },
+      {
+        "id": "auth",
+        "label": "인증과 비밀값",
+        "focus": [
+          "env",
+          "client",
+          "kbapi"
+        ],
+        "note": "appKey/appSecret은 서버의 .env에만 있고, kb_client가 토큰 캐싱과 5xx 재시도(3회)를 맡습니다."
+      }
     ]
   },
   "components": [
-    { "id": "browser", "type": "frontend", "label": "브라우저", "sublabel": "home · heatmap · me", "pos": [40, 360], "size": [170, 64] },
-    { "id": "cdn", "type": "external", "label": "jsDelivr CDN", "sublabel": "d3-hierarchy", "pos": [55, 180], "size": [140, 60] },
-    { "id": "server", "type": "backend", "label": "dividends_web.py", "sublabel": "127.0.0.1:8000", "tag": "로컬 전용", "pos": [280, 360], "size": [160, 64] },
-    { "id": "heatmap", "type": "backend", "label": "heatmap.py", "sublabel": "섹터·분기·ETF·보유", "tag": "60초 · 10분 캐시", "pos": [510, 220], "size": [160, 64] },
-    { "id": "snapshot", "type": "database", "label": "etf_snapshot.json", "sublabel": "날짜별 ETF 코드", "pos": [510, 80], "size": [160, 60] },
-    { "id": "dividends", "type": "backend", "label": "dividends.py", "sublabel": "배당 거래 분류·월별 집계", "pos": [500, 500], "size": [170, 64] },
-    { "id": "client", "type": "backend", "label": "kb_client.py", "sublabel": "토큰 캐싱 · TR 호출", "tag": "5xx 재시도", "pos": [740, 360], "size": [160, 64] },
-    { "id": "env", "type": "security", "label": ".env", "sublabel": "appKey / appSecret", "pos": [750, 520], "size": [140, 60] },
-    { "id": "kbapi", "type": "external", "label": "KB증권 OpenAPI", "sublabel": "developer.kbsec.com:32484", "pos": [1030, 360], "size": [190, 64] }
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "내 PC 브라우저",
+      "sublabel": "home · heatmap · me",
+      "pos": [
+        40,
+        360
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "home.html",
+          "label": "첫 화면"
+        },
+        {
+          "path": "heatmap.html",
+          "label": "히트맵"
+        },
+        {
+          "path": "me.html",
+          "label": "내정보"
+        }
+      ]
+    },
+    {
+      "id": "cdn",
+      "type": "external",
+      "label": "jsDelivr CDN",
+      "sublabel": "d3-hierarchy",
+      "pos": [
+        45,
+        180
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "tomcat",
+      "type": "backend",
+      "label": "Tomcat 10",
+      "sublabel": "kb.war 프록시",
+      "tag": ":8080 공개",
+      "pos": [
+        320,
+        360
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "dividends_web.py",
+      "sublabel": "Python · :8000",
+      "tag": "127.0.0.1 전용",
+      "pos": [
+        580,
+        360
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "dividends_web.py"
+        }
+      ]
+    },
+    {
+      "id": "heatmap",
+      "type": "backend",
+      "label": "heatmap.py",
+      "sublabel": "섹터·분기·ETF·보유",
+      "tag": "60초 · 10분 캐시",
+      "pos": [
+        830,
+        170
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "heatmap.py",
+          "line": 392,
+          "label": "query_heatmap"
+        },
+        {
+          "path": "heatmap.py",
+          "line": 345,
+          "label": "query_quarters"
+        },
+        {
+          "path": "heatmap.py",
+          "line": 216,
+          "label": "fetch_my (보유 종목)"
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "날짜별 ETF 코드",
+      "pos": [
+        830,
+        30
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "heatmap.py",
+          "line": 128,
+          "label": "update_snapshot"
+        }
+      ]
+    },
+    {
+      "id": "dividends",
+      "type": "backend",
+      "label": "dividends.py",
+      "sublabel": "배당 거래 분류·월별 집계",
+      "pos": [
+        575,
+        570
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "dividends.py"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "backend",
+      "label": "kb_client.py",
+      "sublabel": "토큰 캐싱 · TR 호출",
+      "tag": "5xx 3회 재시도",
+      "pos": [
+        830,
+        360
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "kb_client.py",
+          "line": 100,
+          "label": "call"
+        },
+        {
+          "path": "kb_client.py",
+          "line": 130,
+          "label": "_post (5xx 재시도)"
+        }
+      ]
+    },
+    {
+      "id": "env",
+      "type": "security",
+      "label": ".env",
+      "sublabel": "appKey / appSecret",
+      "pos": [
+        840,
+        570
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "kbapi",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "developer.kbsec.com:32484",
+      "pos": [
+        1100,
+        360
+      ],
+      "size": [
+        180,
+        64
+      ]
+    }
   ],
   "boundaries": [
-    { "kind": "region", "label": "로컬 PC · kb_openapi_sample", "wraps": ["server", "heatmap", "snapshot", "dividends", "client", "env"] }
+    {
+      "kind": "region",
+      "label": "리눅스 서버 · /opt/kb_openapi_sample",
+      "wraps": [
+        "tomcat",
+        "server",
+        "heatmap",
+        "snapshot",
+        "dividends",
+        "client",
+        "env"
+      ]
+    }
   ],
   "connections": [
-    { "id": "page-api", "from": "browser", "to": "server", "label": "fetch /api/*", "variant": "emphasis" },
-    { "id": "load-d3", "from": "browser", "to": "cdn", "label": "트리맵", "variant": "dashed" },
-    { "id": "route-heatmap", "from": "server", "to": "heatmap", "label": "heatmap · quarters · holdings" },
-    { "id": "route-dividends", "from": "server", "to": "dividends", "label": "/api/dividends" },
-    { "id": "heatmap-snapshot", "from": "heatmap", "to": "snapshot", "label": "신규 상장 비교", "variant": "dashed" },
-    { "id": "heatmap-client", "from": "heatmap", "to": "client", "label": "시세 · 차트 · 잔고 TR" },
-    { "id": "dividends-client", "from": "dividends", "to": "client", "label": "SWQA2301 연속조회" },
-    { "id": "env-client", "from": "env", "to": "client", "label": "from_env()", "variant": "security" },
-    { "id": "client-kb", "from": "client", "to": "kbapi", "label": "POST /api/v1/{tr}", "variant": "emphasis" }
+    {
+      "id": "page-http",
+      "from": "browser",
+      "to": "tomcat",
+      "label": "http://서버IP:8080/kb/",
+      "variant": "emphasis"
+    },
+    {
+      "id": "proxy",
+      "from": "tomcat",
+      "to": "server",
+      "label": "프록시 → :8000",
+      "variant": "emphasis"
+    },
+    {
+      "id": "load-d3",
+      "from": "browser",
+      "to": "cdn",
+      "label": "트리맵",
+      "variant": "dashed"
+    },
+    {
+      "id": "route-heatmap",
+      "from": "server",
+      "to": "heatmap",
+      "label": "heatmap · quarters · holdings"
+    },
+    {
+      "id": "route-dividends",
+      "from": "server",
+      "to": "dividends",
+      "label": "/api/dividends",
+      "labelDy": 24
+    },
+    {
+      "id": "heatmap-snapshot",
+      "from": "heatmap",
+      "to": "snapshot",
+      "label": "신규 상장 비교",
+      "variant": "dashed"
+    },
+    {
+      "id": "heatmap-client",
+      "from": "heatmap",
+      "to": "client",
+      "label": "시세 · 차트 · 잔고 TR",
+      "labelDy": 24
+    },
+    {
+      "id": "dividends-client",
+      "from": "dividends",
+      "to": "client",
+      "label": "SWQA2301 연속조회"
+    },
+    {
+      "id": "env-client",
+      "from": "env",
+      "to": "client",
+      "label": "from_env()",
+      "variant": "security"
+    },
+    {
+      "id": "client-kb",
+      "from": "client",
+      "to": "kbapi",
+      "label": "POST /api/v1/{tr}",
+      "variant": "emphasis"
+    }
   ],
   "cards": [
-    { "dot": "cyan", "title": "화면", "items": ["히트맵: 섹터 거래대금·시총 등락률, 분기별 거래대금, 국내 ETF 개수", "내정보: 보유 종목·현금 비중, 배당 내역"] },
-    { "dot": "emerald", "title": "서버", "items": ["ThreadingHTTPServer, 127.0.0.1에만 바인딩", "시세 8스레드·차트 4스레드 병렬, 5xx는 두 번 재시도"] },
-    { "dot": "rose", "title": "보안", "items": ["키는 .env에만, 브라우저로 전달하지 않음", "잔고·배당은 매번 조회, 파일 저장 없음"] }
+    {
+      "dot": "cyan",
+      "title": "배포",
+      "items": [
+        "Tomcat 10(kb.war)만 8080으로 공개, Python은 127.0.0.1:8000",
+        "접근 제한 없음 · Java 단독 버전은 java-app/"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "서버",
+      "items": [
+        "시세 8스레드·차트 4스레드 병렬",
+        "5xx는 0.5·1·2초 쉬고 3회 재시도"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "보안",
+      "items": [
+        "키는 서버 .env에만, 브라우저로 전달하지 않음",
+        "잔고·배당은 매번 조회, 파일 저장 없음"
+      ]
+    }
   ]
 }

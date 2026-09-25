@@ -12,6 +12,8 @@
 | `dividends_web.py` | 로컬 웹서버: `/` 첫 화면, `/heatmap`, `/me` 페이지와 `/api/*` |
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
 | `me.html` | 내정보: 보유 종목 현황 + 배당 내역 |
+| `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
+| `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
 | `heatmap.py` / `heatmap.html` | 국내·미국 섹터 히트맵 (같은 서버의 `/heatmap`) |
 
 ## 실행

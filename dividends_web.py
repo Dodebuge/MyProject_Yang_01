@@ -6,6 +6,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
 실행:
     python dividends_web.py              # http://localhost:8000 을 엽니다
     python dividends_web.py --port 8080 --no-open
+    python dividends_web.py --no-open    # 리눅스 서버에서 Tomcat 뒤에 둘 때 (deploy/README.md)
 
 페이지:
     GET /         -> 첫 화면: 히트맵 / 내정보 선택 (home.html)
@@ -96,13 +97,15 @@ def make_handler(client: KBClient):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="배당금 확인 페이지")
+    parser = argparse.ArgumentParser(description="KB증권 OpenAPI 로컬 웹서버")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="바인딩 주소. Tomcat 뒤에서 쓸 때도 127.0.0.1로 두고 Tomcat만 외부에 엽니다.")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-open", action="store_true", help="브라우저를 자동으로 열지 않음")
     args = parser.parse_args()
 
-    # 127.0.0.1에만 바인딩: 같은 네트워크의 다른 기기에서 내 계좌 내역을 볼 수 없게 합니다.
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(KBClient.from_env()))
+    # 기본은 127.0.0.1에만 바인딩: 같은 네트워크의 다른 기기에서 계좌 내역을 직접 볼 수 없게 합니다.
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(KBClient.from_env()))
     url = f"http://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)
     if not args.no_open:

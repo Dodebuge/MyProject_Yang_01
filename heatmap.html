@@ -117,7 +117,7 @@ table.qtable tbody tr[data-sector] { cursor: pointer; }
 <div class="wrap">
   <header class="top">
     <div>
-      <nav class="nav"><a href="/" class="home">KB OpenAPI</a><a href="/heatmap" aria-current="page">히트맵</a><a href="/me">내정보</a></nav>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap" aria-current="page">히트맵</a><a href="me">내정보</a></nav>
       <h1>섹터 히트맵</h1>
       <div class="status" id="status"></div>
     </div>
@@ -179,7 +179,7 @@ async function load(force = false) {
   document.querySelectorAll("button").forEach(b => b.id !== "theme" && (b.disabled = true));
   $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${market === "kr" ? "국내" : "미국"} 시세를 조회하고 있습니다.</div>`;
   try {
-    const res = await fetch(`/api/heatmap?market=${market}`, { cache: "no-store" });
+    const res = await fetch(`api/heatmap?market=${market}`, { cache: "no-store" });
     const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     state.data[market] = json;
@@ -355,7 +355,7 @@ function drawMap(focus, sectors, key, cur, etfN) {
 async function loadQuarters(market) {
   state.quarters[market] = { loading: true };
   try {
-    const res = await fetch(`/api/quarters?market=${market}`, { cache: "no-store" });
+    const res = await fetch(`api/quarters?market=${market}`, { cache: "no-store" });
     const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     state.quarters[market] = json;

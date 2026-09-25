@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "히트맵 화면 조회 시퀀스 (국내)",
+    "title": "히트맵 화면 조회 시퀀스 (국내, Tomcat 경유)",
     "output": "heatmap-request.sequence.html",
     "viewBox": [
       1060,
@@ -20,7 +20,7 @@
           "kb",
           "snapshot"
         ],
-        "note": "/api/heatmap: 시세·업종과 전체 상장 목록을 받아 섹터로 묶고, ETF 스냅숏과 비교합니다."
+        "note": "/kb/api/heatmap: Tomcat이 Python 서버로 넘기고, 시세·업종과 전체 상장 목록을 섹터로 묶어 ETF 스냅숏과 비교합니다."
       },
       {
         "id": "quarters",
@@ -30,7 +30,7 @@
           "heatmap",
           "kb"
         ],
-        "note": "/api/quarters: 히트맵 종목마다 일봉 약 400거래일을 받아 분기별 일평균 거래대금으로 합산합니다."
+        "note": "/kb/api/quarters: 히트맵 종목마다 일봉 약 400거래일을 받아 분기별 일평균 거래대금으로 합산합니다."
       }
     ]
   },
@@ -39,13 +39,13 @@
       "id": "browser",
       "type": "frontend",
       "label": "브라우저",
-      "sublabel": "heatmap.html"
+      "sublabel": "서버IP:8080/kb/heatmap"
     },
     {
       "id": "heatmap",
       "type": "backend",
       "label": "heatmap.py",
-      "sublabel": "dividends_web.py 경유"
+      "sublabel": "Tomcat → dividends_web.py 경유"
     },
     {
       "id": "snapshot",
@@ -78,7 +78,7 @@
       "from": "browser",
       "to": "heatmap",
       "y": 170,
-      "label": "GET /api/heatmap?market=kr",
+      "label": "GET /kb/api/heatmap?market=kr",
       "variant": "emphasis",
       "note": "60초 캐시에 있으면 바로 반환"
     },
@@ -128,7 +128,7 @@
       "from": "browser",
       "to": "heatmap",
       "y": 364,
-      "label": "GET /api/quarters?market=kr",
+      "label": "GET /kb/api/quarters?market=kr",
       "variant": "emphasis",
       "note": "10분 캐시"
     },
@@ -139,7 +139,7 @@
       "y": 394,
       "label": "IVS11560 일봉 × 종목",
       "variant": "emphasis",
-      "note": "4스레드 병렬, 5xx는 두 번 재시도"
+      "note": "4스레드 병렬, 5xx는 0.5·1·2초 쉬고 3회 재시도"
     },
     {
       "id": "chart-rows",

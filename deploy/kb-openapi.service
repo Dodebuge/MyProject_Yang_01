@@ -1,0 +1,23 @@
+# systemd 서비스: Python 서버(dividends_web.py)를 127.0.0.1:8000에서 계속 실행합니다.
+# 외부 접속은 Tomcat(kb.war)만 받고, 이 서버는 같은 머신의 Tomcat만 호출합니다.
+#
+#   sudo cp deploy/kb-openapi.service /etc/systemd/system/
+#   (아래 WorkingDirectory, User를 서버에 맞게 수정)
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi
+#   journalctl -u kb-openapi -f      # 로그 확인
+[Unit]
+Description=KB OpenAPI Python server (behind Tomcat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 코드와 .env가 있는 폴더. etf_snapshot.json도 여기에 저장되므로 User에게 쓰기 권한이 있어야 합니다.
+WorkingDirectory=/opt/kb_openapi_sample
+ExecStart=/usr/bin/python3 dividends_web.py --host 127.0.0.1 --port 8000 --no-open
+User=kbapp
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

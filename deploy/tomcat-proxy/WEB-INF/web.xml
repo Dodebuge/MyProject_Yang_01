@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Tomcat 10.1 (Jakarta Servlet 6.0). 모든 요청을 같은 서버의 Python 서버로 넘깁니다. -->
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
+         version="6.0">
+
+  <display-name>KB OpenAPI (Python 프록시)</display-name>
+
+  <servlet>
+    <servlet-name>proxy</servlet-name>
+    <servlet-class>kb.proxy.ProxyServlet</servlet-class>
+    <init-param>
+      <!-- dividends_web.py 주소. 같은 서버에서 127.0.0.1로만 열어 둡니다. -->
+      <param-name>backend</param-name>
+      <param-value>http://127.0.0.1:8000</param-value>
+    </init-param>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>proxy</servlet-name>
+    <url-pattern>/*</url-pattern>
+  </servlet-mapping>
+
+  <!--
+    접근 제한 없음(요청대로). 서버 IP를 아는 누구나 잔고·배당 화면을 볼 수 있습니다.
+    로그인을 켜려면 아래 주석을 풀고 $CATALINA_HOME/conf/tomcat-users.xml에
+      <role rolename="kb"/><user username="아이디" password="비밀번호" roles="kb"/>
+    를 추가한 뒤 Tomcat을 재시작하세요.
+
+  <security-constraint>
+    <web-resource-collection>
+      <web-resource-name>all</web-resource-name>
+      <url-pattern>/*</url-pattern>
+    </web-resource-collection>
+    <auth-constraint><role-name>kb</role-name></auth-constraint>
+  </security-constraint>
+  <login-config><auth-method>BASIC</auth-method><realm-name>KB OpenAPI</realm-name></login-config>
+  <security-role><role-name>kb</role-name></security-role>
+  -->
+</web-app>

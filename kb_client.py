@@ -2,7 +2,7 @@
 
 kbsecurities/kb-openapi 저장소의 example/python 패턴을 따르되, 아래를 보강했습니다.
 - 토큰 캐싱: expires_in(기본 86400초)까지 재사용하고 만료 60초 전에 재발급
-- 5xx 응답은 0.5초, 1초 쉬고 두 번까지 재시도
+- 5xx 응답은 0.5초, 1초, 2초 쉬고 세 번까지 재시도
 - 업무 오류 판별: HTTP 200이어도 dataHeader.processFlag가 "B"면 KBApiError 발생
   (all_kbstock_sample_V2 샘플 기준: 정상 "A", 주문수량 오류·자료없음 등 "B")
 - 고정길이 전문 값 정리: "   368500" -> "368500", "0000000039024.00" -> 39024.0
@@ -128,12 +128,12 @@ class KBClient:
         raise RuntimeError(f"[{tr_code}] {max_pages}페이지를 넘었습니다. 조회 기간을 줄이세요.")
 
     def _post(self, path: str, headers: dict, body: dict) -> dict:
-        # 호출이 몰리면 KB 서버가 가끔 500을 돌려줍니다. 5xx는 잠시 쉬었다가 두 번까지 다시 시도합니다.
-        for attempt in range(3):
+        # 호출이 몰리면 KB 서버가 가끔 500을 연달아 돌려줍니다. 5xx는 0.5초, 1초, 2초 쉬고 세 번까지 다시 시도합니다.
+        for attempt in range(4):
             response = self._session.post(f"{self.base_url}{path}", headers=headers, json=body, timeout=self.timeout)
-            if response.status_code < 500 or attempt == 2:
+            if response.status_code < 500 or attempt == 3:
                 break
-            time.sleep(0.5 * (attempt + 1))
+            time.sleep(0.5 * 2 ** attempt)
         response.raise_for_status()
         return response.json()
 

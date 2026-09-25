@@ -150,7 +150,7 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 <div class="wrap">
   <header class="top">
     <div>
-      <nav class="nav"><a href="/" class="home">KB OpenAPI</a><a href="/heatmap">히트맵</a><a href="/me" aria-current="page">내정보</a></nav>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap">히트맵</a><a href="me" aria-current="page">내정보</a></nav>
       <h1>내정보</h1>
     </div>
     <div class="controls">
@@ -237,7 +237,7 @@ async function load() {
   $("#status").textContent = "";
   $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${year}년 거래내역을 조회하고 있습니다. 거래가 많으면 10~20초 걸립니다.</div>`;
   try {
-    const res = await fetch(`/api/dividends?year=${year}`, { cache: "no-store" });
+    const res = await fetch(`api/dividends?year=${year}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     state.data = json;
@@ -458,7 +458,7 @@ async function loadHoldings() {
   $("#h-fetch").disabled = true;
   $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>잔고와 시세를 조회하고 있습니다.</div>`;
   try {
-    const res = await fetch("/api/holdings", { cache: "no-store" });
+    const res = await fetch("api/holdings", { cache: "no-store" });
     const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     hold.data = json;
