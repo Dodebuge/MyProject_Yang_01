@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>내 배당금</title>
+<!--
+  배당금 확인 페이지. dividends_web.py가 이 파일을 제공하고,
+  페이지는 /api/dividends?year=YYYY 로 KB OpenAPI 거래내역을 실시간 조회합니다.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
+  --series-1: #2a78d6;   /* 국내 */
+  --series-2: #eb6834;   /* 해외 */
+  --select: rgba(42,120,214,0.08);
+  --bad: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+    --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+  --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.status { color: var(--muted); font-size: 13px; min-height: 20px; }
+.controls { display: flex; gap: 8px; align-items: center; }
+select, button {
+  font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+button.primary { font-weight: 600; }
+button:disabled { opacity: .5; cursor: progress; }
+
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.span-12 { grid-column: span 12; } .span-7 { grid-column: span 7; } .span-5 { grid-column: span 5; }
+@media (max-width: 900px) { .span-7, .span-5 { grid-column: span 12; } }
+.card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.card .sub { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+.card-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; flex-wrap: wrap; }
+
+.tiles { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 12px; }
+@media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .tiles .hero { grid-column: span 2; } }
+.tile .label { color: var(--ink-2); font-size: 13px; }
+.tile .value { font-size: 24px; font-weight: 650; margin-top: 2px; }
+.tile.hero .value { font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; }
+.tile .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.unit { font-size: .5em; font-weight: 500; margin-left: 2px; }
+
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .col { cursor: pointer; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); white-space: nowrap; opacity: 0; transition: opacity .08s;
+  font-variant-numeric: tabular-nums; z-index: 2;
+}
+.tip b { display: block; margin-bottom: 2px; }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+.tip .row span:first-child { color: var(--ink-2); }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+
+table.list { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.list th { text-align: right; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--axis); white-space: nowrap; }
+table.list td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.list .l { text-align: left; }
+table.list tbody tr:hover td { background: var(--hover); }
+table.list tr.clickable { cursor: pointer; }
+table.list tr.selected td { background: var(--select); }
+table.list tfoot td { font-weight: 650; border-bottom: 0; border-top: 1px solid var(--axis); }
+td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.neg { color: var(--bad); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--ink-2); }
+.scroll { overflow-x: auto; }
+.show-sm { display: none; }
+@media (max-width: 600px) {
+  .hide-sm { display: none; }
+  .show-sm { display: table-cell !important; }
+  td.nm { max-width: 92px; }
+  table.list th, table.list td { padding: 6px 4px; }
+}
+
+.bars { display: grid; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr; gap: 10px; align-items: center; font-size: 13px; }
+.bar-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.bar-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar-fill { height: 16px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+.bar-fill.foreign { background: var(--series-2); }
+.bar-val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.empty, .notice { color: var(--muted); padding: 24px 0; text-align: center; }
+.error { background: var(--surface); border: 1px solid var(--bad); border-radius: 12px; padding: 16px; }
+.loading { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 80px 0; color: var(--ink-2); }
+.spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--series-1); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>내 배당금</h1>
+      <div class="status" id="status"></div>
+    </div>
+    <div class="controls">
+      <select id="year" aria-label="연도"></select>
+      <button class="primary" id="fetch">조회</button>
+      <button id="theme" aria-label="테마 전환">◐</button>
+    </div>
+  </header>
+  <main id="app"></main>
+</div>
+
+<script>
+// ---------------------------------------------------------------- 상태
+const state = { data: null, month: null, loading: false };
+const THIS_YEAR = new Date().getFullYear();
+const KIND = { DIV: "배당금 입금", FTAX: "해외원천세 출금", KTAX: "배당세금추징 출금", REFUND: "해외원천세 환급 입금" };
+
+// ---------------------------------------------------------------- 유틸
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const won = n => `<span class="${n < 0 ? "neg" : ""}">${fmt(n)}</span>`;
+const compact = n => {
+  const a = Math.abs(n);
+  if (a >= 1e8) return fmt(n / 1e8, 1) + "억";
+  if (a >= 1e4) return fmt(n / 1e4, a >= 1e5 ? 0 : 1) + "만";
+  return fmt(n);
+};
+const sum = (arr, f) => arr.reduce((s, x) => s + f(x), 0);
+const isDiv = e => e.kind === KIND.DIV;
+const isKR = e => e.currency === "KRW";
+const niceMax = v => {
+  if (v <= 0) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= v);
+};
+
+// ---------------------------------------------------------------- 집계
+function aggregate(entries) {
+  const months = Array.from({ length: 12 }, (_, i) => ({ m: i + 1, kr: 0, fx: 0, usd: 0, gross: 0, tax: 0, count: 0 }));
+  for (const e of entries) {
+    const b = months[e.month - 1];
+    if (isDiv(e)) {
+      b.count++;
+      if (isKR(e)) b.kr += e.gross; else { b.fx += e.gross; b.usd += e.fx_amount; }
+    }
+    b.gross += e.gross; b.tax += e.tax;
+  }
+  months.forEach(b => b.net = b.gross - b.tax);
+
+  const stocks = new Map();
+  for (const e of entries.filter(isDiv)) {
+    const s = stocks.get(e.name) || { name: e.name, gross: 0, count: 0, kr: isKR(e), months: new Set() };
+    s.gross += e.gross; s.count++; s.months.add(e.month);
+    stocks.set(e.name, s);
+  }
+  return { months, stocks: [...stocks.values()].sort((a, b) => b.gross - a.gross) };
+}
+
+// ---------------------------------------------------------------- 조회
+async function load() {
+  const year = +$("#year").value;
+  state.loading = true; state.month = null;
+  $("#fetch").disabled = $("#year").disabled = true;
+  $("#status").textContent = "";
+  $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${year}년 거래내역을 조회하고 있습니다. 거래가 많으면 10~20초 걸립니다.</div>`;
+  try {
+    const res = await fetch(`/api/dividends?year=${year}`, { cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+    state.data = json;
+    $("#status").textContent = `${json.start.slice(0, 4)}.${json.start.slice(4, 6)}.${json.start.slice(6)} – ${json.end.slice(0, 4)}.${json.end.slice(4, 6)}.${json.end.slice(6)} · 조회 ${json.fetchedAt}`;
+    render();
+  } catch (err) {
+    state.data = null;
+    $("#app").innerHTML = `<div class="error"><b>조회하지 못했습니다</b><br>${esc(err.message)}<div class="note">서버(dividends_web.py)가 실행 중인지, .env의 appKey/appSecret이 맞는지 확인하세요.</div></div>`;
+  } finally {
+    state.loading = false;
+    $("#fetch").disabled = $("#year").disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------- 화면
+function render() {
+  const { entries, year } = state.data;
+  const { months, stocks } = aggregate(entries);
+  const divs = entries.filter(isDiv);
+  const gross = sum(entries, e => e.gross), tax = sum(entries, e => e.tax), net = gross - tax;
+  const lastMonth = year === THIS_YEAR ? new Date().getMonth() + 1 : 12;
+  const shown = months.slice(0, Math.max(lastMonth, ...entries.map(e => e.month), 1));
+  const paidMonths = shown.filter(b => b.count).length;
+  const usd = sum(divs.filter(e => !isKR(e)), e => e.fx_amount);
+
+  if (!entries.length) {
+    $("#app").innerHTML = `<div class="card"><div class="empty">${year}년에 받은 배당이 없습니다.</div></div>`;
+    return;
+  }
+
+  $("#app").innerHTML = `
+  <div class="grid">
+    <section class="card span-12">
+      <div class="tiles">
+        <div class="tile hero"><div class="label">${year}년 실수령 배당</div>
+          <div class="value">${fmt(net)}<span class="unit">원</span></div>
+          <div class="meta">세전 ${fmt(gross)}원 − 세금 ${fmt(tax)}원</div></div>
+        <div class="tile"><div class="label">국내 배당 (세전)</div><div class="value">${compact(sum(divs.filter(isKR), e => e.gross))}<span class="unit">원</span></div>
+          <div class="meta">ETF 분배금 포함</div></div>
+        <div class="tile"><div class="label">해외 배당 (세전)</div><div class="value">$${fmt(usd, 2)}</div>
+          <div class="meta">≈ ${fmt(sum(divs.filter(e => !isKR(e)), e => e.gross))}원</div></div>
+        <div class="tile"><div class="label">월평균 실수령</div><div class="value">${compact(Math.round(net / shown.length))}<span class="unit">원</span></div>
+          <div class="meta">${shown.length}개월 기준</div></div>
+        <div class="tile"><div class="label">배당 입금</div><div class="value">${divs.length}<span class="unit">건</span></div>
+          <div class="meta">${stocks.length}종목 · ${paidMonths}개월</div></div>
+      </div>
+    </section>
+
+    <section class="card span-7">
+      <div class="card-head">
+        <div><h2>월별 세전 배당</h2><p class="sub">막대나 표의 행을 누르면 그 달의 상세 내역을 봅니다</p></div>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>국내</span><span><i style="background:var(--series-2)"></i>해외 (원화 환산)</span></div>
+      </div>
+      <div class="chart" id="month-chart"></div>
+    </section>
+
+    <section class="card span-5">
+      <div class="card-head">
+        <div><h2>종목별 세전 배당</h2><p class="sub">${stocks.length}종목 · 원화 기준</p></div>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>국내</span><span><i style="background:var(--series-2)"></i>해외</span></div>
+      </div>
+      <div class="bars">
+        ${stocks.slice(0, 12).map(s => `<div class="bar-row" title="${esc(s.name)} · ${s.count}회 · ${[...s.months].sort((a, b) => a - b).join(", ")}월">
+          <div class="nm">${esc(s.name)}</div>
+          <div class="bar-track"><div class="bar-fill ${s.kr ? "" : "foreign"}" style="width:${(s.gross / stocks[0].gross * 72).toFixed(1)}%"></div><span class="bar-val">${compact(s.gross)}</span></div>
+        </div>`).join("")}
+      </div>
+      ${stocks.length > 12 ? `<div class="note">외 ${stocks.length - 12}종목</div>` : ""}
+    </section>
+
+    <section class="card span-12">
+      <h2>월별 합계</h2>
+      <p class="sub">세금 = 해외 원천세 + 국내 원천징수·추징 − 해외 원천세 환급 · 해외 금액은 거래일 환율로 원화 환산</p>
+      <div class="scroll"><table class="list">
+        <thead><tr><th class="l">월</th><th class="hide-sm">건수</th><th class="hide-sm">국내 세전</th><th class="hide-sm">해외 세전 (USD)</th><th>세전 합계</th><th>세금</th><th>실수령</th></tr></thead>
+        <tbody>${shown.map(b => `<tr class="clickable ${state.month === b.m ? "selected" : ""}" data-month="${b.m}">
+          <td class="l">${b.m}월</td><td class="hide-sm">${b.count || ""}</td><td class="hide-sm">${b.kr ? fmt(b.kr) : ""}</td><td class="hide-sm">${b.usd ? "$" + fmt(b.usd, 2) : ""}</td>
+          <td>${b.gross ? fmt(b.gross) : ""}</td><td>${b.tax ? won(b.tax) : ""}</td><td>${b.gross || b.tax ? won(b.net) : ""}</td></tr>`).join("")}</tbody>
+        <tfoot><tr><td class="l">합계</td><td class="hide-sm">${divs.length}</td><td class="hide-sm">${fmt(sum(shown, b => b.kr))}</td><td class="hide-sm">$${fmt(usd, 2)}</td>
+          <td>${fmt(gross)}</td><td>${won(tax)}</td><td>${won(net)}</td></tr></tfoot>
+      </table></div>
+    </section>
+
+    <section class="card span-12" id="detail"></section>
+  </div>`;
+
+  drawMonthChart(shown);
+  renderDetail();
+  document.querySelectorAll("tr[data-month]").forEach(tr => tr.onclick = () => selectMonth(+tr.dataset.month));
+}
+
+function selectMonth(m) {
+  state.month = state.month === m ? null : m;
+  document.querySelectorAll("tr[data-month]").forEach(tr => tr.classList.toggle("selected", +tr.dataset.month === state.month));
+  document.querySelectorAll(".col").forEach(g => g.setAttribute("opacity", state.month && +g.dataset.month !== state.month ? 0.35 : 1));
+  renderDetail();
+  if (state.month) $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderDetail() {
+  const all = state.data.entries;
+  const es = state.month ? all.filter(e => e.month === state.month) : all;
+  const label = state.month ? `${state.month}월` : "전체";
+  const kindLabel = k => ({ [KIND.DIV]: "배당", [KIND.FTAX]: "해외원천세", [KIND.KTAX]: "국내 추징세", [KIND.REFUND]: "원천세 환급" })[k] || k;
+  $("#detail").innerHTML = `
+    <div class="card-head">
+      <div><h2>${label} 상세 내역</h2><p class="sub">${es.length}건 · 세전 ${fmt(sum(es, e => e.gross))}원 · 세금 ${fmt(sum(es, e => e.tax))}원 · 실수령 ${fmt(sum(es, e => e.net))}원</p></div>
+      <div class="controls">${state.month ? `<button id="show-all">전체 보기</button>` : ""}<button id="csv">CSV 저장</button></div>
+    </div>
+    ${es.length ? `<div class="scroll"><table class="list">
+      <thead><tr><th class="l">일자</th><th class="l">종목</th><th class="l">구분</th><th class="hide-sm">외화</th><th class="hide-sm">환율</th><th class="hide-sm">세전</th><th class="hide-sm">세금</th><th class="show-sm">금액</th></tr></thead>
+      <tbody>${es.map(e => `<tr>
+        <td class="l">${e.date.slice(4, 6)}/${e.date.slice(6)}</td>
+        <td class="l nm" title="${esc(e.name)} ${esc(e.code)}">${esc(e.name)}</td>
+        <td class="l"><span class="tag">${kindLabel(e.kind)}</span></td>
+        <td class="hide-sm">${e.currency !== "KRW" ? `${fmt(e.fx_amount, 2)} ${esc(e.currency)}` : ""}</td>
+        <td class="hide-sm">${e.fx_rate ? fmt(e.fx_rate, 1) : ""}</td>
+        <td class="hide-sm">${e.gross ? fmt(e.gross) : ""}</td><td class="hide-sm">${e.tax ? won(e.tax) : ""}</td>
+        <td class="show-sm">${won(e.gross - e.tax)}</td></tr>`).join("")}</tbody>
+    </table></div>` : `<div class="empty">이 달에는 배당 내역이 없습니다.</div>`}`;
+  $("#csv").onclick = () => downloadCsv(es, label);
+  if ($("#show-all")) $("#show-all").onclick = () => selectMonth(state.month);
+}
+
+function downloadCsv(es, label) {
+  const cols = ["date", "name", "code", "kind", "currency", "fx_amount", "fx_rate", "gross", "tax", "net"];
+  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
+  const csv = "﻿" + [cols.join(","), ...es.map(e => cols.map(c => q(e[c])).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = `dividends_${state.data.year}_${label}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------------------------------------------------------------- 월별 누적 막대
+function drawMonthChart(months) {
+  const host = $("#month-chart");
+  if (!host) return;
+  const W = host.clientWidth, H = 260, m = { t: 20, r: 8, b: 24, l: 44 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const ymax = niceMax(Math.max(...months.map(b => b.kr + b.fx), 1));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => ymax * f);
+  const band = iw / months.length, bw = Math.min(24, band * 0.6);
+  const y = v => m.t + ih - (v / ymax) * ih;
+  const GAP = 2;
+
+  // 아래가 네모, 위쪽 끝만 4px 둥근 막대
+  const seg = (x, top, bottom, round) => {
+    const h = bottom - top;
+    if (h <= 0) return "";
+    const r = round ? Math.min(4, h, bw / 2) : 0;
+    return `M${x},${bottom}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${bottom}Z`;
+  };
+
+  const cols = months.map((b, i) => {
+    const x = m.l + i * band + (band - bw) / 2, base = m.t + ih;
+    const krTop = y(b.kr), fxTop = y(b.kr + b.fx);
+    const hasFx = b.fx > 0;
+    const total = b.kr + b.fx;
+    return `<g class="col" data-month="${b.m}" opacity="${state.month && state.month !== b.m ? 0.35 : 1}">
+      <rect x="${m.l + i * band}" y="${m.t}" width="${band}" height="${ih}" fill="transparent"/>
+      ${b.kr > 0 ? `<path d="${seg(x, krTop, base, !hasFx)}" fill="var(--series-1)"/>` : ""}
+      ${hasFx ? `<path d="${seg(x, fxTop, b.kr > 0 ? krTop - GAP : base, true)}" fill="var(--series-2)"/>` : ""}
+      ${total ? `<text x="${x + bw / 2}" y="${fxTop - 6}" text-anchor="middle" style="fill:var(--ink-2)">${compact(total)}</text>` : ""}
+      <text x="${m.l + i * band + band / 2}" y="${H - 6}" text-anchor="middle">${b.m}월</text>
+    </g>`;
+  }).join("");
+
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="월별 세전 배당 누적 막대">
+    ${ticks.map(t => `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(t)}" y2="${y(t)}" stroke="${t ? "var(--grid)" : "var(--axis)"}"/>
+      <text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${compact(t)}</text>`).join("")}
+    ${cols}
+  </svg><div class="tip"></div>`;
+
+  const svg = $("svg", host), tip = $(".tip", host);
+  svg.querySelectorAll(".col").forEach(g => {
+    const b = months[+g.dataset.month - 1] || months.find(x => x.m === +g.dataset.month);
+    g.addEventListener("click", () => selectMonth(b.m));
+    g.addEventListener("pointermove", e => {
+      tip.innerHTML = `<b>${b.m}월 · ${b.count}건</b>
+        <div class="row"><span><i style="background:var(--series-1)"></i>국내</span><span>${fmt(b.kr)}원</span></div>
+        <div class="row"><span><i style="background:var(--series-2)"></i>해외</span><span>${fmt(b.fx)}원${b.usd ? ` ($${fmt(b.usd, 2)})` : ""}</span></div>
+        <div class="row"><span>세금</span><span>${fmt(b.tax)}원</span></div>
+        <div class="row"><span>실수령</span><span><b style="display:inline;margin:0">${fmt(b.net)}원</b></span></div>`;
+      tip.style.opacity = 1;
+      const rect = host.getBoundingClientRect();
+      const x = e.clientX - rect.left, w = tip.offsetWidth;
+      tip.style.left = Math.min(Math.max(x + 12, 0), host.clientWidth - w) + "px";
+      tip.style.top = Math.max(e.clientY - rect.top - tip.offsetHeight - 12, 0) + "px";
+    });
+    g.addEventListener("pointerleave", () => tip.style.opacity = 0);
+  });
+}
+
+// ---------------------------------------------------------------- 시작
+(() => {
+  const sel = $("#year");
+  for (let y = THIS_YEAR; y >= THIS_YEAR - 5; y--) sel.add(new Option(`${y}년`, y));
+  $("#fetch").onclick = load;
+  sel.onchange = load;
+
+  const saved = (() => { try { return localStorage.getItem("div-theme"); } catch { return null; } })();
+  if (saved) document.documentElement.dataset.theme = saved;
+  $("#theme").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("div-theme", next); } catch {}
+  };
+
+  let t;
+  addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => state.data && drawMonthChart(aggregate(state.data.entries).months.slice(0, document.querySelectorAll("tr[data-month]").length)), 150); });
+
+  if (location.protocol === "file:") {
+    $("#app").innerHTML = `<div class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000 을 여세요.</div>`;
+    return;
+  }
+  load();
+})();
+</script>
+</body>
+</html>

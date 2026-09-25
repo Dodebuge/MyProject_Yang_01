@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>섹터 히트맵</title>
+<!--
+  국내·해외 섹터 히트맵. dividends_web.py가 /heatmap 으로 이 파일을 제공하고,
+  페이지는 /api/heatmap?market=kr|us 로 KB OpenAPI 시세를 조회합니다.
+  섹터 칸 크기 = 시가총액 또는 거래대금 합계, 색 = 시총 가중 등락률 (빨강 상승 / 파랑 하락). 섹터를 누르면 종목 히트맵.
+  아래 표에 국내 상장 ETF의 섹터별 개수와 신규 상장 수를 보여 줍니다.
+-->
+<script src="https://cdn.jsdelivr.net/npm/d3-hierarchy@3"></script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
+  --up: #e34948; --down: #2a78d6; --flat: #e1e0d9; --bad: #d03b3b;
+  --seg-on: #0b0b0b; --seg-on-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+    --up: #e66767; --down: #3987e5; --flat: #383835; --bad: #e66767;
+    --seg-on: #ffffff; --seg-on-ink: #0b0b0b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+  --up: #e66767; --down: #3987e5; --flat: #383835; --bad: #e66767;
+  --seg-on: #ffffff; --seg-on-ink: #0b0b0b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h1 a { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 10px; text-decoration: none; }
+h1 a:hover { color: var(--ink); }
+.status { color: var(--muted); font-size: 13px; min-height: 20px; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button {
+  font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: progress; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; border-radius: 0; padding: 6px 14px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--seg-on-ink); font-weight: 600; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; min-width: 0; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.card h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.sub { color: var(--muted); font-size: 12px; margin: 0; }
+
+.scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale .steps { display: flex; gap: 2px; }
+.scale .steps span { width: 28px; height: 14px; border-radius: 3px; }
+
+.map { position: relative; width: 100%; }
+.map svg { display: block; width: 100%; }
+.map .leaf { cursor: default; }
+.map .leaf rect { rx: 3px; }
+.map .leaf:hover rect { stroke: var(--ink); stroke-width: 2px; }
+.map .leaf.sector { cursor: pointer; }
+button.link { border: 0; background: none; padding: 0 8px 0 0; color: var(--ink-2); font-weight: 500; }
+button.link:hover { color: var(--ink); }
+table.list tr.clickable { cursor: pointer; }
+table.list tr.selected td { background: var(--hover); }
+table.list tbody.group td { color: var(--muted); font-size: 12px; padding-top: 14px; border-bottom: 1px solid var(--axis); }
+td.nm { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.map .leaf text { pointer-events: none; font-variant-numeric: tabular-nums; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); white-space: nowrap; opacity: 0; transition: opacity .08s;
+  font-variant-numeric: tabular-nums; z-index: 2;
+}
+.tip b { display: block; margin-bottom: 2px; }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; }
+.tip .row span:first-child { color: var(--ink-2); }
+
+table.list { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.list th { text-align: right; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--axis); white-space: nowrap; }
+table.list td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.list .l { text-align: left; }
+table.list tbody tr:hover td { background: var(--hover); }
+.share { display: inline-block; height: 8px; border-radius: 0 3px 3px 0; background: var(--axis); vertical-align: 0; margin-right: 8px; }
+.up { color: var(--up); } .down { color: var(--down); }
+.scroll { overflow-x: auto; }
+@media (max-width: 600px) { .hide-sm { display: none; } }
+
+.error { background: var(--surface); border: 1px solid var(--bad); border-radius: 12px; padding: 16px; }
+.loading { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 120px 0; color: var(--ink-2); }
+.spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--down); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>섹터 히트맵<a href="/">내 배당금 →</a></h1>
+      <div class="status" id="status"></div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="market" role="group" aria-label="시장">
+        <button data-v="kr">국내</button><button data-v="us">해외(미국)</button>
+      </div>
+      <div class="seg" id="size" role="group" aria-label="크기 기준">
+        <button data-v="cap">시가총액</button><button data-v="value">거래대금</button>
+      </div>
+      <button id="fetch">새로고침</button>
+      <button id="theme" aria-label="테마 전환">◐</button>
+    </div>
+  </header>
+  <main id="app"></main>
+</div>
+
+<script>
+// ---------------------------------------------------------------- 상태
+const state = { market: "kr", size: "cap", sector: null, data: {}, loading: false };
+const SIZE_LABEL = { cap: "시가총액", value: "거래대금" };
+const MAX_CHG = 3;  // ±3% 이상은 가장 진한 색
+
+// ---------------------------------------------------------------- 유틸
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = n => `${n > 0 ? "+" : ""}${fmt(n, 2)}%`;
+const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
+const money = (n, cur) => {
+  const a = Math.abs(n);
+  if (cur === "USD") {
+    if (a >= 1e12) return "$" + fmt(n / 1e12, 2) + "T";
+    if (a >= 1e9) return "$" + fmt(n / 1e9, 1) + "B";
+    return "$" + fmt(n / 1e6, 0) + "M";
+  }
+  if (a >= 1e12) return fmt(n / 1e12, a >= 1e14 ? 0 : 1) + "조";
+  if (a >= 1e8) return fmt(n / 1e8, 0) + "억";
+  return fmt(n) + "원";
+};
+// 등락률 -> 색. 0%는 중립 회색, ±3%에서 양 끝 색 (색 섞기는 OKLab)
+const tone = chg => {
+  const t = Math.min(Math.abs(chg) / MAX_CHG, 1);
+  if (t < 0.03) return { fill: "var(--flat)", ink: "var(--ink)" };
+  return {
+    fill: `color-mix(in oklab, ${chg > 0 ? "var(--up)" : "var(--down)"} ${Math.round(t * 100)}%, var(--flat))`,
+    ink: t > 0.45 ? "#ffffff" : "var(--ink)",
+  };
+};
+const weighted = ss => {
+  const w = ss.reduce((s, x) => s + x.cap, 0);
+  return w ? ss.reduce((s, x) => s + x.change * x.cap, 0) / w : 0;
+};
+
+// ---------------------------------------------------------------- 조회
+async function load(force = false) {
+  const market = state.market;
+  if (!force && state.data[market]) return render();
+  state.loading = true;
+  document.querySelectorAll("button").forEach(b => b.id !== "theme" && (b.disabled = true));
+  $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${market === "kr" ? "국내" : "미국"} 시세를 조회하고 있습니다.</div>`;
+  try {
+    const res = await fetch(`/api/heatmap?market=${market}`, { cache: "no-store" });
+    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+    state.data[market] = json;
+    render();
+  } catch (err) {
+    $("#app").innerHTML = `<div class="error"><b>조회하지 못했습니다</b><br>${esc(err.message)}<div class="note">서버(dividends_web.py)를 다시 시작했는지 확인하세요.</div></div>`;
+  } finally {
+    state.loading = false;
+    document.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+
+// ---------------------------------------------------------------- 화면
+function sectorsOf(d, key) {
+  const by = new Map();
+  for (const s of d.stocks.filter(s => s[key] > 0)) (by.get(s.sector) || by.set(s.sector, []).get(s.sector)).push(s);
+  return [...by].map(([name, ss]) => ({
+    name, stocks: ss.sort((a, b) => b[key] - a[key]), n: ss.length,
+    cap: ss.reduce((a, s) => a + s.cap, 0), value: ss.reduce((a, s) => a + s.value, 0), change: weighted(ss),
+  })).sort((a, b) => b[key] - a[key]);
+}
+
+// 국내 상장 ETF를 현재 시장의 섹터 이름으로 묶음 (섹터 ETF가 아닌 것은 채권·시장지수 등 묶음 그대로)
+function etfGroups(d) {
+  const field = state.market === "kr" ? "kr" : "us";
+  const fresh = new Set(d.etf.changes.listed);
+  const by = new Map();
+  for (const e of d.etf.items) {
+    const name = e.sector ? e[field] : e.kr;
+    const g = by.get(name) || by.set(name, { name, isSector: e.sector, n: 0, cap: 0, items: [], fresh: [] }).get(name);
+    g.n++; g.cap += e.cap; g.items.push(e);
+    if (fresh.has(e.code)) g.fresh.push(e);
+  }
+  for (const g of by.values()) g.items.sort((a, b) => b.cap - a.cap);
+  return by;
+}
+
+function render() {
+  const d = state.data[state.market];
+  if (!d) return;
+  const cur = d.currency, key = state.size;
+  const sectors = sectorsOf(d, key);
+  const etf = etfGroups(d);
+  const focus = state.sector && sectors.find(s => s.name === state.sector);
+  if (!focus) state.sector = null;
+  const total = sectors.reduce((a, s) => a + s[key], 0);
+  const etfN = name => etf.get(name)?.n || 0;
+  const ch = d.etf.changes;
+
+  const latest = d.stocks.map(s => s.date).filter(Boolean).sort().pop();
+  $("#status").textContent = `${d.stocks.length}종목 · ${sectors.length}개 섹터 · 국내 상장 ETF ${fmt(d.etf.total)}개 · 조회 ${d.fetchedAt}` +
+    (latest ? ` · 미국 ${latest.slice(0, 4)}.${latest.slice(4, 6)}.${latest.slice(6)} 기준(15분 지연)` : "");
+
+  const stops = [-3, -2, -1, 0, 1, 2, 3];
+  const groups = [...etf.values()];
+  const sectorGroups = groups.filter(g => g.isSector).sort((a, b) => b.n - a.n);
+  const otherGroups = groups.filter(g => !g.isSector).sort((a, b) => b.n - a.n);
+  const maxN = Math.max(...groups.map(g => g.n));
+  const etfRow = g => `<tr${g.isSector && sectors.some(s => s.name === g.name) ? ` class="clickable" data-sector="${esc(g.name)}"` : ""}>
+      <td class="l">${esc(g.name)}</td>
+      <td class="l"><span class="share" style="width:${(g.n / maxN * 120).toFixed(0)}px"></span>${fmt(g.n)}</td>
+      <td class="hide-sm">${money(g.cap, "KRW")}</td>
+      <td>${ch.since ? (g.fresh.length ? `<span class="up" title="${esc(g.fresh.map(e => e.name).join("\n"))}">+${g.fresh.length}</span>` : "0") : "—"}</td>
+      <td class="l hide-sm nm">${g.items.slice(0, 2).map(e => esc(e.name)).join(", ")}</td></tr>`;
+
+  $("#app").innerHTML = `
+    <section class="card">
+      <div class="card-head">
+        <div>${focus
+          ? `<h2><button id="back" class="link">← 전체 섹터</button> ${esc(focus.name)} <span class="${cls(focus.change)}">${pct(focus.change)}</span></h2>
+             <p class="sub">${focus.n}종목 · 시가총액 ${money(focus.cap, cur)} · 거래대금 ${money(focus.value, cur)} · 국내 상장 ${esc(focus.name)} ETF ${etfN(focus.name)}개</p>`
+          : `<h2>섹터별 ${SIZE_LABEL[key]} · ${state.market === "kr" ? "국내" : "미국"}</h2>
+             <p class="sub">칸 크기 = 섹터 ${SIZE_LABEL[key]} 합계, 색 = 시가총액 가중 등락률. 섹터를 누르면 종목을 봅니다.</p>`}</div>
+        <div class="scale" aria-label="색 범례">
+          <span>−3%</span><span class="steps">${stops.map(c => `<span style="background:${tone(c).fill}" title="${pct(c)}"></span>`).join("")}</span><span>+3%</span>
+        </div>
+      </div>
+      <div class="map" id="map"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>섹터별 합계</h2><p class="sub">${SIZE_LABEL[key]} 순 · 행을 누르면 히트맵에서 그 섹터를 봅니다</p></div></div>
+      <div class="scroll"><table class="list">
+        <thead><tr><th class="l">섹터</th><th class="hide-sm">종목수</th><th>시가총액</th><th>거래대금</th><th>등락률</th><th class="l hide-sm">${SIZE_LABEL[key]} 비중</th><th>국내 ETF</th><th class="l hide-sm">상위 종목</th></tr></thead>
+        <tbody>${sectors.map(s => `<tr class="clickable ${s.name === state.sector ? "selected" : ""}" data-sector="${esc(s.name)}">
+          <td class="l">${esc(s.name)}</td><td class="hide-sm">${s.n}</td>
+          <td>${money(s.cap, cur)}</td><td>${money(s.value, cur)}</td>
+          <td class="${cls(s.change)}">${pct(s.change)}</td>
+          <td class="l hide-sm"><span class="share" style="width:${(s[key] / sectors[0][key] * 120).toFixed(0)}px"></span>${fmt(s[key] / total * 100, 1)}%</td>
+          <td>${etfN(s.name) || ""}</td>
+          <td class="l hide-sm">${s.stocks.slice(0, 3).map(x => esc(x.name)).join(", ")}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div>
+        <h2>국내 상장 ETF 섹터별 개수 · 총 ${fmt(d.etf.total)}개</h2>
+        <p class="sub">${state.market === "kr" ? "국내 업종" : "미국 GICS 섹터"} 기준, ETF 이름의 테마 키워드로 분류 · 레버리지·인버스·커버드콜 포함 ·
+          신규 = ${ch.since ? `${ch.since} 대비 새로 상장 (${ch.listed.length}개${ch.delisted.length ? `, 상장폐지 ${ch.delisted.length}개` : ""})` : "오늘 처음 저장해 다음 날부터 비교합니다"}</p>
+      </div></div>
+      <div class="scroll"><table class="list">
+        <thead><tr><th class="l">섹터</th><th class="l">ETF 수</th><th class="hide-sm">시가총액 합계</th><th>신규</th><th class="l hide-sm">시가총액 상위</th></tr></thead>
+        <tbody>${sectorGroups.map(etfRow).join("")}</tbody>
+        <tbody class="group"><tr><td class="l" colspan="5">섹터 외</td></tr>${otherGroups.map(etfRow).join("")}</tbody>
+      </table></div>
+    </section>`;
+
+  drawMap(focus, sectors, key, cur, etfN);
+  document.querySelectorAll("tr[data-sector]").forEach(tr => tr.onclick = () => showSector(tr.dataset.sector));
+  if ($("#back")) $("#back").onclick = () => showSector(null);
+}
+
+function showSector(name) {
+  state.sector = name;
+  render();
+  $("#map").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function drawMap(focus, sectors, key, cur, etfN) {
+  const host = $("#map");
+  const W = host.clientWidth, H = Math.round(Math.min(Math.max(W * 0.58, 420), 760));
+  const items = focus ? focus.stocks : sectors;
+  const root = d3.hierarchy({ children: items }).sum(d => d.children ? 0 : d[key]).sort((a, b) => b.value - a.value);
+  d3.treemap().size([W, H]).tile(d3.treemapSquarify.ratio(1.2)).paddingInner(2).round(true)(root);
+
+  const nodes = root.leaves();
+  const tiles = nodes.map((n, i) => {
+    const s = n.data, w = n.x1 - n.x0, h = n.y1 - n.y0, t = tone(s.change);
+    const big = w > 90 && h > 56, fits = w > 44 && h > 26;
+    const size = big ? Math.min(focus ? 20 : 22, Math.max(12, Math.sqrt(w * h) / 9)) : 11;
+    const maxChars = Math.floor(w / (size * (/[가-힣]/.test(s.name) ? 1.0 : 0.62)));
+    const name = s.name.length > maxChars ? s.name.slice(0, Math.max(maxChars - 1, 1)) + "…" : s.name;
+    const extra = focus ? "" : `ETF ${etfN(s.name)}개 · ${s.n}종목`;
+    const three = big && extra && h > 80 && w > 110;
+    const cx = n.x0 + w / 2, cy = n.y0 + h / 2 - (three ? size * 0.4 : 0);
+    return `<g class="leaf${focus ? "" : " sector"}" data-i="${i}">
+      <rect x="${n.x0}" y="${n.y0}" width="${w}" height="${h}" fill="${t.fill}"/>
+      ${fits ? `<text x="${cx}" y="${big ? cy - 2 : cy + 4}" text-anchor="middle" font-size="${size}" font-weight="600" fill="${t.ink}">${esc(name)}</text>` : ""}
+      ${big ? `<text x="${cx}" y="${cy + size * 0.9}" text-anchor="middle" font-size="${Math.max(11, size * 0.7)}" fill="${t.ink}" opacity=".9">${pct(s.change)}</text>` : ""}
+      ${three ? `<text x="${cx}" y="${cy + size * 0.9 + 18}" text-anchor="middle" font-size="11" fill="${t.ink}" opacity=".8">${extra}</text>` : ""}
+    </g>`;
+  }).join("");
+
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${focus ? esc(focus.name) + " 종목" : "섹터"}별 ${SIZE_LABEL[key]} 트리맵. 아래 표에 같은 내용이 있습니다.">${tiles}</svg><div class="tip"></div>`;
+
+  const tip = $(".tip", host);
+  host.querySelectorAll(".leaf").forEach(g => {
+    const s = nodes[+g.dataset.i].data;
+    if (!focus) g.addEventListener("click", () => showSector(s.name));
+    g.addEventListener("pointermove", e => {
+      tip.innerHTML = focus
+        ? `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)}</span></b>
+          <div class="row"><span>현재가</span><span>${cur === "USD" ? "$" + fmt(+s.price, 2) : fmt(+s.price) + "원"}</span></div>
+          <div class="row"><span>등락률</span><span class="${cls(s.change)}">${pct(s.change)}</span></div>
+          <div class="row"><span>시가총액</span><span>${money(s.cap, cur)}</span></div>
+          <div class="row"><span>거래대금</span><span>${money(s.value, cur)}</span></div>`
+        : `<b>${esc(s.name)}</b>
+          <div class="row"><span>등락률 (시총 가중)</span><span class="${cls(s.change)}">${pct(s.change)}</span></div>
+          <div class="row"><span>시가총액</span><span>${money(s.cap, cur)}</span></div>
+          <div class="row"><span>거래대금</span><span>${money(s.value, cur)}</span></div>
+          <div class="row"><span>종목수</span><span>${s.n}</span></div>
+          <div class="row"><span>국내 상장 ETF</span><span>${etfN(s.name)}개</span></div>
+          <div class="row"><span>상위</span><span>${s.stocks.slice(0, 3).map(x => esc(x.name)).join(", ")}</span></div>`;
+      tip.style.opacity = 1;
+      const r = host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = Math.max(0, x + 14 + tw > host.clientWidth ? x - tw - 14 : x + 14) + "px";
+      tip.style.top = Math.max(0, y + 14 + th > host.clientHeight ? y - th - 14 : y + 14) + "px";
+    });
+    g.addEventListener("pointerleave", () => tip.style.opacity = 0);
+  });
+}
+
+// ---------------------------------------------------------------- 시작
+(() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("heatmap") || "{}"); } catch {}
+  if (saved.market) state.market = saved.market;
+  if (saved.size) state.size = saved.size;
+  const remember = () => { try { localStorage.setItem("heatmap", JSON.stringify({ market: state.market, size: state.size })); } catch {} };
+  const sync = () => document.querySelectorAll(".seg button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.v === state[b.parentElement.id]));
+
+  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+    if (b.parentElement.id === "market") state.sector = null;
+    state[b.parentElement.id] = b.dataset.v;
+    sync(); remember();
+    b.parentElement.id === "market" ? load() : render();
+  });
+  $("#fetch").onclick = () => load(true);
+
+  try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  $("#theme").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("div-theme", next); } catch {}
+  };
+
+  let t;
+  addEventListener("keydown", e => e.key === "Escape" && state.sector && showSector(null));
+  addEventListener("resize", () => { clearTimeout(t); t = setTimeout(render, 150); });
+
+  sync();
+  if (location.protocol === "file:") {
+    $("#app").innerHTML = `<div class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000/heatmap 을 여세요.</div>`;
+    return;
+  }
+  load();
+})();
+</script>
+</body>
+</html>
