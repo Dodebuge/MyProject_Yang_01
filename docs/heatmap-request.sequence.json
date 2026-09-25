@@ -2,43 +2,35 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "섹터 히트맵 조회 시퀀스 (/api/heatmap?market=kr)",
+    "title": "히트맵 화면 조회 시퀀스 (국내)",
     "output": "heatmap-request.sequence.html",
     "viewBox": [
       1060,
-      582
+      560
     ],
     "column_fit": "spread",
     "quality_profile": "showcase",
     "views": [
       {
-        "id": "request-cache",
-        "label": "요청과 캐시",
+        "id": "heatmap",
+        "label": "섹터 히트맵",
         "focus": [
           "browser",
-          "server",
-          "heatmap"
-        ],
-        "note": "시장별 결과를 60초 캐시하고, 없을 때만 KB OpenAPI를 조회합니다."
-      },
-      {
-        "id": "quotes",
-        "label": "국내 시세 수집",
-        "focus": [
-          "heatmap",
-          "kb"
-        ],
-        "note": "순위 두 개로 종목을 모으고, 종목마다 IVM10050으로 업종·시총·거래대금을 받습니다."
-      },
-      {
-        "id": "etf",
-        "label": "ETF 목록과 스냅숏",
-        "focus": [
           "heatmap",
           "kb",
           "snapshot"
         ],
-        "note": "전체 상장 종목에서 ETF를 골라 분류하고, 직전 날짜 스냅숏과 비교해 신규 상장을 셉니다."
+        "note": "/api/heatmap: 시세·업종과 전체 상장 목록을 받아 섹터로 묶고, ETF 스냅숏과 비교합니다."
+      },
+      {
+        "id": "quarters",
+        "label": "분기별 거래대금",
+        "focus": [
+          "browser",
+          "heatmap",
+          "kb"
+        ],
+        "note": "/api/quarters: 히트맵 종목마다 일봉 약 400거래일을 받아 분기별 일평균 거래대금으로 합산합니다."
       }
     ]
   },
@@ -50,16 +42,10 @@
       "sublabel": "heatmap.html"
     },
     {
-      "id": "server",
-      "type": "backend",
-      "label": "dividends_web.py",
-      "sublabel": "127.0.0.1:8000"
-    },
-    {
       "id": "heatmap",
       "type": "backend",
       "label": "heatmap.py",
-      "sublabel": "query_heatmap"
+      "sublabel": "dividends_web.py 경유"
     },
     {
       "id": "snapshot",
@@ -77,81 +63,47 @@
   "segments": [
     {
       "from": 152,
-      "to": 214,
-      "label": "요청"
+      "to": 334,
+      "label": "섹터 히트맵"
     },
     {
-      "from": 226,
-      "to": 288,
-      "label": "국내 시세"
-    },
-    {
-      "from": 300,
-      "to": 422,
-      "label": "ETF"
-    },
-    {
-      "from": 434,
-      "to": 496,
-      "label": "응답"
+      "from": 346,
+      "to": 468,
+      "label": "분기별 거래대금"
     }
   ],
   "messages": [
     {
       "id": "get-heatmap",
       "from": "browser",
-      "to": "server",
+      "to": "heatmap",
       "y": 170,
       "label": "GET /api/heatmap?market=kr",
-      "variant": "emphasis"
-    },
-    {
-      "id": "query",
-      "from": "server",
-      "to": "heatmap",
-      "y": 200,
-      "label": "query_heatmap(kr)",
+      "variant": "emphasis",
       "note": "60초 캐시에 있으면 바로 반환"
     },
     {
-      "id": "quotes-call",
+      "id": "quotes",
       "from": "heatmap",
       "to": "kb",
-      "y": 244,
-      "label": "IVS10920 · IVU10210 → IVM10050 × 약 280",
+      "y": 200,
+      "label": "IVS10920 · IVU10210 · IVM10050",
       "variant": "emphasis",
-      "note": "토큰은 kb_client가 1회 발급 후 재사용, IVM10050은 8스레드 병렬"
+      "note": "순위 → 종목별 투자지표(8스레드), 전체 상장 목록"
     },
     {
       "id": "quotes-rows",
       "from": "kb",
       "to": "heatmap",
-      "y": 274,
-      "label": "업종 · 시총 · 거래대금 (ETF·ETN 제외)",
-      "variant": "return"
-    },
-    {
-      "id": "all-call",
-      "from": "heatmap",
-      "to": "kb",
-      "y": 318,
-      "label": "IVS10920 (inq_cnt 9999)",
-      "variant": "emphasis",
-      "note": "전체 상장 종목"
-    },
-    {
-      "id": "all-rows",
-      "from": "kb",
-      "to": "heatmap",
-      "y": 348,
-      "label": "약 4,300종목 → ETF 선별 · 섹터 분류",
+      "y": 230,
+      "label": "업종 · 시총 · 거래대금 · 등락률",
       "variant": "return"
     },
     {
       "id": "snap-save",
       "from": "heatmap",
       "to": "snapshot",
-      "y": 378,
+      "y": 260,
       "label": "오늘 ETF 코드 저장",
       "variant": "dashed"
     },
@@ -159,48 +111,78 @@
       "id": "snap-prev",
       "from": "snapshot",
       "to": "heatmap",
-      "y": 408,
+      "y": 290,
       "label": "직전 날짜 대비 신규·폐지",
       "variant": "return"
     },
     {
-      "id": "payload",
+      "id": "heatmap-json",
       "from": "heatmap",
-      "to": "server",
-      "y": 452,
-      "label": "stocks + etf",
-      "variant": "return",
-      "note": "60초 캐시에 저장"
+      "to": "browser",
+      "y": 320,
+      "label": "200 JSON → 섹터 히트맵",
+      "variant": "return"
     },
     {
-      "id": "response",
-      "from": "server",
+      "id": "get-quarters",
+      "from": "browser",
+      "to": "heatmap",
+      "y": 364,
+      "label": "GET /api/quarters?market=kr",
+      "variant": "emphasis",
+      "note": "10분 캐시"
+    },
+    {
+      "id": "charts",
+      "from": "heatmap",
+      "to": "kb",
+      "y": 394,
+      "label": "IVS11560 일봉 × 종목",
+      "variant": "emphasis",
+      "note": "4스레드 병렬, 5xx는 두 번 재시도"
+    },
+    {
+      "id": "chart-rows",
+      "from": "kb",
+      "to": "heatmap",
+      "y": 424,
+      "label": "약 400거래일 거래대금",
+      "variant": "return"
+    },
+    {
+      "id": "quarters-json",
+      "from": "heatmap",
       "to": "browser",
-      "y": 482,
-      "label": "200 JSON",
+      "y": 454,
+      "label": "분기별 일평균 거래대금",
       "variant": "return"
     }
   ],
   "activations": [
     {
-      "participant": "server",
-      "from": 170,
-      "to": 487
-    },
-    {
       "participant": "heatmap",
-      "from": 200,
-      "to": 457
+      "from": 170,
+      "to": 325
     },
     {
       "participant": "kb",
-      "from": 244,
-      "to": 353
+      "from": 200,
+      "to": 235
     },
     {
       "participant": "snapshot",
-      "from": 378,
-      "to": 413
+      "from": 260,
+      "to": 295
+    },
+    {
+      "participant": "heatmap",
+      "from": 364,
+      "to": 459
+    },
+    {
+      "participant": "kb",
+      "from": 394,
+      "to": 429
     }
   ]
 }

@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>내 배당금</title>
+<title>내정보</title>
 <!--
-  배당금 확인 페이지. dividends_web.py가 이 파일을 제공하고,
+  내정보: 보유 종목 현황 + 배당 내역. dividends_web.py가 /me 로 이 파일을 제공하고,
+  보유 종목은 /api/holdings (잔고 TR 실시간 조회, 파일 저장 없음),
   페이지는 /api/dividends?year=YYYY 로 KB OpenAPI 거래내역을 실시간 조회합니다.
 -->
 <style>
@@ -17,6 +18,7 @@
   --series-2: #eb6834;   /* 해외 */
   --select: rgba(42,120,214,0.08);
   --bad: #d03b3b;
+  --up: #e34948; --down: #2a78d6; --flat: #e1e0d9;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -24,6 +26,7 @@
     --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
     --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+    --up: #e66767; --down: #3987e5; --flat: #383835;
   }
 }
 :root[data-theme="dark"] {
@@ -31,6 +34,7 @@
   --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
   --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+    --up: #e66767; --down: #3987e5; --flat: #383835;
 }
 
 * { box-sizing: border-box; }
@@ -118,21 +122,62 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--series-1); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+/* 보유 종목 */
+.nav { display: flex; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.nav a:hover { background: var(--hover); color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
+.nav a.home { color: var(--muted); }
+.section-head { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: end; justify-content: space-between; margin: 28px 0 12px; }
+.section-head h2 { font-size: 17px; margin: 0; font-weight: 650; }
+.up { color: var(--up); } .down { color: var(--down); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; border-radius: 0; padding: 6px 14px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--page); font-weight: 600; }
+.scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale .steps { display: flex; gap: 2px; }
+.scale .steps span { width: 24px; height: 12px; border-radius: 3px; }
+.map { position: relative; width: 100%; }
+.map svg { display: block; width: 100%; }
+.map .leaf text { pointer-events: none; font-variant-numeric: tabular-nums; }
+.map .leaf:hover rect { stroke: var(--ink); stroke-width: 2px; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/d3-hierarchy@3"></script>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
     <div>
-      <h1>내 배당금</h1>
-      <div class="status" id="status"></div>
+      <nav class="nav"><a href="/" class="home">KB OpenAPI</a><a href="/heatmap">히트맵</a><a href="/me" aria-current="page">내정보</a></nav>
+      <h1>내정보</h1>
     </div>
     <div class="controls">
-      <select id="year" aria-label="연도"></select>
-      <button class="primary" id="fetch">조회</button>
       <button id="theme" aria-label="테마 전환">◐</button>
     </div>
   </header>
+
+  <section class="card" id="holdings">
+    <div class="card-head">
+      <div><h2>보유 종목 현황</h2><p class="sub" id="h-status"></p></div>
+      <div class="controls">
+        <div class="seg" id="h-color" role="group" aria-label="색 기준">
+          <button data-v="change">오늘 등락률</button><button data-v="pl">수익률</button>
+        </div>
+        <button id="h-fetch">새로고침</button>
+      </div>
+    </div>
+    <div id="h-body"></div>
+  </section>
+
+  <div class="section-head">
+    <div><h2>배당 내역</h2><div class="status" id="status"></div></div>
+    <div class="controls">
+      <select id="year" aria-label="연도"></select>
+      <button class="primary" id="fetch">조회</button>
+    </div>
+  </div>
   <main id="app"></main>
 </div>
 
@@ -388,6 +433,133 @@ function drawMonthChart(months) {
   });
 }
 
+// ---------------------------------------------------------------- 보유 종목 (/api/holdings)
+const hold = { data: null, color: "change" };
+const HOLD_MAX = { change: 3, pl: 10 };  // 이 값 이상은 가장 진한 색
+const pct = n => n == null || isNaN(n) ? "—" : `${n > 0 ? "+" : ""}${fmt(n, 2)}%`;
+const updown = n => n > 0 ? "up" : n < 0 ? "down" : "";
+const pctCell = n => `<span class="${updown(n)}">${pct(n)}</span>`;
+// 등락률·수익률 -> 색. 0은 중립 회색, ±max에서 양 끝 색 (빨강 상승 / 파랑 하락, OKLab 섞기)
+const tone = (v, max) => {
+  const t = Math.min(Math.abs(v ?? 0) / max, 1);
+  if (t < 0.03) return { fill: "var(--flat)", ink: "var(--ink)" };
+  return { fill: `color-mix(in oklab, ${v > 0 ? "var(--up)" : "var(--down)"} ${Math.round(t * 100)}%, var(--flat))`, ink: t > 0.55 ? "#ffffff" : "var(--ink)" };
+};
+// 평가금액 가중 평균. 값이 없는 종목(null)은 뺍니다.
+const weightedBy = (ss, f) => {
+  const xs = ss.filter(x => f(x) != null), w = sum(xs, x => x.cap);
+  return w ? sum(xs, x => f(x) * x.cap) / w : null;
+};
+const priceText = s => s.market === "미국" ? "$" + fmt(+s.price, 2) : fmt(+s.price) + "원";
+const qtyText = q => fmt(q, Number.isInteger(q) ? 0 : 4);
+const share = (n, total) => fmt(n / total * 100, 1) + "%";
+
+async function loadHoldings() {
+  $("#h-fetch").disabled = true;
+  $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>잔고와 시세를 조회하고 있습니다.</div>`;
+  try {
+    const res = await fetch("/api/holdings", { cache: "no-store" });
+    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+    hold.data = json;
+    renderHoldings();
+  } catch (err) {
+    hold.data = null;
+    $("#h-body").innerHTML = `<div class="error"><b>보유 종목을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
+  } finally {
+    $("#h-fetch").disabled = false;
+  }
+}
+
+function renderHoldings() {
+  const d = hold.data;
+  if (!d) return;
+  const ss = [...d.stocks].sort((a, b) => b.cap - a.cap);
+  const cash = d.cash.krw + d.cash.fx_krw;
+  const stock = sum(ss, s => s.cap), total = stock + cash;
+  $("#h-status").textContent = `조회 ${d.fetchedAt} · 잔고 TR(SSQM2952, SPQM2226) 실시간 조회`;
+  if (!total) { $("#h-body").innerHTML = `<div class="empty">보유 종목과 현금이 없습니다.</div>`; return; }
+
+  const kr = sum(ss.filter(s => s.market === "국내"), s => s.cap), us = sum(ss.filter(s => s.market === "미국"), s => s.cap);
+  const max = HOLD_MAX[hold.color];
+  const stops = [-1, -2 / 3, -1 / 3, 0, 1 / 3, 2 / 3, 1].map(f => f * max);
+
+  $("#h-body").innerHTML = `
+    <div class="tiles">
+      <div class="tile hero"><div class="label">총자산</div><div class="value">${fmt(total)}<span class="unit">원</span></div>
+        <div class="meta">주식 ${fmt(stock)}원 + 현금 ${fmt(cash)}원</div></div>
+      <div class="tile"><div class="label">수익률</div><div class="value">${pctCell(weightedBy(ss, s => s.pl))}</div><div class="meta">보유 종목 평가금액 가중</div></div>
+      <div class="tile"><div class="label">오늘</div><div class="value">${pctCell(weightedBy(ss, s => s.change))}</div><div class="meta">보유 종목 평가금액 가중</div></div>
+      <div class="tile"><div class="label">국내 · 미국</div><div class="value">${share(kr, total)} · ${share(us, total)}</div>
+        <div class="meta">${compact(kr)}원 · ${compact(us)}원</div></div>
+      <div class="tile"><div class="label">현금 비율</div><div class="value">${share(cash, total)}</div>
+        <div class="meta">${fmt(cash)}원 (D+2 예수금)</div></div>
+    </div>
+    <div class="card-head" style="margin-top:16px">
+      <div><h2>금액 비중</h2><p class="sub">칸 크기 = 총자산(현금 포함) 대비 비중, 색 = ${hold.color === "pl" ? "수익률" : "오늘 등락률"}</p></div>
+      <div class="scale" aria-label="색 범례"><span>−${max}%</span><span class="steps">${stops.map(v => `<span style="background:${tone(v, max).fill}" title="${pct(v)}"></span>`).join("")}</span><span>+${max}%</span></div>
+    </div>
+    <div class="map" id="h-map"></div>
+    <div class="scroll" style="margin-top:16px"><table class="list">
+      <thead><tr><th class="l">종목</th><th class="l hide-sm">섹터</th><th class="hide-sm">수량</th><th class="hide-sm">현재가</th><th>평가금액</th><th>비중</th><th>오늘</th><th>수익률</th></tr></thead>
+      <tbody>${ss.map(s => `<tr>
+        <td class="l nm" title="${esc(s.code)}">${esc(s.name)} <span class="tag">${s.market}</span></td>
+        <td class="l hide-sm">${esc(s.sector)}</td><td class="hide-sm">${qtyText(s.qty)}</td><td class="hide-sm">${priceText(s)}</td>
+        <td>${fmt(s.cap)}</td><td>${share(s.cap, total)}</td><td>${pctCell(s.change)}</td><td>${pctCell(s.pl)}</td></tr>`).join("")}
+        <tr><td class="l">현금 <span class="tag">예수금</span></td><td class="l hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td>
+          <td>${fmt(cash)}</td><td>${share(cash, total)}</td><td></td><td></td></tr></tbody>
+      <tfoot><tr><td class="l">합계</td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td><td>${fmt(total)}</td><td>100%</td>
+        <td>${pctCell(weightedBy(ss, s => s.change))}</td><td>${pctCell(weightedBy(ss, s => s.pl))}</td></tr></tfoot>
+    </table></div>
+    <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>`;
+  drawHoldings([...ss, { name: "현금", code: "", cash: true, cap: cash }], total, max);
+}
+
+function drawHoldings(items, total, max) {
+  const host = $("#h-map");
+  if (!host) return;
+  const W = host.clientWidth, H = Math.round(Math.min(Math.max(W * 0.4, 280), 480));
+  const val = s => s[hold.color];
+  const root = d3.hierarchy({ children: items.filter(s => s.cap > 0) }).sum(d => d.children ? 0 : d.cap).sort((a, b) => b.value - a.value);
+  d3.treemap().size([W, H]).tile(d3.treemapSquarify.ratio(1.2)).paddingInner(2).round(true)(root);
+
+  const nodes = root.leaves();
+  const tiles = nodes.map((n, i) => {
+    const s = n.data, w = n.x1 - n.x0, h = n.y1 - n.y0;
+    const t = s.cash ? { fill: "var(--hover)", ink: "var(--ink)" } : tone(val(s), max);
+    const big = w > 90 && h > 60, fits = w > 44 && h > 24;
+    const size = big ? Math.min(20, Math.max(12, Math.sqrt(w * h) / 9)) : 11;
+    const maxChars = Math.floor(w / (size * (/[가-힣]/.test(s.name) ? 1.0 : 0.62)));
+    const name = s.name.length > maxChars ? s.name.slice(0, Math.max(maxChars - 1, 1)) + "…" : s.name;
+    const cx = n.x0 + w / 2, cy = n.y0 + h / 2 - (big ? size * 0.35 : 0);
+    const sub = s.cash ? share(s.cap, total) : `${share(s.cap, total)} · ${pct(val(s))}`;
+    return `<g class="leaf" data-i="${i}"><rect x="${n.x0}" y="${n.y0}" width="${w}" height="${h}" rx="3" fill="${t.fill}"
+        ${s.cash ? `stroke="var(--axis)" stroke-dasharray="4 3"` : ""}/>
+      ${fits ? `<text x="${cx}" y="${big ? cy : cy + 4}" text-anchor="middle" font-size="${size}" font-weight="600" fill="${t.ink}">${esc(name)}</text>` : ""}
+      ${big ? `<text x="${cx}" y="${cy + size + 4}" text-anchor="middle" font-size="${Math.max(11, size * 0.7)}" fill="${t.ink}" opacity=".9">${sub}</text>` : ""}</g>`;
+  }).join("");
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="총자산 대비 종목·현금 비중 트리맵. 아래 표에 같은 내용이 있습니다.">${tiles}</svg><div class="tip"></div>`;
+
+  const tip = $(".tip", host);
+  const row = (k, v) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
+  host.querySelectorAll(".leaf").forEach(g => {
+    const s = nodes[+g.dataset.i].data;
+    g.addEventListener("pointermove", e => {
+      tip.innerHTML = s.cash
+        ? `<b>현금</b>` + row("금액", fmt(s.cap) + "원") + row("비중", share(s.cap, total))
+        : `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)} · ${s.market}</span></b>` +
+          row("비중", share(s.cap, total)) + row("평가금액", fmt(s.cap) + "원") + row("섹터", esc(s.sector)) +
+          row("보유 수량", qtyText(s.qty)) + row("현재가", priceText(s)) + row("오늘", pctCell(s.change)) + row("수익률", pctCell(s.pl));
+      tip.style.opacity = 1;
+      const r = host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = Math.max(0, x + 14 + tw > host.clientWidth ? x - tw - 14 : x + 14) + "px";
+      tip.style.top = Math.max(0, y + 14 + th > host.clientHeight ? y - th - 14 : y + 14) + "px";
+    });
+    g.addEventListener("pointerleave", () => tip.style.opacity = 0);
+  });
+}
+
 // ---------------------------------------------------------------- 시작
 (() => {
   const sel = $("#year");
@@ -404,13 +576,27 @@ function drawMonthChart(months) {
     try { localStorage.setItem("div-theme", next); } catch {}
   };
 
+  $("#h-fetch").onclick = loadHoldings;
+  try { const c = localStorage.getItem("hold-color"); if (c === "change" || c === "pl") hold.color = c; } catch {}
+  const syncColor = () => document.querySelectorAll("#h-color button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === hold.color));
+  document.querySelectorAll("#h-color button").forEach(b => b.onclick = () => {
+    hold.color = b.dataset.v;
+    try { localStorage.setItem("hold-color", hold.color); } catch {}
+    syncColor(); renderHoldings();
+  });
+  syncColor();
+
   let t;
-  addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => state.data && drawMonthChart(aggregate(state.data.entries).months.slice(0, document.querySelectorAll("tr[data-month]").length)), 150); });
+  addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => {
+    state.data && drawMonthChart(aggregate(state.data.entries).months.slice(0, document.querySelectorAll("tr[data-month]").length));
+    renderHoldings();
+  }, 150); });
 
   if (location.protocol === "file:") {
-    $("#app").innerHTML = `<div class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000 을 여세요.</div>`;
+    $("#app").innerHTML = `<div class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000/me 를 여세요.</div>`;
     return;
   }
+  loadHoldings();
   load();
 })();
 </script>

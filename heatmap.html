@@ -44,8 +44,11 @@ body {
 .wrap { max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; }
 header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
 h1 { font-size: 20px; margin: 0; font-weight: 650; }
-h1 a { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 10px; text-decoration: none; }
-h1 a:hover { color: var(--ink); }
+.nav { display: flex; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.nav a:hover { background: var(--hover); color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
+.nav a.home { color: var(--muted); }
 .status { color: var(--muted); font-size: 13px; min-height: 20px; }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 button {
@@ -105,21 +108,22 @@ table.list tbody tr:hover td { background: var(--hover); }
 .spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--down); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+table.qtable td.qcell { font-variant-numeric: tabular-nums; }
+table.qtable td.qcell small { display: block; font-size: 11px; opacity: .85; }
+table.qtable tbody tr[data-sector] { cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
     <div>
-      <h1>섹터 히트맵<a href="/">내 배당금 →</a></h1>
+      <nav class="nav"><a href="/" class="home">KB OpenAPI</a><a href="/heatmap" aria-current="page">히트맵</a><a href="/me">내정보</a></nav>
+      <h1>섹터 히트맵</h1>
       <div class="status" id="status"></div>
     </div>
     <div class="controls">
       <div class="seg" id="market" role="group" aria-label="시장">
         <button data-v="kr">국내</button><button data-v="us">해외(미국)</button>
-      </div>
-      <div class="seg" id="size" role="group" aria-label="크기 기준">
-        <button data-v="cap">시가총액</button><button data-v="value">거래대금</button>
       </div>
       <button id="fetch">새로고침</button>
       <button id="theme" aria-label="테마 전환">◐</button>
@@ -130,8 +134,7 @@ table.list tbody tr:hover td { background: var(--hover); }
 
 <script>
 // ---------------------------------------------------------------- 상태
-const state = { market: "kr", size: "cap", sector: null, data: {}, loading: false };
-const SIZE_LABEL = { cap: "시가총액", value: "거래대금" };
+const state = { market: "kr", sector: null, data: {}, quarters: {}, loading: false };
 const MAX_CHG = 3;  // ±3% 이상은 가장 진한 색
 
 // ---------------------------------------------------------------- 유틸
@@ -151,24 +154,27 @@ const money = (n, cur) => {
   if (a >= 1e8) return fmt(n / 1e8, 0) + "억";
   return fmt(n) + "원";
 };
-// 등락률 -> 색. 0%는 중립 회색, ±3%에서 양 끝 색 (색 섞기는 OKLab)
-const tone = chg => {
-  const t = Math.min(Math.abs(chg) / MAX_CHG, 1);
+// 등락률 -> 색. 0%는 중립 회색, ±max%에서 양 끝 색 (색 섞기는 OKLab)
+const tone = (chg, max = MAX_CHG) => {
+  const t = Math.min(Math.abs(chg) / max, 1);
   if (t < 0.03) return { fill: "var(--flat)", ink: "var(--ink)" };
   return {
     fill: `color-mix(in oklab, ${chg > 0 ? "var(--up)" : "var(--down)"} ${Math.round(t * 100)}%, var(--flat))`,
-    ink: t > 0.45 ? "#ffffff" : "var(--ink)",
+    ink: t > 0.55 ? "#ffffff" : "var(--ink)",
   };
 };
-const weighted = ss => {
-  const w = ss.reduce((s, x) => s + x.cap, 0);
-  return w ? ss.reduce((s, x) => s + x.change * x.cap, 0) / w : 0;
+
+// 섹터 시가총액의 전일 대비 등락률: 오늘 시총 합 / 전일 시총 합 − 1 (전일 시총 = 오늘 시총 / (1 + 등락률))
+const capChange = ss => {
+  const now = ss.reduce((a, x) => a + x.cap, 0), prev = ss.reduce((a, x) => a + x.cap / (1 + x.change / 100), 0);
+  return prev ? (now / prev - 1) * 100 : 0;
 };
 
 // ---------------------------------------------------------------- 조회
 async function load(force = false) {
   const market = state.market;
   if (!force && state.data[market]) return render();
+  delete state.quarters[market];
   state.loading = true;
   document.querySelectorAll("button").forEach(b => b.id !== "theme" && (b.disabled = true));
   $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${market === "kr" ? "국내" : "미국"} 시세를 조회하고 있습니다.</div>`;
@@ -192,7 +198,7 @@ function sectorsOf(d, key) {
   for (const s of d.stocks.filter(s => s[key] > 0)) (by.get(s.sector) || by.set(s.sector, []).get(s.sector)).push(s);
   return [...by].map(([name, ss]) => ({
     name, stocks: ss.sort((a, b) => b[key] - a[key]), n: ss.length,
-    cap: ss.reduce((a, s) => a + s.cap, 0), value: ss.reduce((a, s) => a + s.value, 0), change: weighted(ss),
+    cap: ss.reduce((a, s) => a + s.cap, 0), value: ss.reduce((a, s) => a + s.value, 0), change: capChange(ss),
   })).sort((a, b) => b[key] - a[key]);
 }
 
@@ -214,7 +220,7 @@ function etfGroups(d) {
 function render() {
   const d = state.data[state.market];
   if (!d) return;
-  const cur = d.currency, key = state.size;
+  const cur = d.currency, key = "value";  // 칸 크기·정렬 = 거래대금
   const sectors = sectorsOf(d, key);
   const etf = etfGroups(d);
   const focus = state.sector && sectors.find(s => s.name === state.sector);
@@ -245,8 +251,8 @@ function render() {
         <div>${focus
           ? `<h2><button id="back" class="link">← 전체 섹터</button> ${esc(focus.name)} <span class="${cls(focus.change)}">${pct(focus.change)}</span></h2>
              <p class="sub">${focus.n}종목 · 시가총액 ${money(focus.cap, cur)} · 거래대금 ${money(focus.value, cur)} · 국내 상장 ${esc(focus.name)} ETF ${etfN(focus.name)}개</p>`
-          : `<h2>섹터별 ${SIZE_LABEL[key]} · ${state.market === "kr" ? "국내" : "미국"}</h2>
-             <p class="sub">칸 크기 = 섹터 ${SIZE_LABEL[key]} 합계, 색 = 시가총액 가중 등락률. 섹터를 누르면 종목을 봅니다.</p>`}</div>
+          : `<h2>섹터별 거래대금 · 시가총액 · ${state.market === "kr" ? "국내" : "미국"}</h2>
+             <p class="sub">칸 크기 = 섹터 거래대금 합계, 색 = 섹터 시가총액 등락률(전일 대비), 칸 아래 줄 = 거래대금 · 시가총액. 섹터를 누르면 종목을 봅니다.</p>`}</div>
         <div class="scale" aria-label="색 범례">
           <span>−3%</span><span class="steps">${stops.map(c => `<span style="background:${tone(c).fill}" title="${pct(c)}"></span>`).join("")}</span><span>+3%</span>
         </div>
@@ -255,9 +261,9 @@ function render() {
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>섹터별 합계</h2><p class="sub">${SIZE_LABEL[key]} 순 · 행을 누르면 히트맵에서 그 섹터를 봅니다</p></div></div>
+      <div class="card-head"><div><h2>섹터별 합계</h2><p class="sub">거래대금 순 · 행을 누르면 히트맵에서 그 섹터를 봅니다</p></div></div>
       <div class="scroll"><table class="list">
-        <thead><tr><th class="l">섹터</th><th class="hide-sm">종목수</th><th>시가총액</th><th>거래대금</th><th>등락률</th><th class="l hide-sm">${SIZE_LABEL[key]} 비중</th><th>국내 ETF</th><th class="l hide-sm">상위 종목</th></tr></thead>
+        <thead><tr><th class="l">섹터</th><th class="hide-sm">종목수</th><th>시가총액</th><th>거래대금</th><th>시총 등락률</th><th class="l hide-sm">거래대금 비중</th><th>국내 ETF</th><th class="l hide-sm">상위 종목</th></tr></thead>
         <tbody>${sectors.map(s => `<tr class="clickable ${s.name === state.sector ? "selected" : ""}" data-sector="${esc(s.name)}">
           <td class="l">${esc(s.name)}</td><td class="hide-sm">${s.n}</td>
           <td>${money(s.cap, cur)}</td><td>${money(s.value, cur)}</td>
@@ -281,8 +287,10 @@ function render() {
         <tbody class="group"><tr><td class="l" colspan="5">섹터 외</td></tr>${otherGroups.map(etfRow).join("")}</tbody>
       </table></div>
     </section>`;
+  $("#map").closest(".card").insertAdjacentHTML("afterend", `<section class="card" id="quarters"></section>`);
 
   drawMap(focus, sectors, key, cur, etfN);
+  renderQuarters(focus);
   document.querySelectorAll("tr[data-sector]").forEach(tr => tr.onclick = () => showSector(tr.dataset.sector));
   if ($("#back")) $("#back").onclick = () => showSector(null);
 }
@@ -307,8 +315,8 @@ function drawMap(focus, sectors, key, cur, etfN) {
     const size = big ? Math.min(focus ? 20 : 22, Math.max(12, Math.sqrt(w * h) / 9)) : 11;
     const maxChars = Math.floor(w / (size * (/[가-힣]/.test(s.name) ? 1.0 : 0.62)));
     const name = s.name.length > maxChars ? s.name.slice(0, Math.max(maxChars - 1, 1)) + "…" : s.name;
-    const extra = focus ? "" : `ETF ${etfN(s.name)}개 · ${s.n}종목`;
-    const three = big && extra && h > 80 && w > 110;
+    const extra = `거래대금 ${money(s.value, cur)} · 시총 ${money(s.cap, cur)}`;
+    const three = big && h > 80 && w > 170;
     const cx = n.x0 + w / 2, cy = n.y0 + h / 2 - (three ? size * 0.4 : 0);
     return `<g class="leaf${focus ? "" : " sector"}" data-i="${i}">
       <rect x="${n.x0}" y="${n.y0}" width="${w}" height="${h}" fill="${t.fill}"/>
@@ -318,26 +326,21 @@ function drawMap(focus, sectors, key, cur, etfN) {
     </g>`;
   }).join("");
 
-  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${focus ? esc(focus.name) + " 종목" : "섹터"}별 ${SIZE_LABEL[key]} 트리맵. 아래 표에 같은 내용이 있습니다.">${tiles}</svg><div class="tip"></div>`;
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${focus ? esc(focus.name) + " 종목" : "섹터"}별 거래대금 트리맵(색: 시가총액 등락률). 아래 표에 같은 내용이 있습니다.">${tiles}</svg><div class="tip"></div>`;
 
   const tip = $(".tip", host);
+  const row = (k, v) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
   host.querySelectorAll(".leaf").forEach(g => {
     const s = nodes[+g.dataset.i].data;
     if (!focus) g.addEventListener("click", () => showSector(s.name));
     g.addEventListener("pointermove", e => {
       tip.innerHTML = focus
-        ? `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)}</span></b>
-          <div class="row"><span>현재가</span><span>${cur === "USD" ? "$" + fmt(+s.price, 2) : fmt(+s.price) + "원"}</span></div>
-          <div class="row"><span>등락률</span><span class="${cls(s.change)}">${pct(s.change)}</span></div>
-          <div class="row"><span>시가총액</span><span>${money(s.cap, cur)}</span></div>
-          <div class="row"><span>거래대금</span><span>${money(s.value, cur)}</span></div>`
-        : `<b>${esc(s.name)}</b>
-          <div class="row"><span>등락률 (시총 가중)</span><span class="${cls(s.change)}">${pct(s.change)}</span></div>
-          <div class="row"><span>시가총액</span><span>${money(s.cap, cur)}</span></div>
-          <div class="row"><span>거래대금</span><span>${money(s.value, cur)}</span></div>
-          <div class="row"><span>종목수</span><span>${s.n}</span></div>
-          <div class="row"><span>국내 상장 ETF</span><span>${etfN(s.name)}개</span></div>
-          <div class="row"><span>상위</span><span>${s.stocks.slice(0, 3).map(x => esc(x.name)).join(", ")}</span></div>`;
+        ? `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)}</span></b>` +
+          row("현재가", cur === "USD" ? "$" + fmt(+s.price, 2) : fmt(+s.price) + "원") +
+          row("등락률", `<span class="${cls(s.change)}">${pct(s.change)}</span>`) + row("시가총액", money(s.cap, cur)) + row("거래대금", money(s.value, cur))
+        : `<b>${esc(s.name)}</b>` + row("시총 등락률 (전일 대비)", `<span class="${cls(s.change)}">${pct(s.change)}</span>`) +
+          row("시가총액", money(s.cap, cur)) + row("거래대금", money(s.value, cur)) + row("종목수", s.n) +
+          row("국내 상장 ETF", `${etfN(s.name)}개`) + row("상위", s.stocks.slice(0, 3).map(x => esc(x.name)).join(", "));
       tip.style.opacity = 1;
       const r = host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
       const tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -348,13 +351,66 @@ function drawMap(focus, sectors, key, cur, etfN) {
   });
 }
 
+// ---------------------------------------------------------------- 분기별 거래대금 (/api/quarters)
+async function loadQuarters(market) {
+  state.quarters[market] = { loading: true };
+  try {
+    const res = await fetch(`/api/quarters?market=${market}`, { cache: "no-store" });
+    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+    state.quarters[market] = json;
+  } catch (err) {
+    state.quarters[market] = { error: err.message };
+  }
+  if (state.market === market) renderQuarters(state.sector && { name: state.sector });
+}
+
+const quarterLabel = q => `${q.slice(2, 4)}년 ${q.slice(5)}분기`;
+const growth = (v, p) => v != null && p ? (v / p - 1) * 100 : null;
+const GROWTH_MAX = 50;  // 분기 대비 ±50% 이상은 가장 진한 색
+
+function renderQuarters(focus) {
+  const host = $("#quarters");
+  if (!host) return;
+  const d = state.quarters[state.market];
+  const head = sub => `<div class="card-head"><div><h2>분기별 거래대금${focus ? ` · ${esc(focus.name)}` : ""}</h2><p class="sub">${sub}</p></div>
+    <div class="scale" aria-label="색 범례: 전 분기 대비"><span>−${GROWTH_MAX}%</span><span class="steps">${[-1, -2 / 3, -1 / 3, 0, 1 / 3, 2 / 3, 1]
+      .map(f => `<span style="background:${tone(f * GROWTH_MAX, GROWTH_MAX).fill}"></span>`).join("")}</span><span>+${GROWTH_MAX}%</span></div></div>`;
+  if (!d) { loadQuarters(state.market); return renderQuarters(focus); }
+  if (d.loading) { host.innerHTML = head("일봉 거래대금을 분기별로 모으고 있습니다") + `<div class="loading" style="padding:40px 0"><div class="spinner"></div>종목별 차트 조회 중 (10~20초)</div>`; return; }
+  if (d.error) { host.innerHTML = head("") + `<div class="error"><b>분기별 거래대금을 조회하지 못했습니다</b><br>${esc(d.error)}</div>`; return; }
+
+  const cur = d.currency, n = d.quarters.length, last = n - 1;
+  const rows = (focus ? d.stocks.filter(s => s.sector === focus.name) : d.sectors)
+    .filter(r => r.values[last] != null).sort((a, b) => b.values[last] - a.values[last]);
+  const total = d.quarters.map((_, i) => rows.reduce((a, r) => a + (r.values[i] || 0), 0));
+  const asOf = `${d.asOf.slice(0, 4)}.${d.asOf.slice(4, 6)}.${d.asOf.slice(6)}`;
+  const cell = (vs, i) => {
+    const v = vs[i], g = i ? growth(v, vs[i - 1]) : null, t = tone(g ?? 0, GROWTH_MAX);
+    return v == null ? `<td>—</td>` : `<td class="qcell" style="background:${i ? t.fill : "transparent"};color:${i ? t.ink : "inherit"}">
+      ${money(v, cur)}${g == null ? "" : `<small>${pct(g)}</small>`}</td>`;
+  };
+  const pctTd = g => `<td class="${cls(g)}">${g == null ? "—" : pct(g)}</td>`;
+  const row = (name, vs, cls_ = "") => `<tr class="${cls_}"${!focus && !cls_ ? ` data-sector="${esc(name)}"` : ""}><td class="l">${esc(name)}</td>
+    ${vs.map((_, i) => cell(vs, i)).join("")}${pctTd(growth(vs[last], vs[last - 1]))}${pctTd(growth(vs[last], vs[last - 4]))}</tr>`;
+
+  host.innerHTML = head(`일평균 거래대금 (분기 합계 ÷ 거래일수) · 칸 색 = 전 분기 대비 · ${quarterLabel(d.quarters[last])}는 ${asOf}까지` +
+      ` · 현재 히트맵 ${d.stocks.length}종목 기준${d.failed ? ` (${d.failed}종목 차트 조회 실패로 제외)` : ""}`) + `
+    <div class="scroll"><table class="list qtable">
+      <thead><tr><th class="l">${focus ? "종목" : "섹터"}</th>${d.quarters.map(q => `<th>${quarterLabel(q)}</th>`).join("")}<th>전 분기 대비</th><th>전년 동기 대비</th></tr></thead>
+      <tbody>${rows.map(r => row(r.name, r.values)).join("")}</tbody>
+      <tfoot>${row(focus ? `${focus.name} 합계` : "전체", total, "sum")}</tfoot>
+    </table></div>
+    <div class="note">분기 중간에 상장한 종목은 상장 이후 거래일만으로 평균합니다. 과거 분기도 지금 히트맵에 있는 종목만 합산합니다(그때 상위였지만 지금 빠진 종목은 제외).</div>`;
+  host.querySelectorAll("tr[data-sector]").forEach(tr => tr.onclick = () => showSector(tr.dataset.sector));
+}
+
 // ---------------------------------------------------------------- 시작
 (() => {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("heatmap") || "{}"); } catch {}
-  if (saved.market) state.market = saved.market;
-  if (saved.size) state.size = saved.size;
-  const remember = () => { try { localStorage.setItem("heatmap", JSON.stringify({ market: state.market, size: state.size })); } catch {} };
+  if (saved.market === "kr" || saved.market === "us") state.market = saved.market;
+  const remember = () => { try { localStorage.setItem("heatmap", JSON.stringify({ market: state.market })); } catch {} };
   const sync = () => document.querySelectorAll(".seg button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.v === state[b.parentElement.id]));
 

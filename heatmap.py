@@ -21,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
+import requests
+
 from kb_client import KBApiError, KBClient
 
 # (티커, 거래소, 섹터). 거래소: NAS=나스닥, NYS=뉴욕
@@ -154,8 +156,8 @@ CACHE_SECONDS = 60
 _cache: dict[str, tuple[float, dict]] = {}
 
 
-def _parallel(fn, items):
-    with ThreadPoolExecutor(8) as pool:
+def _parallel(fn, items, workers: int = 8):
+    with ThreadPoolExecutor(workers) as pool:
         return list(pool.map(fn, items))
 
 
@@ -170,13 +172,15 @@ def fetch_kr(client: KBClient) -> list[dict]:
     def one(row: dict) -> dict | None:
         try:
             m = client.call("IVM10050", {"is_cd": row["is_cd"]})
-        except KBApiError:
+        except (KBApiError, requests.RequestException):
             return None
-        sector = str(m.get("indx_nm") or "").replace("코스피 ", "").replace("코스닥 ", "").strip()
+        index_name = str(m.get("indx_nm") or "")
+        sector = index_name.replace("코스피 ", "").replace("코스닥 ", "").strip()
         if not sector:  # ETF·ETN
             return None
         return {
             "code": row["is_cd"], "name": row["is_nm"], "sector": sector,
+            "board": "KOSDAQ" if index_name.startswith("코스닥") else "KOSPI",  # 차트 TR의 mkt_clsf에 필요
             "cap": int(m.get("opn_prc_tl_amt") or 0) * 100_000_000,  # 억원 -> 원
             "value": int(m.get("dl_tw_amt") or 0),
             "change": float(row.get("up_dwn_r_p2") or 0),
@@ -192,10 +196,10 @@ def fetch_us(client: KBClient) -> list[dict]:
         symbol, exchange, sector = item
         try:
             q = client.call("GSS10030", {"krx_cd": exchange, "is_cd": symbol})
-        except KBApiError:
+        except (KBApiError, requests.RequestException):
             return None
         return {
-            "code": symbol, "name": symbol, "sector": sector,
+            "code": symbol, "name": symbol, "sector": sector, "exchange": exchange,
             "cap": float(q.get("opn_prc_tl_amt") or 0),
             "value": float(q.get("dl_tw_amt") or 0),
             "change": float(q.get("up_dwn_r_p2") or 0),
@@ -204,6 +208,185 @@ def fetch_us(client: KBClient) -> list[dict]:
         }
 
     return [s for s in _parallel(one, US_STOCKS) if s and s["cap"]]
+
+
+US_SECTOR = {symbol: sector for symbol, _, sector in US_STOCKS} | {"GOOG": "커뮤니케이션"}
+
+
+def fetch_my(client: KBClient) -> dict:
+    """내 보유 종목과 현금. 매번 잔고 TR로 조회합니다.
+
+    국내: SSQM2952 보유종목 잔고 중 원화 종목(구분 "현금"). 해외 종목도 섞여 오지만 해외는 SPQM2226을 씁니다.
+    해외: SPQM2226 해외주식 잔고 (소수점 보유 포함). 같은 종목의 온주·소수점 행은 합칩니다.
+    cap = 평가금액(원), pl = 수익률(%; 해외는 달러 기준), change = 오늘 등락률(%).
+    현금 = D+2 추정예수금(결제 예정 매매 반영) + 외화예수금 원화환산.
+
+    현금이 D+2 기준이라 종목도 결제 후 잔량(ec_q) 기준으로 셉니다. 매도해 결제를 기다리는 종목은
+    hld_q가 남아 있어도 ec_q가 0이고, 그 대금은 이미 D+2 예수금에 들어 있습니다.
+    원화 평가금액은 국내·해외 모두 SSQM2952의 val_amt를 씁니다(KB 앱 표시와 같은 환율).
+    """
+    holdings: dict[str, dict] = {}
+    balance = client.call("SSQM2952", {"excg_mktpr_ccd": ""})
+    cash = {
+        "krw": int(balance.get("nxt2_dy_tfnd") or 0),
+        "fx_krw": round(float(balance.get("fcrncy_tfnd_krw_exch_amt") or 0)),
+        "today": int(balance.get("dy_tfnd") or 0),
+    }
+
+    fx_value: dict[str, int] = {}  # 해외 종목 원화 평가금액 (온주·소수점 행 합계)
+    for r in balance.get("Record1", []):
+        if r.get("crncy_cd"):
+            fx_value[r["is_cd"]] = fx_value.get(r["is_cd"], 0) + int(r.get("val_amt") or 0)
+            continue
+        qty = int(r.get("ec_q") or 0)
+        if not qty:
+            continue
+        code, name = str(r["is_cd"]).removeprefix("A"), r["is_nm"]
+        cost = int(r.get("byng_amt") or 0)
+        is_etf = name.split(" ")[0] in ETF_BRANDS
+        kr_group, us_sector, _ = classify_etf(name)
+        holdings[code] = {
+            "code": code, "name": name, "market": "국내", "qty": qty, "etf": is_etf,
+            # 해외 보유와 같은 기준으로 묶도록 섹터 ETF는 GICS 섹터 이름을 씁니다.
+            "sector": (us_sector or kr_group) if is_etf else None,
+            "cap": int(r.get("val_amt") or 0),
+            "cost": cost, "pl": float(r.get("val_yld") or 0) if cost else None,
+        }
+
+    for r in client.call("SPQM2226", {"fee_clsf": "", "nxt_key": "", "std_crncy_f": "1", "cn_f": "",
+                                      "exch_r_aplc_f": "1"}).get("Record2", []):
+        code = r["is_cd"]
+        h = holdings.setdefault(code, {
+            "code": code, "name": r["is_nm"], "market": "미국", "exchange": r.get("mkt_clsf"), "qty": 0.0,
+            "etf": False, "sector": US_SECTOR.get(code, "미분류"), "cap": 0, "cost_usd": 0.0,
+        })
+        qty = float(r.get("frgn_hld_q_p6") or 0)
+        h["qty"] += qty
+        h["cap"] = fx_value.get(code) or h["cap"] + int(r.get("krw_val_amt") or 0)
+        h["cost_usd"] += qty * float(r.get("byng_avr_prc_p4") or 0)
+        h["price"] = float(r.get("now_prc_p4") or 0)
+
+    def quote(h: dict) -> dict:
+        try:
+            if h["market"] == "국내":
+                q = client.call("IVU10140", {"excg_clsf": "0", "shrt_cd": h["code"]})
+                h["price"] = q.get("now_prc")
+                if h["sector"] is None:
+                    m = client.call("IVM10050", {"is_cd": h["code"]})
+                    h["sector"] = str(m.get("indx_nm") or "미분류").replace("코스피 ", "").replace("코스닥 ", "").strip()
+            else:
+                q = client.call("GSS10030", {"krx_cd": h.pop("exchange"), "is_cd": h["code"]})
+                cost = h.pop("cost_usd")
+                h["pl"] = (h["qty"] * h["price"] / cost - 1) * 100 if cost else None
+                h["qty"] = round(h["qty"], 6)
+            h["change"] = float(q.get("up_dwn_r_p2") or 0)
+        except KBApiError:
+            h["change"] = 0.0
+        h["value"] = h["cap"]  # 크기 기준을 평가금액 하나로 통일
+        return h
+
+    return {"stocks": [h for h in _parallel(quote, list(holdings.values())) if h["cap"] > 0], "cash": cash}
+
+
+def query_holdings(client: KBClient) -> dict:
+    """내 보유 종목 (내정보 화면). 서버 메모리에 60초만 캐시하고 파일로 저장하지 않습니다."""
+    hit = _cache.get("holdings")
+    if hit and time.time() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    client.access_token
+    payload = {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **fetch_my(client)}
+    _cache["holdings"] = (time.time(), payload)
+    return payload
+
+
+# ---------------------------------------------------------------------- 분기별 거래대금
+
+QUARTER_CACHE_SECONDS = 600  # 과거 분기 값은 자주 바뀌지 않음
+QUARTERS = 5                 # 최근 5개 분기 (진행 중인 분기 포함)
+
+
+def _amount(value) -> float | None:
+    """거래대금 값. 가끔 오는 깨진 값(예: '5803-3893')은 None."""
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _valid_day(d: str) -> bool:
+    """실제 달력 날짜이고 오늘 이전인지. 필드가 밀린 행은 날짜 자리에 엉뚱한 숫자가 옵니다."""
+    try:
+        return date(2000, 1, 1) <= datetime.strptime(d, "%Y%m%d").date() <= date.today()
+    except ValueError:
+        return False
+
+
+def daily_values(client: KBClient, stock: dict, market: str) -> list[tuple[str, float]]:
+    """종목의 최근 약 400거래일 (날짜, 거래대금). 국내 원, 미국 달러."""
+    if market == "kr":
+        rows = client.call("IVS11560", {
+            "info_ccd": "1", "mkt_clsf": "1" if stock.get("board") == "KOSDAQ" else "0", "chrt_clsf": "D",
+            "minute_tck_indx": "", "is_cd": stock["code"], "inq_clsf": "2", "strt_dy": "", "inq_cnt": "400",
+        }).get("out2", [])
+        days = [(str(r["dt"]), _amount(r.get("dl_tw_amt"))) for r in rows]
+        return [(d, v * 10) for d, v in days if v is not None and _valid_day(d)]  # 국내 차트 거래대금은 10원 단위
+    rows = client.call("GSC10060", {
+        "chrt_clsf": "3", "mdfy_stk_prc_use_f": "", "is_cd": stock["code"], "clsf": "1",  # chrt_clsf 3 = 일봉
+        "srch_strt_dy": date.today().strftime("%Y%m%d"), "rcrd_c": "400", "bndl": "", "krx_cd": stock["exchange"],
+    }).get("out2", [])
+    days = [(str(r["dt"]), _amount(r.get("dl_tw_amt"))) for r in rows]
+    return [(d, v) for d, v in days if v is not None and _valid_day(d)]
+
+
+def quarter_of(yyyymmdd: str) -> str:
+    return f"{yyyymmdd[:4]}Q{(int(yyyymmdd[4:6]) - 1) // 3 + 1}"
+
+
+def query_quarters(client: KBClient, market: str) -> dict:
+    """히트맵과 같은 종목의 분기별 일평균 거래대금. 섹터 값 = 소속 종목 일평균의 합."""
+    hit = _cache.get(("quarters", market))
+    if hit and time.time() - hit[0] < QUARTER_CACHE_SECONDS:
+        return hit[1]
+    stocks = query_heatmap(client, market)["stocks"]
+
+    def one(stock: dict) -> dict:
+        try:
+            days = daily_values(client, stock, market)
+        except (KBApiError, requests.RequestException):  # 재시도 후에도 실패한 종목은 빼고 개수만 알림
+            days = []
+        by_q: dict[str, list[float]] = {}
+        for d, v in days:
+            by_q.setdefault(quarter_of(d), []).append(v)
+        return {"code": stock["code"], "name": stock["name"], "sector": stock["sector"], "last": max((d for d, _ in days), default=""),
+                "avg": {q: sum(vs) / len(vs) for q, vs in by_q.items()}}
+
+    rows = _parallel(one, stocks, workers=4)
+    failed = sum(1 for r in rows if not r["last"])
+    last = max((r["last"] for r in rows), default="")
+    if not last:
+        raise ValueError("차트 데이터를 받지 못했습니다.")
+    y, q = int(last[:4]), (int(last[4:6]) - 1) // 3 + 1
+    quarters = []
+    for _ in range(QUARTERS):
+        quarters.insert(0, f"{y}Q{q}")
+        y, q = (y, q - 1) if q > 1 else (y - 1, 4)
+
+    sectors: dict[str, list[float]] = {}
+    for r in rows:
+        r["values"] = [r["avg"].get(q) for q in quarters]
+        del r["avg"], r["last"]
+        acc = sectors.setdefault(r["sector"], [0.0] * QUARTERS)
+        for i, v in enumerate(r["values"]):
+            acc[i] += v or 0
+    payload = {
+        "market": market, "currency": "KRW" if market == "kr" else "USD", "quarters": quarters, "asOf": last,
+        "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sectors": [{"name": n, "values": v} for n, v in sectors.items()],
+        "failed": failed,
+        "stocks": rows,
+    }
+    _cache[("quarters", market)] = (time.time(), payload)
+    return payload
 
 
 def query_heatmap(client: KBClient, market: str) -> dict:

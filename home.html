@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KB OpenAPI</title>
+<!-- 첫 화면: 히트맵 / 내정보 선택. dividends_web.py가 / 로 제공합니다. -->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04); --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05); --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05); --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink); min-height: 100vh;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 960px; margin: 0 auto; padding: 48px 16px; }
+header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 28px; }
+h1 { font-size: 24px; margin: 0; font-weight: 650; }
+.sub { color: var(--muted); margin: 4px 0 0; }
+button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 640px) { .choices { grid-template-columns: 1fr; } }
+a.choice {
+  display: flex; flex-direction: column; gap: 10px; min-height: 240px; padding: 24px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  color: var(--ink); text-decoration: none; transition: border-color .12s, background .12s;
+}
+a.choice:hover, a.choice:focus-visible { border-color: var(--accent); background: var(--hover); outline: none; }
+a.choice h2 { font-size: 22px; margin: 0; font-weight: 650; }
+a.choice p { color: var(--ink-2); margin: 0; }
+a.choice ul { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); }
+a.choice .go { margin-top: auto; color: var(--accent); font-weight: 600; }
+.icon { width: 44px; height: 44px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>KB증권 OpenAPI</h1>
+      <p class="sub">보고 싶은 화면을 고르세요.</p>
+    </div>
+    <button id="theme" aria-label="테마 전환">◐</button>
+  </header>
+
+  <div class="choices">
+    <a class="choice" href="/heatmap">
+      <svg class="icon" viewBox="0 0 44 44" aria-hidden="true">
+        <rect x="2" y="2" width="24" height="24" rx="3" fill="#e34948"/><rect x="28" y="2" width="14" height="14" rx="3" fill="#2a78d6"/>
+        <rect x="28" y="18" width="14" height="8" rx="2" fill="#e8a5a0"/><rect x="2" y="28" width="16" height="14" rx="3" fill="#9ec5f4"/>
+        <rect x="20" y="28" width="22" height="14" rx="3" fill="#e1e0d9"/>
+      </svg>
+      <h2>히트맵</h2>
+      <p>국내·미국 섹터 히트맵</p>
+      <ul>
+        <li>섹터별 시가총액·거래대금, 시총 가중 등락률</li>
+        <li>섹터를 누르면 종목 히트맵</li>
+        <li>국내 상장 ETF 섹터별 개수와 신규 상장</li>
+      </ul>
+      <span class="go">히트맵 보기 →</span>
+    </a>
+    <a class="choice" href="/me">
+      <svg class="icon" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="14" r="8" fill="none" stroke="#2a78d6" stroke-width="3"/>
+        <path d="M6 40c2-9 9-14 16-14s14 5 16 14" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <h2>내정보</h2>
+      <p>내 계좌의 보유 종목과 배당</p>
+      <ul>
+        <li>보유 종목 현황: 평가금액, 수익률, 섹터별 비중</li>
+        <li>배당 내역: 월별·종목별 배당, 세금, CSV 저장</li>
+      </ul>
+      <span class="go">내정보 보기 →</span>
+    </a>
+  </div>
+  <p class="note">조회할 때마다 KB OpenAPI를 호출합니다. 계좌 정보는 파일로 저장하지 않고, 서버는 이 PC(127.0.0.1)에서만 열립니다.</p>
+</div>
+<script>
+try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+document.getElementById("theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("div-theme", next); } catch {}
+};
+</script>
+</body>
+</html>

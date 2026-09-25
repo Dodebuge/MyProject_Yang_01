@@ -1,16 +1,23 @@
-"""배당금 확인 페이지 (로컬 웹서버).
+"""KB증권 OpenAPI 로컬 웹서버.
 
-페이지(dividends.html)에서 연도를 고르고 조회하면, 이 서버가 그때 KB OpenAPI로 거래내역을 조회해
-배당 내역을 JSON으로 돌려줍니다. appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니다.
+페이지에서 조회할 때마다 이 서버가 KB OpenAPI를 호출해 JSON으로 돌려줍니다.
+appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니다.
 
 실행:
-    python dividends_web.py              # http://localhost:8000 을 열고 올해 배당을 조회
+    python dividends_web.py              # http://localhost:8000 을 엽니다
     python dividends_web.py --port 8080 --no-open
 
+페이지:
+    GET /         -> 첫 화면: 히트맵 / 내정보 선택 (home.html)
+    GET /heatmap  -> 국내·해외 섹터 히트맵 (heatmap.html)
+    GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
+
 API:
+    GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...], "etf": {...}}
+    GET /api/quarters?market=kr|us -> {"quarters", "asOf", "sectors": [{"name", "values"}], "stocks": [...], "failed"}
+                                      히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
+    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today"}}  잔고 TR 실시간 조회, 파일 저장 없음
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
-    GET /heatmap                   -> 국내·해외 섹터 히트맵 페이지 (heatmap.html)
-    GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...]}
 """
 
 from __future__ import annotations
@@ -25,11 +32,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from dividends import fetch_entries
-from heatmap import query_heatmap
+from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
 
-PAGE = Path(__file__).resolve().parent / "dividends.html"
-HEATMAP_PAGE = PAGE.with_name("heatmap.html")
+HERE = Path(__file__).resolve().parent
+PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html"}
 
 
 def query_dividends(client: KBClient, year: int) -> dict:
@@ -52,14 +59,16 @@ def make_handler(client: KBClient):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             url = urlparse(self.path)
-            if url.path == "/":
-                self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-            elif url.path == "/heatmap":
-                self._send(200, HEATMAP_PAGE.read_bytes(), "text/html; charset=utf-8")
+            if url.path in PAGES:
+                self._send(200, (HERE / PAGES[url.path]).read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/dividends":
                 self._api(lambda q: query_dividends(client, int(q.get("year", [date.today().year])[0])), parse_qs(url.query))
             elif url.path == "/api/heatmap":
                 self._api(lambda q: query_heatmap(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
+            elif url.path == "/api/quarters":
+                self._api(lambda q: query_quarters(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
+            elif url.path == "/api/holdings":
+                self._api(lambda q: query_holdings(client), {})
             else:
                 self.send_error(404)
 
