@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "섹터 히트맵 조회 시퀀스 (/api/heatmap?market=kr)",
+    "output": "heatmap-request.sequence.html",
+    "viewBox": [
+      1060,
+      582
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "request-cache",
+        "label": "요청과 캐시",
+        "focus": [
+          "browser",
+          "server",
+          "heatmap"
+        ],
+        "note": "시장별 결과를 60초 캐시하고, 없을 때만 KB OpenAPI를 조회합니다."
+      },
+      {
+        "id": "quotes",
+        "label": "국내 시세 수집",
+        "focus": [
+          "heatmap",
+          "kb"
+        ],
+        "note": "순위 두 개로 종목을 모으고, 종목마다 IVM10050으로 업종·시총·거래대금을 받습니다."
+      },
+      {
+        "id": "etf",
+        "label": "ETF 목록과 스냅숏",
+        "focus": [
+          "heatmap",
+          "kb",
+          "snapshot"
+        ],
+        "note": "전체 상장 종목에서 ETF를 골라 분류하고, 직전 날짜 스냅숏과 비교해 신규 상장을 셉니다."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "브라우저",
+      "sublabel": "heatmap.html"
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "dividends_web.py",
+      "sublabel": "127.0.0.1:8000"
+    },
+    {
+      "id": "heatmap",
+      "type": "backend",
+      "label": "heatmap.py",
+      "sublabel": "query_heatmap"
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "날짜별 ETF 코드"
+    },
+    {
+      "id": "kb",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "kb_client.py 경유 POST"
+    }
+  ],
+  "segments": [
+    {
+      "from": 152,
+      "to": 214,
+      "label": "요청"
+    },
+    {
+      "from": 226,
+      "to": 288,
+      "label": "국내 시세"
+    },
+    {
+      "from": 300,
+      "to": 422,
+      "label": "ETF"
+    },
+    {
+      "from": 434,
+      "to": 496,
+      "label": "응답"
+    }
+  ],
+  "messages": [
+    {
+      "id": "get-heatmap",
+      "from": "browser",
+      "to": "server",
+      "y": 170,
+      "label": "GET /api/heatmap?market=kr",
+      "variant": "emphasis"
+    },
+    {
+      "id": "query",
+      "from": "server",
+      "to": "heatmap",
+      "y": 200,
+      "label": "query_heatmap(kr)",
+      "note": "60초 캐시에 있으면 바로 반환"
+    },
+    {
+      "id": "quotes-call",
+      "from": "heatmap",
+      "to": "kb",
+      "y": 244,
+      "label": "IVS10920 · IVU10210 → IVM10050 × 약 280",
+      "variant": "emphasis",
+      "note": "토큰은 kb_client가 1회 발급 후 재사용, IVM10050은 8스레드 병렬"
+    },
+    {
+      "id": "quotes-rows",
+      "from": "kb",
+      "to": "heatmap",
+      "y": 274,
+      "label": "업종 · 시총 · 거래대금 (ETF·ETN 제외)",
+      "variant": "return"
+    },
+    {
+      "id": "all-call",
+      "from": "heatmap",
+      "to": "kb",
+      "y": 318,
+      "label": "IVS10920 (inq_cnt 9999)",
+      "variant": "emphasis",
+      "note": "전체 상장 종목"
+    },
+    {
+      "id": "all-rows",
+      "from": "kb",
+      "to": "heatmap",
+      "y": 348,
+      "label": "약 4,300종목 → ETF 선별 · 섹터 분류",
+      "variant": "return"
+    },
+    {
+      "id": "snap-save",
+      "from": "heatmap",
+      "to": "snapshot",
+      "y": 378,
+      "label": "오늘 ETF 코드 저장",
+      "variant": "dashed"
+    },
+    {
+      "id": "snap-prev",
+      "from": "snapshot",
+      "to": "heatmap",
+      "y": 408,
+      "label": "직전 날짜 대비 신규·폐지",
+      "variant": "return"
+    },
+    {
+      "id": "payload",
+      "from": "heatmap",
+      "to": "server",
+      "y": 452,
+      "label": "stocks + etf",
+      "variant": "return",
+      "note": "60초 캐시에 저장"
+    },
+    {
+      "id": "response",
+      "from": "server",
+      "to": "browser",
+      "y": 482,
+      "label": "200 JSON",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "server",
+      "from": 170,
+      "to": 487
+    },
+    {
+      "participant": "heatmap",
+      "from": 200,
+      "to": 457
+    },
+    {
+      "participant": "kb",
+      "from": 244,
+      "to": 353
+    },
+    {
+      "participant": "snapshot",
+      "from": 378,
+      "to": 413
+    }
+  ]
+}
