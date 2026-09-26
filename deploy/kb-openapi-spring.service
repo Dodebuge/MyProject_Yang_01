@@ -1,0 +1,24 @@
+# systemd 서비스: Spring Boot 버전(spring-app)을 계속 실행합니다. Tomcat·Python 설치가 필요 없습니다.
+#
+#   cd /opt/kb_openapi_sample/spring-app && ./mvnw -q -DskipTests package
+#   sudo cp deploy/kb-openapi-spring.service /etc/systemd/system/
+#   (아래 WorkingDirectory, User, 포트를 서버에 맞게 수정)
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
+#   journalctl -u kb-openapi-spring -f      # 로그 확인
+[Unit]
+Description=KB OpenAPI (Spring Boot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# .env가 있고 etf_snapshot.json을 쓸 폴더. User에게 쓰기 권한이 있어야 합니다.
+WorkingDirectory=/opt/kb_openapi_sample
+Environment=KB_DATA_DIR=/opt/kb_openapi_sample
+Environment=PORT=8080
+ExecStart=/usr/bin/java -Xmx512m -jar /opt/kb_openapi_sample/spring-app/target/kb-openapi-spring.jar
+User=kbapp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

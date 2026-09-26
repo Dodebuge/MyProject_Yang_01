@@ -1,0 +1,347 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Java · Spring Boot 코드 구조",
+    "output": "java-structure.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Dodebuge/MyProject_Yang_01",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "b73b275b2331d47440f007a43c5531f391707611"
+    },
+    "views": [
+      {
+        "id": "spring",
+        "label": "Spring Boot 요청 흐름",
+        "focus": [
+          "browser",
+          "page",
+          "api",
+          "heatmap",
+          "dividends",
+          "client",
+          "kbapi"
+        ],
+        "note": "spring-app: 컨트롤러가 공통 코어(Heatmap, Dividends)를 호출하고 KBClient가 KB OpenAPI를 부릅니다."
+      },
+      {
+        "id": "shared-core",
+        "label": "공통 코어 재사용",
+        "focus": [
+          "api",
+          "servlet",
+          "heatmap",
+          "dividends",
+          "client"
+        ],
+        "note": "Spring 컨트롤러와 Tomcat WAR의 AppServlet이 java-app의 같은 코어 소스를 씁니다."
+      },
+      {
+        "id": "files",
+        "label": "설정과 파일",
+        "focus": [
+          "client",
+          "env",
+          "heatmap",
+          "snapshot"
+        ],
+        "note": "kb.data-dir 폴더의 .env에서 키를 읽고, ETF 코드 스냅숏을 etf_snapshot.json에 저장합니다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "브라우저",
+      "sublabel": "home · heatmap · me.html",
+      "pos": [
+        40,
+        330
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "page",
+      "type": "backend",
+      "label": "PageController",
+      "sublabel": "/, /heatmap, /me → static",
+      "pos": [
+        300,
+        150
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "ApiController",
+      "sublabel": "@RestController /api/*",
+      "tag": "오류 → 400/502",
+      "pos": [
+        300,
+        330
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "servlet",
+      "type": "backend",
+      "label": "AppServlet",
+      "sublabel": "java-app WAR (Tomcat 10)",
+      "pos": [
+        300,
+        520
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/AppServlet.java"
+        }
+      ]
+    },
+    {
+      "id": "heatmap",
+      "type": "backend",
+      "label": "Heatmap",
+      "sublabel": "섹터·분기·ETF·보유",
+      "tag": "60초 · 10분 캐시",
+      "pos": [
+        630,
+        250
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java"
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "날짜별 ETF 코드",
+      "pos": [
+        635,
+        20
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "dividends",
+      "type": "backend",
+      "label": "Dividends",
+      "sublabel": "SWQA2301 배당 분류",
+      "pos": [
+        630,
+        440
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Dividends.java"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "backend",
+      "label": "KBClient",
+      "sublabel": "토큰 · TR 호출 · 값 정리",
+      "tag": "5xx 3회 재시도",
+      "pos": [
+        900,
+        330
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Values.java",
+          "label": "Values (숫자 변환·병렬)"
+        }
+      ]
+    },
+    {
+      "id": "env",
+      "type": "security",
+      "label": ".env",
+      "sublabel": "appKey / appSecret",
+      "pos": [
+        915,
+        520
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "kbapi",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "developer.kbsec.com:32484",
+      "pos": [
+        1160,
+        330
+      ],
+      "size": [
+        190,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "spring-app · Spring Boot 3.5 (내장 Tomcat)",
+      "wraps": [
+        "page",
+        "api"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "공통 코어 · java-app/src/main/java",
+      "wraps": [
+        "heatmap",
+        "dividends",
+        "client"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "get-pages",
+      "from": "browser",
+      "to": "page",
+      "label": "GET 화면",
+      "fromSide": "top"
+    },
+    {
+      "id": "fetch-api",
+      "from": "browser",
+      "to": "api",
+      "label": "fetch api/*",
+      "variant": "emphasis"
+    },
+    {
+      "id": "war-alt",
+      "from": "browser",
+      "to": "servlet",
+      "label": "또는 WAR 배포",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-heatmap",
+      "from": "api",
+      "to": "heatmap",
+      "label": "heatmap · quarters · holdings"
+    },
+    {
+      "id": "api-dividends",
+      "from": "api",
+      "to": "dividends",
+      "label": "dividends"
+    },
+    {
+      "id": "servlet-core",
+      "from": "servlet",
+      "to": "dividends",
+      "label": "같은 코어",
+      "variant": "dashed"
+    },
+    {
+      "id": "heatmap-snapshot",
+      "from": "heatmap",
+      "to": "snapshot",
+      "label": "신규 상장 비교",
+      "variant": "dashed",
+      "labelDy": -60
+    },
+    {
+      "id": "heatmap-client",
+      "from": "heatmap",
+      "to": "client",
+      "label": "call()"
+    },
+    {
+      "id": "dividends-client",
+      "from": "dividends",
+      "to": "client",
+      "label": "callPages()"
+    },
+    {
+      "id": "env-client",
+      "from": "env",
+      "to": "client",
+      "label": "fromEnv()",
+      "variant": "security"
+    },
+    {
+      "id": "client-kb",
+      "from": "client",
+      "to": "kbapi",
+      "label": "POST /api/v1/{tr}",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Spring Boot (spring-app)",
+      "items": [
+        "KbApplication: KBClient·Heatmap·Dividends를 @Bean으로 등록",
+        "application.properties: PORT, KB_DATA_DIR",
+        "java -jar 하나로 실행, Java 17"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "공통 코어 (java-app)",
+      "items": [
+        "Python 4개 파일을 그대로 옮긴 로직",
+        "Spring과 Tomcat WAR가 같은 소스를 컴파일",
+        "Gson으로 KB 응답을 읽고 고정길이 값 정리"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Python → Java",
+      "items": [
+        "dividends_web.py → ApiController · AppServlet",
+        "heatmap.py → Heatmap, dividends.py → Dividends",
+        "kb_client.py → KBClient + Values"
+      ]
+    }
+  ]
+}

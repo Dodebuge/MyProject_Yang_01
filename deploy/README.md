@@ -1,4 +1,23 @@
-# 리눅스 서버 배포 (Tomcat 10 + Python)
+# 리눅스 서버 배포
+
+## 방법 A. Spring Boot (권장, Tomcat·Python 설치 불필요)
+
+```
+내 PC 브라우저 ──http://서버IP:8080/──▶ java -jar kb-openapi-spring.jar (내장 Tomcat) ──▶ KB OpenAPI
+```
+
+```bash
+git clone https://github.com/Dodebuge/MyProject_Yang_01.git /opt/kb_openapi_sample
+cd /opt/kb_openapi_sample
+vi .env && chmod 600 .env                     # KB_OPENAPI_BASE_URL, KB_OPENAPI_APP_KEY, KB_OPENAPI_APP_SECRET
+cd spring-app && ./mvnw -q -DskipTests package   # JDK 17 이상 필요
+sudo cp ../deploy/kb-openapi-spring.service /etc/systemd/system/   # WorkingDirectory, User 확인
+sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
+```
+
+방화벽에서 8080만 열면 됩니다 (아래 "방화벽"). 접근 제한은 없습니다.
+
+## 방법 B. Tomcat 10 + Python
 
 ```
 내 PC 브라우저 ──http://서버IP:8080/kb/──▶ Tomcat 10 (kb.war, 프록시) ──http://127.0.0.1:8000──▶ dividends_web.py ──▶ KB OpenAPI
@@ -9,12 +28,12 @@
 - **접근 제한 없음**: 서버 IP를 아는 같은 네트워크의 누구나 `내정보`(잔고·배당)를 볼 수 있습니다.
   로그인이 필요해지면 `tomcat-proxy/WEB-INF/web.xml` 아래쪽 주석을 풀면 됩니다.
 
-## 필요한 것
+### 필요한 것
 
 - Tomcat 10.1 (jakarta.servlet), JDK 11 이상 (`javac`, `jar`). Tomcat 9 이하(javax.servlet)에서는 동작하지 않습니다.
 - Python 3.9 이상, `pip install -r requirements.txt`
 
-## 1. 코드와 키 올리기
+### 1. 코드와 키 올리기
 
 ```bash
 sudo mkdir -p /opt/kb_openapi_sample && sudo chown $USER /opt/kb_openapi_sample
@@ -25,7 +44,7 @@ vi .env        # KB_OPENAPI_BASE_URL, KB_OPENAPI_APP_KEY, KB_OPENAPI_APP_SECRET 
 chmod 600 .env
 ```
 
-## 2. Python 서버를 서비스로 실행
+### 2. Python 서버를 서비스로 실행
 
 ```bash
 python3 dividends_web.py --no-open          # 먼저 직접 실행해 오류가 없는지 확인 (Ctrl+C)
@@ -35,7 +54,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi
 curl -s http://127.0.0.1:8000/ | head -3    # 서버 안에서만 열리는지 확인
 ```
 
-## 3. Tomcat에 프록시 WAR 올리기
+### 3. Tomcat에 프록시 WAR 올리기
 
 ```bash
 cd /opt/kb_openapi_sample/deploy/tomcat-proxy
@@ -46,7 +65,7 @@ cp kb.war /opt/tomcat/webapps/              # 몇 초 뒤 자동 배포 → http
 루트 주소(`http://서버IP:8080/`)로 쓰려면 기존 `webapps/ROOT`를 치우고 `ROOT.war` 이름으로 복사하세요.
 페이지 안의 링크와 API 호출은 상대경로라 어느 경로에 올려도 동작합니다.
 
-## 4. 방화벽
+## 방화벽 (A·B 공통)
 
 ```bash
 sudo firewall-cmd --add-port=8080/tcp --permanent && sudo firewall-cmd --reload   # RHEL/Rocky 계열

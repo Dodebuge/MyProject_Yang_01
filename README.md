@@ -14,6 +14,7 @@
 | `me.html` | 내정보: 보유 종목 현황 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
+| `spring-app/` | Spring Boot 버전, 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)) |
 | `heatmap.py` / `heatmap.html` | 국내·미국 섹터 히트맵 (같은 서버의 `/heatmap`) |
 
 ## 실행
@@ -40,8 +41,17 @@ python dividends.py --csv dividends.csv  # 상세 내역 CSV 저장 (엑셀용)
 
 ## 웹 화면
 
+Spring Boot로 실행합니다 (JDK 17 이상만 있으면 됨, Maven은 `mvnw`가 자동으로 받음).
+
 ```bash
-python dividends_web.py          # http://localhost:8000 첫 화면이 열립니다
+spring-app\run.cmd              # Windows → http://localhost:8080
+spring-app/run.sh               # Linux/macOS
+```
+
+Python으로 실행해도 같은 화면입니다.
+
+```bash
+python dividends_web.py          # http://localhost:8000
 python dividends_web.py --port 8080 --no-open
 ```
 
