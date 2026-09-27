@@ -12,6 +12,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /         -> 첫 화면: 히트맵 / 내정보 선택 (home.html)
     GET /heatmap  -> 국내·해외 섹터 히트맵 (heatmap.html)
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
+    GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
     GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...], "etf": {...}}
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import webbrowser
 from dataclasses import asdict
 from datetime import date, datetime
@@ -41,6 +43,7 @@ from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
 PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html"}
+DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
 
 def query_dividends(client: KBClient, year: int, refresh: bool = False) -> dict:
@@ -81,6 +84,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: query_quarters(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
             elif url.path == "/api/holdings":
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
+            elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
+                self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:
                 self.send_error(404)
 

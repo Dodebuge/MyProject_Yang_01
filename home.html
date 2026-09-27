@@ -46,6 +46,18 @@ a.choice p { color: var(--ink-2); margin: 0; }
 a.choice ul { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); }
 a.choice .go { margin-top: auto; color: var(--accent); font-weight: 600; }
 .icon { width: 44px; height: 44px; }
+.docs { margin-top: 32px; }
+.docs h2 { font-size: 16px; margin: 0 0 4px; font-weight: 650; }
+.docs .groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+@media (max-width: 640px) { .docs .groups { grid-template-columns: 1fr; } }
+.docs .group { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.docs h3 { font-size: 13px; margin: 0 0 8px; color: var(--ink-2); font-weight: 600; }
+.docs a.doc {
+  display: block; padding: 7px 10px; margin-top: 6px; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--ink); text-decoration: none; font-size: 13px;
+}
+.docs a.doc:hover, .docs a.doc:focus-visible { border-color: var(--accent); background: var(--hover); outline: none; }
+.docs a.doc small { display: block; color: var(--muted); font-size: 12px; }
 .note { color: var(--muted); font-size: 12px; margin-top: 20px; }
 </style>
 </head>
@@ -89,7 +101,31 @@ a.choice .go { margin-top: auto; color: var(--accent); font-weight: 600; }
       <span class="go">내정보 보기 →</span>
     </a>
   </div>
-  <p class="note">조회할 때마다 KB OpenAPI를 호출합니다. 계좌 정보는 파일로 저장하지 않고, 서버는 이 PC(127.0.0.1)에서만 열립니다.</p>
+  <section class="docs" aria-labelledby="docs-title">
+    <h2 id="docs-title">구조 문서</h2>
+    <p class="sub">Archify로 그린 구조도·순서도입니다. 새 탭에서 열리며, 노드를 누르면 설명과 소스 링크를 볼 수 있습니다.</p>
+    <div class="groups">
+      <div class="group">
+        <h3>아키텍처</h3>
+        <a class="doc" href="docs/spring-architecture.html" target="_blank" rel="noopener">Spring Boot 배포 아키텍처<small>서버 · systemd · JVM · 데이터 파일</small></a>
+        <a class="doc" href="docs/architecture.html" target="_blank" rel="noopener">리눅스 서버 배포 구조<small>Tomcat 10 + Python 구성</small></a>
+        <a class="doc" href="docs/heatmap-request.sequence.html" target="_blank" rel="noopener">히트맵 조회 시퀀스<small>Tomcat 경유 요청 순서</small></a>
+      </div>
+      <div class="group">
+        <h3>코드 구조</h3>
+        <a class="doc" href="docs/spring-app.html" target="_blank" rel="noopener">spring-app 구조<small>java-app 코어 공유 · DailyStore</small></a>
+        <a class="doc" href="docs/java-app.html" target="_blank" rel="noopener">java-app 구조와 주석 가이드<small>클래스별 주석 · 소스 링크</small></a>
+        <a class="doc" href="docs/java-structure.html" target="_blank" rel="noopener">Java · Spring 코드 구조 (이전)<small>kb.db 도입 전 버전</small></a>
+      </div>
+      <div class="group">
+        <h3>순서도</h3>
+        <a class="doc" href="docs/flow-request.html" target="_blank" rel="noopener">요청 처리 순서도<small>GET /api/heatmap</small></a>
+        <a class="doc" href="docs/flow-kbclient.html" target="_blank" rel="noopener">KBClient.call() 순서도<small>토큰 · 재시도 · 응답 검사</small></a>
+        <a class="doc" href="docs/flow-c-style.html" target="_blank" rel="noopener">C 스타일 흐름도<small>C 함수 이름으로 본 전체 흐름</small></a>
+      </div>
+    </div>
+  </section>
+  <p class="note">히트맵은 조회할 때마다 KB OpenAPI를 호출합니다. 내정보는 하루 한 번 조회해 서버의 kb.db에 저장합니다.</p>
 </div>
 <script>
 try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}

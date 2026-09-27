@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -23,6 +24,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * dividends_web.py와 같은 주소를 처리합니다. 화면(HTML)은 Python 버전과 같은 파일을 씁니다.
  *
  *   GET /, /heatmap, /me                -> home.html, heatmap.html, me.html
+ *   GET /docs/*.html                    -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
  *   GET /api/holdings                   -> 보유 종목과 현금
@@ -36,6 +38,8 @@ public class AppServlet extends HttpServlet {
 
     private static final Gson GSON = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
     private static final Map<String, String> PAGES = new HashMap<>();
+    // 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
+    private static final Pattern DOC = Pattern.compile("/docs/[\\w.-]+\\.html");
 
     static {
         PAGES.put("/", "/home.html");
@@ -98,8 +102,12 @@ public class AppServlet extends HttpServlet {
         String path = req.getPathInfo() == null ? "/" : req.getPathInfo();
         resp.setHeader("Cache-Control", "no-store");
 
-        if (PAGES.containsKey(path)) {
-            try (InputStream in = getServletContext().getResourceAsStream(PAGES.get(path))) {
+        String page = PAGES.get(path);
+        if (page == null && DOC.matcher(path).matches()) {
+            page = path;  // WAR 안의 docs/*.html
+        }
+        if (page != null) {
+            try (InputStream in = getServletContext().getResourceAsStream(page)) {
                 if (in == null) {
                     resp.sendError(404);
                     return;

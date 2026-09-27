@@ -59,6 +59,17 @@
           <include>me.html</include>
         </includes>
       </resource>
+      <!-- 첫 화면의 '구조 문서': Archify 구조도·순서도 → /docs/*.html (검증용 *.visual-check.html 제외) -->
+      <resource>
+        <directory>${project.basedir}/../docs</directory>
+        <targetPath>static/docs</targetPath>
+        <includes>
+          <include>*.html</include>
+        </includes>
+        <excludes>
+          <exclude>*.visual-check.html</exclude>
+        </excludes>
+      </resource>
     </resources>
     <plugins>
       <plugin>

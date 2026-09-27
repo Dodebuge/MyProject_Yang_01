@@ -7,7 +7,7 @@
 # .env(appKey/appSecret)는 저장소 루트에서 읽습니다 (KB_DATA_DIR로 바꿀 수 있음).
 #
 # 시작을 빠르게 하는 세 가지:
-#   1) 소스가 jar보다 새로울 때만 빌드합니다 (매번 Maven을 돌리지 않음).
+#   1) 소스·화면·docs가 jar보다 새로울 때만 빌드합니다 (매번 Maven을 돌리지 않음).
 #   2) jar를 풀어 두고 CDS(클래스 데이터 공유) 아카이브를 한 번 만들어 재사용합니다.
 #   3) -XX:TieredStopAtLevel=1: JIT를 가볍게 해서 시작을 줄입니다 (KB 응답을 기다리는 앱이라 성능 차이는 작음).
 set -e
@@ -16,7 +16,7 @@ export KB_DATA_DIR="${KB_DATA_DIR:-$(cd .. && pwd)}"
 JAR=target/kb-openapi-spring.jar
 APP=target/app   # 푼 jar(kb-openapi-spring.jar + lib/)와 CDS 아카이브(app.jsa)
 
-if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../home.html ../heatmap.html ../me.html -newer "$JAR" -print -quit)" ]; then
+if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../home.html ../heatmap.html ../me.html ../docs -newer "$JAR" -print -quit)" ]; then
   ./mvnw -q -B -DskipTests package
 fi
 
