@@ -1,0 +1,468 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "java-app 구조와 주석 가이드",
+    "output": "java-app.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Dodebuge/MyProject_Yang_01",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "0428dc3acdfe1aab7b28f64519768be267a1e248"
+    },
+    "views": [
+      {
+        "id": "guide-servlet",
+        "label": "주석: AppServlet",
+        "focus": [
+          "browser",
+          "webxml",
+          "servlet"
+        ],
+        "note": "클래스 주석에 처리 주소 5개와 설정 방법(dataDir, KB_DATA_DIR, KB_OPENAPI_*)을 적었습니다. 새 주소를 추가하면 이 목록도 함께 고칩니다."
+      },
+      {
+        "id": "guide-client",
+        "label": "주석: KBClient",
+        "focus": [
+          "client",
+          "env",
+          "exception",
+          "kbapi"
+        ],
+        "note": "클래스 주석의 4가지 약속: 토큰 캐싱, processFlag 검사, 고정길이 값 정리, 5xx 재시도. 동작을 바꾸면 주석도 함께 고칩니다."
+      },
+      {
+        "id": "guide-heatmap",
+        "label": "주석: Heatmap",
+        "focus": [
+          "heatmap",
+          "snapshot",
+          "client"
+        ],
+        "note": "클래스 주석에 국내·해외·ETF별로 쓰는 TR을 적었습니다. public 메서드 주석은 GET 주소로 시작하고, ponytail: 주석은 알려진 한계를 표시합니다."
+      },
+      {
+        "id": "guide-dividends",
+        "label": "주석: Dividends · Values",
+        "focus": [
+          "dividends",
+          "values",
+          "client"
+        ],
+        "note": "Dividends는 어느 TR에서 무엇을 고르는지, Values는 어떤 Python 표현에 해당하는지를 주석에 적었습니다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "브라우저",
+      "sublabel": "home · heatmap · me.html",
+      "pos": [
+        40,
+        70
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "webxml",
+      "type": "backend",
+      "label": "web.xml",
+      "sublabel": "dataDir · /* → app",
+      "pos": [
+        40,
+        500
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/webapp/WEB-INF/web.xml",
+          "line": 10,
+          "end_line": 25,
+          "label": "dataDir 설정과 서블릿 매핑"
+        }
+      ]
+    },
+    {
+      "id": "servlet",
+      "type": "backend",
+      "label": "AppServlet",
+      "sublabel": "페이지 · /api/* 라우팅",
+      "tag": "400 / 502 → {error}",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/AppServlet.java",
+          "line": 22,
+          "end_line": 33,
+          "label": "클래스 주석: 주소와 설정"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/AppServlet.java",
+          "line": 55,
+          "end_line": 81,
+          "label": "init(): 객체 생성과 API 등록"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/AppServlet.java",
+          "line": 89,
+          "end_line": 127,
+          "label": "doGet(): 응답과 오류 코드"
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "날짜별 ETF 코드",
+      "pos": [
+        380,
+        50
+      ],
+      "size": [
+        180,
+        60
+      ]
+    },
+    {
+      "id": "heatmap",
+      "type": "backend",
+      "label": "Heatmap",
+      "sublabel": "히트맵 · 분기 · ETF · 보유",
+      "tag": "캐시 60초 · 10분",
+      "pos": [
+        380,
+        200
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java",
+          "line": 27,
+          "end_line": 38,
+          "label": "클래스 주석과 ponytail: 표시"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java",
+          "line": 196,
+          "end_line": 214,
+          "label": "GET /api/heatmap 주석"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java",
+          "line": 497,
+          "end_line": 514,
+          "label": "GET /api/holdings 주석"
+        }
+      ]
+    },
+    {
+      "id": "dividends",
+      "type": "backend",
+      "label": "Dividends",
+      "sublabel": "SWQA2301 배당 분류",
+      "pos": [
+        380,
+        410
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Dividends.java",
+          "line": 16,
+          "end_line": 19,
+          "label": "클래스 주석"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Dividends.java",
+          "line": 35,
+          "end_line": 50,
+          "label": "GET /api/dividends 주석"
+        }
+      ]
+    },
+    {
+      "id": "values",
+      "type": "backend",
+      "label": "Values",
+      "sublabel": "num · lng · parallel",
+      "pos": [
+        380,
+        550
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Values.java",
+          "line": 11,
+          "end_line": 11,
+          "label": "클래스 주석: Python 대응"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Values.java",
+          "line": 57,
+          "end_line": 57,
+          "label": "parallel() 예외 주의"
+        }
+      ]
+    },
+    {
+      "id": "exception",
+      "type": "security",
+      "label": "KBApiException",
+      "sublabel": "trCode · code",
+      "pos": [
+        690,
+        490
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBApiException.java",
+          "line": 3,
+          "end_line": 3,
+          "label": "클래스 주석"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "backend",
+      "label": "KBClient",
+      "sublabel": "토큰 · TR 호출 · 값 정리",
+      "tag": "5xx 3회 재시도",
+      "pos": [
+        690,
+        300
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 26,
+          "end_line": 32,
+          "label": "클래스 주석: 4가지 동작"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 119,
+          "end_line": 144,
+          "label": "call() · callPages() 주석"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 219,
+          "end_line": 223,
+          "label": "문자열로 남기는 필드 규칙"
+        }
+      ]
+    },
+    {
+      "id": "env",
+      "type": "security",
+      "label": ".env",
+      "sublabel": "appKey / appSecret",
+      "pos": [
+        990,
+        490
+      ],
+      "size": [
+        180,
+        60
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 56,
+          "end_line": 70,
+          "label": "fromEnv(): 환경변수 우선"
+        }
+      ]
+    },
+    {
+      "id": "kbapi",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "developer.kbsec.com:32484",
+      "pos": [
+        990,
+        300
+      ],
+      "size": [
+        200,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Tomcat 10.1 · kb-openapi.war",
+      "wraps": [
+        "webxml",
+        "servlet"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "공통 코어 · Spring 버전도 같은 소스 사용",
+      "wraps": [
+        "heatmap",
+        "dividends",
+        "values",
+        "client",
+        "exception"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-servlet",
+      "from": "browser",
+      "to": "servlet",
+      "label": "GET / · /api/*",
+      "variant": "emphasis",
+      "labelAt": [
+        125,
+        217
+      ]
+    },
+    {
+      "id": "webxml-servlet",
+      "from": "webxml",
+      "to": "servlet",
+      "label": "/* 매핑",
+      "variant": "dashed"
+    },
+    {
+      "id": "servlet-heatmap",
+      "from": "servlet",
+      "to": "heatmap",
+      "label": "heatmap · quarters · holdings"
+    },
+    {
+      "id": "servlet-dividends",
+      "from": "servlet",
+      "to": "dividends",
+      "label": "dividends"
+    },
+    {
+      "id": "heatmap-snapshot",
+      "from": "heatmap",
+      "to": "snapshot",
+      "label": "신규 상장 비교",
+      "variant": "dashed",
+      "labelAt": [
+        470,
+        128
+      ]
+    },
+    {
+      "id": "heatmap-client",
+      "from": "heatmap",
+      "to": "client",
+      "label": "call()"
+    },
+    {
+      "id": "dividends-client",
+      "from": "dividends",
+      "to": "client",
+      "label": "callPages()"
+    },
+    {
+      "id": "dividends-values",
+      "from": "dividends",
+      "to": "values",
+      "label": "num · lng",
+      "labelAt": [
+        470,
+        512
+      ]
+    },
+    {
+      "id": "client-exception",
+      "from": "client",
+      "to": "exception",
+      "label": "processFlag ≠ A",
+      "labelAt": [
+        780,
+        427
+      ]
+    },
+    {
+      "id": "env-client",
+      "from": "env",
+      "to": "client",
+      "label": "fromEnv()",
+      "variant": "security"
+    },
+    {
+      "id": "client-kbapi",
+      "from": "client",
+      "to": "kbapi",
+      "label": "POST /api/v1/{tr}",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "클래스 주석 (/** */)",
+      "items": [
+        "무엇을 하는지 + 어느 Python 파일과 같은지",
+        "처리하는 주소나 쓰는 TR 코드를 목록으로",
+        "설정 위치와 우선순위(환경변수 > .env)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "메서드 주석",
+      "items": [
+        "API 메서드는 GET 주소로 시작 (GET /api/holdings)",
+        "단위를 밝힘: cap·value는 원 또는 달러",
+        "실패 시 동작: null 반환, 예외 종류"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "한 줄 주석 (//)",
+      "items": [
+        "코드만 봐선 모르는 이유 (KB 서버가 500을 연달아 줌)",
+        "ponytail: 알려진 한계와 고칠 곳 (US_STOCKS, ETF 분류)",
+        "동작을 바꾸면 해당 주석도 같이 고침"
+      ]
+    }
+  ]
+}

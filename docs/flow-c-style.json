@@ -1,0 +1,316 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "java-app 흐름도 (C 스타일)",
+    "output": "flow-c-style.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "진입·응답"
+        },
+        "backend": {
+          "label": "함수"
+        },
+        "database": {
+          "label": "캐시"
+        },
+        "external": {
+          "label": "HTTP"
+        },
+        "security": {
+          "label": "오류 (longjmp)"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "startup",
+        "label": "시작과 라우팅",
+        "focus": [
+          "main",
+          "init",
+          "doget",
+          "html",
+          "query"
+        ],
+        "note": "main()은 Tomcat입니다. app_init()이 한 번 돌고, 요청마다 app_do_get()이 PAGES/apis 테이블로 분기합니다."
+      },
+      {
+        "id": "kb-call",
+        "label": "KB 호출",
+        "focus": [
+          "query",
+          "fetch",
+          "call",
+          "post",
+          "parse",
+          "store",
+          "json"
+        ],
+        "note": "캐시가 없으면 종목마다 kbclient_call()을 8 스레드로 부르고, post() → parse_response() 결과를 store()에 저장합니다."
+      },
+      {
+        "id": "errors",
+        "label": "오류 처리",
+        "focus": [
+          "doget",
+          "post",
+          "parse",
+          "error"
+        ],
+        "note": "throw는 longjmp처럼 app_do_get()의 catch까지 올라갑니다. 업무 오류는 400, 네트워크 오류는 502입니다."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "app",
+      "label": "AppServlet.java (main.c)"
+    },
+    {
+      "id": "heatmap",
+      "label": "Heatmap.java (heatmap.c)"
+    },
+    {
+      "id": "client",
+      "label": "KBClient.java (kbclient.c)"
+    },
+    {
+      "id": "fail",
+      "label": "catch 블록",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "main",
+    "init",
+    "doget",
+    "query",
+    "fetch",
+    "call",
+    "post",
+    "parse",
+    "store",
+    "json"
+  ],
+  "nodes": [
+    {
+      "id": "main",
+      "lane": "app",
+      "col": 0,
+      "type": "frontend",
+      "label": "main()",
+      "sublabel": "Tomcat 시작",
+      "width": 150
+    },
+    {
+      "id": "init",
+      "lane": "app",
+      "col": 1,
+      "type": "backend",
+      "label": "app_init()",
+      "sublabel": ".env 읽기 · apis 등록",
+      "width": 150
+    },
+    {
+      "id": "doget",
+      "lane": "app",
+      "col": 2,
+      "type": "backend",
+      "label": "app_do_get(req)",
+      "sublabel": "path로 테이블 조회",
+      "tag": "요청마다",
+      "width": 150
+    },
+    {
+      "id": "html",
+      "lane": "app",
+      "col": 3,
+      "type": "frontend",
+      "label": "copy_stream()",
+      "sublabel": "home.html 등 전송",
+      "width": 150
+    },
+    {
+      "id": "json",
+      "lane": "app",
+      "col": 5,
+      "type": "frontend",
+      "label": "json_encode()",
+      "sublabel": "status 200 응답",
+      "width": 150
+    },
+    {
+      "id": "query",
+      "lane": "heatmap",
+      "col": 2,
+      "type": "database",
+      "label": "query_heatmap()",
+      "sublabel": "market 검사 · cached()",
+      "width": 150
+    },
+    {
+      "id": "fetch",
+      "lane": "heatmap",
+      "col": 3,
+      "type": "backend",
+      "label": "fetch_kr()",
+      "sublabel": "values_parallel(8)",
+      "width": 150
+    },
+    {
+      "id": "store",
+      "lane": "heatmap",
+      "col": 5,
+      "type": "database",
+      "label": "store(key, map)",
+      "sublabel": "캐시에 저장",
+      "width": 150
+    },
+    {
+      "id": "call",
+      "lane": "client",
+      "col": 3,
+      "type": "backend",
+      "label": "kbclient_call()",
+      "sublabel": "access_token() + body",
+      "width": 150
+    },
+    {
+      "id": "post",
+      "lane": "client",
+      "col": 4,
+      "type": "external",
+      "label": "post()",
+      "sublabel": "5xx면 sleep 후 재시도",
+      "tag": "최대 3회",
+      "width": 150
+    },
+    {
+      "id": "parse",
+      "lane": "client",
+      "col": 5,
+      "type": "backend",
+      "label": "parse_response()",
+      "sublabel": "processFlag · clean()",
+      "width": 150
+    },
+    {
+      "id": "error",
+      "lane": "fail",
+      "col": 4,
+      "type": "security",
+      "label": "resp 400 / 502",
+      "sublabel": "{\"error\": msg}",
+      "width": 150
+    }
+  ],
+  "edges": [
+    {
+      "id": "main-init",
+      "from": "main",
+      "to": "init",
+      "label": "1회"
+    },
+    {
+      "id": "init-doget",
+      "from": "init",
+      "to": "doget"
+    },
+    {
+      "id": "doget-html",
+      "from": "doget",
+      "to": "html",
+      "label": "PAGES[path]",
+      "role": "branch"
+    },
+    {
+      "id": "doget-query",
+      "from": "doget",
+      "to": "query",
+      "label": "apis[path]",
+      "variant": "emphasis"
+    },
+    {
+      "id": "query-json",
+      "from": "query",
+      "to": "json",
+      "label": "if (hit) return",
+      "role": "return",
+      "variant": "dashed"
+    },
+    {
+      "id": "query-fetch",
+      "from": "query",
+      "to": "fetch",
+      "label": "miss"
+    },
+    {
+      "id": "fetch-call",
+      "from": "fetch",
+      "to": "call",
+      "label": "종목마다"
+    },
+    {
+      "id": "call-post",
+      "from": "call",
+      "to": "post"
+    },
+    {
+      "id": "post-parse",
+      "from": "post",
+      "to": "parse",
+      "label": "200"
+    },
+    {
+      "id": "parse-store",
+      "from": "parse",
+      "to": "store",
+      "label": "return map"
+    },
+    {
+      "id": "store-json",
+      "from": "store",
+      "to": "json",
+      "variant": "emphasis"
+    },
+    {
+      "id": "post-error",
+      "from": "post",
+      "to": "error",
+      "label": "IOException",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "parse-error",
+      "from": "parse",
+      "to": "error",
+      "label": "flag != 'A'",
+      "role": "error",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "C로 읽는 법",
+      "items": [
+        "class = struct + 함수, new = malloc (free 없음)",
+        "Map<String,Object> = JSON 객체 (해시 테이블)",
+        "throw / catch = longjmp / setjmp"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "스레드와 락",
+      "items": [
+        "app_do_get()은 여러 스레드에서 동시에 호출",
+        "access_token()은 synchronized = mutex",
+        "캐시는 ConcurrentHashMap = 락 내장 해시"
+      ]
+    }
+  ]
+}

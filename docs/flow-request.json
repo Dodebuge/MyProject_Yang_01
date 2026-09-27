@@ -1,0 +1,318 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "요청 처리 순서도 · GET /api/heatmap",
+    "output": "flow-request.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "cache-hit",
+        "label": "캐시 적중",
+        "focus": [
+          "req",
+          "route",
+          "validate",
+          "cache",
+          "json"
+        ],
+        "note": "60초 안에 같은 market을 조회했다면 KB를 부르지 않고 저장된 결과를 바로 돌려줍니다."
+      },
+      {
+        "id": "cache-miss",
+        "label": "KB 조회",
+        "focus": [
+          "cache",
+          "token",
+          "fetch",
+          "call",
+          "store",
+          "json"
+        ],
+        "note": "토큰을 먼저 한 번 받고, 8개 스레드로 종목별 TR을 호출한 뒤 결과를 캐시에 저장합니다."
+      },
+      {
+        "id": "errors",
+        "label": "오류 처리",
+        "focus": [
+          "validate",
+          "call",
+          "e400",
+          "e502"
+        ],
+        "note": "잘못된 입력과 KBApiException은 400, 네트워크 오류는 502로 {error} JSON을 돌려줍니다."
+      }
+    ],
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "요청·응답"
+        },
+        "backend": {
+          "label": "처리 로직"
+        },
+        "database": {
+          "label": "캐시"
+        },
+        "security": {
+          "label": "토큰·오류"
+        },
+        "external": {
+          "label": "KB 호출"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "servlet",
+      "label": "AppServlet.doGet"
+    },
+    {
+      "id": "service",
+      "label": "Heatmap.queryHeatmap"
+    },
+    {
+      "id": "client",
+      "label": "KBClient"
+    },
+    {
+      "id": "error",
+      "label": "오류 응답",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "req",
+    "route",
+    "validate",
+    "cache",
+    "token",
+    "fetch",
+    "call",
+    "store",
+    "json"
+  ],
+  "nodes": [
+    {
+      "id": "req",
+      "lane": "servlet",
+      "col": 0,
+      "type": "frontend",
+      "label": "요청 수신",
+      "sublabel": "getPathInfo · no-store",
+      "width": 170
+    },
+    {
+      "id": "route",
+      "lane": "servlet",
+      "col": 1,
+      "type": "backend",
+      "label": "주소 판별",
+      "sublabel": "PAGES · apis Map",
+      "tag": "없으면 404",
+      "width": 170
+    },
+    {
+      "id": "html",
+      "lane": "servlet",
+      "col": 2,
+      "type": "frontend",
+      "label": "HTML 반환",
+      "sublabel": "home · heatmap · me",
+      "width": 170
+    },
+    {
+      "id": "json",
+      "lane": "servlet",
+      "col": 5,
+      "type": "frontend",
+      "label": "200 JSON",
+      "sublabel": "Gson.toJson",
+      "width": 170
+    },
+    {
+      "id": "validate",
+      "lane": "service",
+      "col": 1,
+      "type": "backend",
+      "label": "market 검사",
+      "sublabel": "kr 또는 us",
+      "width": 170
+    },
+    {
+      "id": "cache",
+      "lane": "service",
+      "col": 2,
+      "type": "database",
+      "label": "캐시 확인",
+      "sublabel": "60초 이내?",
+      "width": 170
+    },
+    {
+      "id": "fetch",
+      "lane": "service",
+      "col": 3,
+      "type": "backend",
+      "label": "종목 조회",
+      "sublabel": "fetchKr / fetchUs",
+      "tag": "8 스레드",
+      "width": 170
+    },
+    {
+      "id": "store",
+      "lane": "service",
+      "col": 4,
+      "type": "database",
+      "label": "캐시 저장",
+      "sublabel": "store(market)",
+      "width": 170
+    },
+    {
+      "id": "token",
+      "lane": "client",
+      "col": 2,
+      "type": "security",
+      "label": "accessToken()",
+      "sublabel": "만료 60초 전 재발급",
+      "width": 170
+    },
+    {
+      "id": "call",
+      "lane": "client",
+      "col": 3,
+      "type": "external",
+      "label": "call(TR)",
+      "sublabel": "IVS10920 · IVM10050",
+      "width": 170
+    },
+    {
+      "id": "e400",
+      "lane": "error",
+      "col": 0,
+      "type": "security",
+      "label": "400 {error}",
+      "sublabel": "입력 · KB 업무 오류",
+      "width": 170
+    },
+    {
+      "id": "e502",
+      "lane": "error",
+      "col": 4,
+      "type": "security",
+      "label": "502 {error}",
+      "sublabel": "네트워크 · HTTP 오류",
+      "width": 170
+    }
+  ],
+  "edges": [
+    {
+      "id": "req-route",
+      "from": "req",
+      "to": "route"
+    },
+    {
+      "id": "route-html",
+      "from": "route",
+      "to": "html",
+      "label": "화면 주소",
+      "role": "branch"
+    },
+    {
+      "id": "route-validate",
+      "from": "route",
+      "to": "validate",
+      "label": "/api/heatmap",
+      "variant": "emphasis"
+    },
+    {
+      "id": "validate-cache",
+      "from": "validate",
+      "to": "cache"
+    },
+    {
+      "id": "cache-json",
+      "from": "cache",
+      "to": "json",
+      "label": "적중",
+      "role": "return",
+      "variant": "dashed"
+    },
+    {
+      "id": "cache-token",
+      "from": "cache",
+      "to": "token",
+      "label": "없음·만료"
+    },
+    {
+      "id": "token-fetch",
+      "from": "token",
+      "to": "fetch",
+      "toSide": "left"
+    },
+    {
+      "id": "fetch-call",
+      "from": "fetch",
+      "to": "call",
+      "label": "종목마다",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "call-store",
+      "from": "call",
+      "to": "store",
+      "label": "dataBody"
+    },
+    {
+      "id": "store-json",
+      "from": "store",
+      "to": "json",
+      "variant": "emphasis"
+    },
+    {
+      "id": "validate-e400",
+      "from": "validate",
+      "to": "e400",
+      "label": "그 외 값",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "call-e502",
+      "from": "call",
+      "to": "e502",
+      "label": "IOException",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "call-e400",
+      "from": "call",
+      "to": "e400",
+      "label": "processFlag ≠ A",
+      "role": "error",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "다른 API도 같은 순서",
+      "items": [
+        "/api/quarters: 캐시 600초, 일봉 TR로 분기 평균",
+        "/api/holdings: 캐시 60초, 잔고 TR 실시간",
+        "/api/dividends: 캐시 없음, callPages로 전체 조회"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "한 종목 실패는 건너뜀",
+      "items": [
+        "fetch 안에서는 orNull()이 오류를 null로 바꿈",
+        "그래서 502는 순위 조회처럼 필수 호출이 실패할 때만",
+        "KBApiException은 doGet에서 400으로 응답"
+      ]
+    }
+  ]
+}

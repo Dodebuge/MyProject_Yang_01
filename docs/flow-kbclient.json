@@ -1,0 +1,298 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "KBClient.call() 순서도",
+    "output": "flow-kbclient.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "token",
+        "label": "토큰",
+        "focus": [
+          "start",
+          "tokcheck",
+          "issue",
+          "post"
+        ],
+        "note": "토큰이 없거나 만료 60초 전이면 /oauth2/token으로 새로 받습니다. synchronized라서 동시에 불러도 한 번만 발급합니다."
+      },
+      {
+        "id": "retry",
+        "label": "5xx 재시도",
+        "focus": [
+          "post",
+          "status",
+          "wait",
+          "httperr"
+        ],
+        "note": "5xx면 0.5초, 1초, 2초 쉬고 다시 보냅니다. 세 번 재시도해도 실패하거나 4xx면 IOException입니다."
+      },
+      {
+        "id": "parse",
+        "label": "응답 검사",
+        "focus": [
+          "status",
+          "flag",
+          "clean",
+          "done",
+          "apierr"
+        ],
+        "note": "HTTP 200이어도 processFlag가 A가 아니면 KBApiException입니다. 정상이면 고정길이 값을 숫자로 정리합니다."
+      }
+    ],
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "호출·반환"
+        },
+        "security": {
+          "label": "토큰·예외"
+        },
+        "external": {
+          "label": "HTTP 요청"
+        },
+        "backend": {
+          "label": "검사·정리"
+        },
+        "messagebus": {
+          "label": "재시도"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "call",
+      "label": "call() · accessToken()"
+    },
+    {
+      "id": "http",
+      "label": "post()"
+    },
+    {
+      "id": "parse",
+      "label": "parseResponse()"
+    },
+    {
+      "id": "fail",
+      "label": "예외",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "start",
+    "tokcheck",
+    "post",
+    "status",
+    "flag",
+    "clean",
+    "done"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "lane": "call",
+      "col": 0,
+      "type": "frontend",
+      "label": "call(trCode, body)",
+      "sublabel": "dataHeader + dataBody",
+      "width": 150
+    },
+    {
+      "id": "done",
+      "lane": "call",
+      "col": 5,
+      "type": "frontend",
+      "label": "Map 반환",
+      "sublabel": "정리된 dataBody",
+      "width": 150
+    },
+    {
+      "id": "tokcheck",
+      "lane": "call",
+      "col": 1,
+      "type": "security",
+      "label": "토큰 유효?",
+      "sublabel": "만료 60초 전까지",
+      "width": 150
+    },
+    {
+      "id": "issue",
+      "lane": "call",
+      "col": 2,
+      "type": "security",
+      "label": "토큰 발급",
+      "sublabel": "POST /oauth2/token",
+      "width": 150
+    },
+    {
+      "id": "post",
+      "lane": "http",
+      "col": 2,
+      "type": "external",
+      "label": "POST /api/v1/{tr}",
+      "sublabel": "appKey · bearer 토큰",
+      "width": 150
+    },
+    {
+      "id": "status",
+      "lane": "http",
+      "col": 3,
+      "type": "backend",
+      "label": "HTTP 상태",
+      "sublabel": "timeout 10초",
+      "width": 150
+    },
+    {
+      "id": "wait",
+      "lane": "http",
+      "col": 4,
+      "type": "messagebus",
+      "label": "대기 후 재시도",
+      "sublabel": "0.5 · 1 · 2초",
+      "tag": "최대 3회",
+      "width": 150
+    },
+    {
+      "id": "flag",
+      "lane": "parse",
+      "col": 4,
+      "type": "backend",
+      "label": "processFlag",
+      "sublabel": "== \"A\" ?",
+      "width": 150
+    },
+    {
+      "id": "clean",
+      "lane": "parse",
+      "col": 5,
+      "type": "backend",
+      "label": "clean()",
+      "sublabel": "\"  368500\" → 368500",
+      "width": 150
+    },
+    {
+      "id": "httperr",
+      "lane": "fail",
+      "col": 3,
+      "type": "security",
+      "label": "IOException",
+      "sublabel": "4xx · 재시도 소진",
+      "width": 150
+    },
+    {
+      "id": "apierr",
+      "lane": "fail",
+      "col": 4,
+      "type": "security",
+      "label": "KBApiException",
+      "sublabel": "trCode · code · msg",
+      "width": 150
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-tokcheck",
+      "from": "start",
+      "to": "tokcheck"
+    },
+    {
+      "id": "tokcheck-post",
+      "from": "tokcheck",
+      "to": "post",
+      "label": "유효",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tokcheck-issue",
+      "from": "tokcheck",
+      "to": "issue",
+      "label": "없음·만료",
+      "role": "branch"
+    },
+    {
+      "id": "issue-post",
+      "from": "issue",
+      "to": "post",
+      "role": "branch"
+    },
+    {
+      "id": "post-status",
+      "from": "post",
+      "to": "status"
+    },
+    {
+      "id": "status-wait",
+      "from": "status",
+      "to": "wait",
+      "label": "5xx",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "wait-post",
+      "from": "wait",
+      "to": "post",
+      "label": "다시 보냄",
+      "role": "return",
+      "variant": "dashed"
+    },
+    {
+      "id": "status-flag",
+      "from": "status",
+      "to": "flag",
+      "label": "200",
+      "variant": "emphasis"
+    },
+    {
+      "id": "status-httperr",
+      "from": "status",
+      "to": "httperr",
+      "label": "4xx · 3회 초과",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "flag-clean",
+      "from": "flag",
+      "to": "clean",
+      "label": "A",
+      "variant": "emphasis"
+    },
+    {
+      "id": "flag-apierr",
+      "from": "flag",
+      "to": "apierr",
+      "label": "A 아님",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "clean-done",
+      "from": "clean",
+      "to": "done",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "clean() 규칙",
+      "items": [
+        "\"0000000039024.00\" → 39024.0",
+        "_cd · _dt · _no · _tm 등은 문자열 유지",
+        "dt · tm · is_* 도 문자열 유지"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "callPages() = call() 반복",
+      "items": [
+        "응답의 nxt_key를 다음 요청에 넣어 반복",
+        "nxt_key가 비거나 이미 본 키면 종료",
+        "maxPages를 넘으면 IOException"
+      ]
+    }
+  ]
+}
