@@ -68,7 +68,10 @@ button:disabled { opacity: .5; cursor: progress; }
 .tiles { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 12px; }
 @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .tiles .hero { grid-column: span 2; } }
 .tiles.four { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 900px) { .tiles.four { grid-template-columns: repeat(2, 1fr); } }
+.tiles.five { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 900px) { .tiles.four, .tiles.five { grid-template-columns: repeat(2, 1fr); } }
+#frac-plan { position: relative; }
+#frac-plan [data-diff] { cursor: help; }
 .tile .label { color: var(--ink-2); font-size: 13px; }
 .tile .value { font-size: 24px; font-weight: 650; margin-top: 2px; }
 .tile.hero .value { font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; }
@@ -246,6 +249,7 @@ async function load() {
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     state.data = json;
+    if (json.year === THIS_YEAR) recentDiv = latestDividendMonth(json.entries);
     $("#status").textContent = `${json.start.slice(0, 4)}.${json.start.slice(4, 6)}.${json.start.slice(6)} – ${json.end.slice(0, 4)}.${json.end.slice(4, 6)}.${json.end.slice(6)} · 조회 ${json.fetchedAt}`;
     render();
   } catch (err) {
@@ -254,6 +258,7 @@ async function load() {
   } finally {
     state.loading = false;
     $("#fetch").disabled = $("#year").disabled = false;
+    renderPlan(planFs);  // 정기 구매 계획의 '최근 월 배당' 갱신
   }
 }
 
@@ -563,8 +568,16 @@ const FREQ = { day: { label: "매일", perMonth: 252 / 12 }, week: { label: "매
 const plan = (() => { try { return JSON.parse(localStorage.getItem(PLAN_KEY)) || {}; } catch { return {}; } })();
 const savePlan = () => { try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); } catch {} };
 const perMonth = p => p && FREQ[p.freq] && p.amount > 0 ? p.amount * FREQ[p.freq].perMonth : 0;
+let planFs = [];        // 마지막으로 그린 소수점 보유 종목 (배당 조회가 끝나면 다시 그릴 때 사용)
+let recentDiv = null;   // 올해 배당이 들어온 마지막 달 {m, gross, tax, net, count}
+
+function latestDividendMonth(entries) {
+  const paid = aggregate(entries).months.filter(b => b.count);
+  return paid.length ? paid[paid.length - 1] : null;
+}
 
 function renderPlan(fs) {
+  planFs = fs;
   const host = $("#frac-plan");
   if (!host) return;
   const names = new Map(fs.map(s => [s.code, s.name]));
@@ -577,8 +590,11 @@ function renderPlan(fs) {
       <div><h2>정기 구매 계획</h2><p class="sub">종목마다 주기(매일·매주·매월)와 1회 금액을 정하면 월 비용을 계산합니다 · 실제 주문은 하지 않습니다</p></div>
       <div class="controls"><input id="plan-code" class="sm" placeholder="티커 (예: MSFT)" size="12" aria-label="추가할 종목 티커"><button id="plan-add" class="sm">종목 추가</button></div>
     </div>
-    <div class="tiles four">
-      <div class="tile"><div class="label">월 예상 비용</div><div class="value">${fmt(total)}<span class="unit">원</span></div><div class="meta">평균 추정</div></div>
+    <div class="tiles five">
+      <div class="tile" data-diff><div class="label">최근 월 배당${recentDiv ? ` (${recentDiv.m}월 실수령)` : ""}</div>
+        <div class="value">${recentDiv ? `${fmt(recentDiv.net)}<span class="unit">원</span>` : state.loading ? `<span class="unit">조회 중</span>` : "—"}</div>
+        <div class="meta">${recentDiv ? "올리면 월 비용과 비교" : state.loading ? "배당 내역을 불러오는 중" : "올해 받은 배당 없음"}</div></div>
+      <div class="tile" data-diff><div class="label">월 예상 비용</div><div class="value">${fmt(total)}<span class="unit">원</span></div><div class="meta">평균 추정</div></div>
       <div class="tile"><div class="label">연 예상 비용</div><div class="value">${compact(total * 12)}<span class="unit">원</span></div><div class="meta">월 비용 × 12</div></div>
       <div class="tile"><div class="label">설정한 종목</div><div class="value">${ps.filter(p => perMonth(p)).length}<span class="unit">종목</span></div>
         <div class="meta">매일 ${count("day")} · 매주 ${count("week")} · 매월 ${count("month")}</div></div>
@@ -596,7 +612,31 @@ function renderPlan(fs) {
         <td>${names.has(code) && !fs.some(s => s.code === code) ? `<button class="sm plan-del" aria-label="${esc(name)} 삭제">삭제</button>` : ""}</td></tr>`; }).join("")}</tbody>
       <tfoot><tr><td class="l">합계</td><td></td><td></td><td class="hide-sm"></td><td>${fmt(total)}원</td><td></td></tr></tfoot>
     </table></div>` : `<div class="empty">소수점 보유 종목이 없습니다. 티커를 입력해 종목을 추가하세요.</div>`}
-    <div class="note">월 횟수는 평균입니다: 매일 = 미국 거래일 기준 월 21회, 매주 = 월 4.3회, 매월 = 1회. 설정은 이 브라우저에만 저장되어 다른 기기에서는 보이지 않습니다.</div>`;
+    <div class="note">월 횟수는 평균입니다: 매일 = 미국 거래일 기준 월 21회, 매주 = 월 4.3회, 매월 = 1회. 설정은 이 브라우저에만 저장되어 다른 기기에서는 보이지 않습니다.
+      최근 월 배당은 올해 배당이 들어온 마지막 달의 실수령액(세후, 아래 배당 내역과 같은 값)입니다.</div>
+    <div class="tip"></div>`;
+
+  // 배당·월 비용 타일에 마우스를 올리면: 최근 월 배당으로 정기 구매할 때 남는 금액 또는 부족 금액
+  const tip = $(".tip", host);
+  const row = (k, v) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
+  host.querySelectorAll("[data-diff]").forEach(el => {
+    el.onpointermove = e => {
+      if (!recentDiv) tip.innerHTML = `<b>최근 월 배당이 없습니다</b>${state.loading ? "배당 내역을 불러오는 중입니다." : "올해 받은 배당이 없어 비교할 수 없습니다."}`;
+      else if (!total) tip.innerHTML = `<b>${recentDiv.m}월 배당 ${fmt(recentDiv.net)}원</b>정기 구매를 설정하면 남는·부족 금액을 계산합니다.`;
+      else {
+        const diff = recentDiv.net - total;
+        tip.innerHTML = `<b>${recentDiv.m}월 배당으로 정기 구매하면</b>` +
+          row("배당 실수령", fmt(recentDiv.net) + "원") + row("월 예상 비용", fmt(total) + "원") +
+          row(diff >= 0 ? "남는 금액" : "부족 금액", `<b style="display:inline;margin:0" class="${diff < 0 ? "neg" : ""}">${fmt(Math.abs(diff))}원</b>`) +
+          row("배당 충당률", fmt(recentDiv.net / total * 100, 0) + "%");
+      }
+      tip.style.opacity = 1;
+      const r = host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      tip.style.left = Math.max(0, Math.min(x + 14, host.clientWidth - tip.offsetWidth)) + "px";
+      tip.style.top = Math.max(0, y - tip.offsetHeight - 12) + "px";
+    };
+    el.onpointerleave = () => tip.style.opacity = 0;
+  });
 
   const update = tr => {
     const code = tr.dataset.code, freq = $(".plan-freq", tr).value, amount = Math.max(0, Math.round(+$(".plan-amount", tr).value || 0));
