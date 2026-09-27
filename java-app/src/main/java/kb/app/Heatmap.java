@@ -565,6 +565,9 @@ final class Heatmap {
                 n.put("sector", US_SECTOR.getOrDefault(c, "미분류"));
                 n.put("cap", 0L);
                 n.put("cost_usd", 0.0);
+                n.put("frac_qty", 0.0);
+                n.put("frac_cost_usd", 0.0);
+                n.put("frac_krw", 0L);
                 return n;
             });
             double qty = Values.num(r.get("frgn_hld_q_p6"));
@@ -573,6 +576,11 @@ final class Heatmap {
             h.put("cap", fx != null && fx != 0 ? fx : (Long) h.get("cap") + Values.lng(r.get("krw_val_amt")));
             h.put("cost_usd", (Double) h.get("cost_usd") + qty * Values.num(r.get("byng_avr_prc_p4")));
             h.put("price", Values.num(r.get("now_prc_p4")));
+            if ("1".equals(Values.str(r.get("dcml_dl_f")))) {  // 소수점 거래 행 ("0"은 온주 행)
+                h.put("frac_qty", (Double) h.get("frac_qty") + qty);
+                h.put("frac_cost_usd", (Double) h.get("frac_cost_usd") + qty * Values.num(r.get("byng_avr_prc_p4")));
+                h.put("frac_krw", (Long) h.get("frac_krw") + Values.lng(r.get("krw_val_amt")));
+            }
         }
 
         List<Map<String, Object>> stocks = Values.parallel(new ArrayList<>(holdings.values()), 8, h -> {
@@ -594,6 +602,7 @@ final class Heatmap {
                 double qty = (Double) h.get("qty");
                 h.put("pl", cost != 0 ? (Object) ((qty * (Double) h.get("price") / cost - 1) * 100) : null);
                 h.put("qty", Math.round(qty * 1e6) / 1e6);
+                h.put("frac_qty", Math.round((Double) h.get("frac_qty") * 1e6) / 1e6);
             }
             h.put("change", q == null ? 0.0 : Values.num(q.get("up_dwn_r_p2")));
             h.put("value", h.get("cap"));  // 크기 기준을 평가금액 하나로 통일

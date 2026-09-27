@@ -47,11 +47,14 @@ header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; j
 h1 { font-size: 20px; margin: 0; font-weight: 650; }
 .status { color: var(--muted); font-size: 13px; min-height: 20px; }
 .controls { display: flex; gap: 8px; align-items: center; }
-select, button {
+select, button, input {
   font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--ink); cursor: pointer;
 }
 button.primary { font-weight: 600; }
+input { cursor: text; }
+input.amount { width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
+select.sm, input.sm, button.sm { padding: 3px 8px; font-size: 13px; }
 button:disabled { opacity: .5; cursor: progress; }
 
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
@@ -64,6 +67,8 @@ button:disabled { opacity: .5; cursor: progress; }
 
 .tiles { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 12px; }
 @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .tiles .hero { grid-column: span 2; } }
+.tiles.four { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { .tiles.four { grid-template-columns: repeat(2, 1fr); } }
 .tile .label { color: var(--ink-2); font-size: 13px; }
 .tile .value { font-size: 24px; font-weight: 650; margin-top: 2px; }
 .tile.hero .value { font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; }
@@ -511,8 +516,109 @@ function renderHoldings() {
       <tfoot><tr><td class="l">합계</td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td><td>${fmt(total)}</td><td>100%</td>
         <td>${pctCell(weightedBy(ss, s => s.change))}</td><td>${pctCell(weightedBy(ss, s => s.pl))}</td></tr></tfoot>
     </table></div>
-    <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>`;
+    <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>
+    ${fractionalSection(ss)}`;
+  renderPlan(ss.filter(s => s.frac_qty > 0).sort((a, b) => b.frac_krw - a.frac_krw));
   drawHoldings([...ss, { name: "현금", code: "", cash: true, cap: cash }], total, max);
+}
+
+// 소수점 구매 현황: 해외 잔고(SPQM2226)에서 소수점 거래 행(dcml_dl_f = "1")만 모은 값
+function fractionalSection(ss) {
+  const fs = ss.filter(s => s.frac_qty > 0).sort((a, b) => b.frac_krw - a.frac_krw);
+  const head = `<div class="card-head" style="margin-top:28px"><div><h2>소수점 구매 현황</h2>
+    <p class="sub">해외주식 소수점 거래로 산 수량만 · 같은 종목의 온주 보유분은 위 표에 합산돼 있습니다</p></div></div>`;
+  if (!fs.length) return head + `<div class="empty">소수점으로 보유한 종목이 없습니다.</div><div id="frac-plan"></div>`;
+
+  const usd = s => s.frac_qty * s.price;
+  const plOf = (value, cost) => cost ? (value / cost - 1) * 100 : null;
+  const cost = sum(fs, s => s.frac_cost_usd), value = sum(fs, usd), krw = sum(fs, s => s.frac_krw);
+  return head + `
+    <div class="tiles four">
+      <div class="tile"><div class="label">소수점 보유 종목</div><div class="value">${fs.length}<span class="unit">종목</span></div>
+        <div class="meta">${fs.filter(s => s.frac_qty < s.qty).length}종목은 온주도 함께 보유</div></div>
+      <div class="tile"><div class="label">매입금액</div><div class="value">$${fmt(cost, 2)}</div><div class="meta">수량 × 평균 매입가</div></div>
+      <div class="tile"><div class="label">평가금액</div><div class="value">$${fmt(value, 2)}</div><div class="meta">≈ ${fmt(krw)}원</div></div>
+      <div class="tile"><div class="label">수익률</div><div class="value">${pctCell(plOf(value, cost))}</div><div class="meta">달러 기준</div></div>
+    </div>
+    <div class="scroll" style="margin-top:12px"><table class="list">
+      <thead><tr><th class="l">종목</th><th>소수점 수량</th><th class="hide-sm">보유 중 비율</th><th class="hide-sm">평균 매입가</th><th class="hide-sm">현재가</th>
+        <th class="hide-sm">매입금액</th><th>평가금액</th><th class="hide-sm">원화 평가</th><th>수익률</th></tr></thead>
+      <tbody>${fs.map(s => `<tr>
+        <td class="l nm" title="${esc(s.code)}">${esc(s.name)} <span class="tag">${esc(s.code)}</span></td>
+        <td>${fmt(s.frac_qty, 6)}</td><td class="hide-sm">${fmt(s.frac_qty / s.qty * 100, 1)}%</td>
+        <td class="hide-sm">$${fmt(s.frac_cost_usd / s.frac_qty, 2)}</td><td class="hide-sm">${priceText(s)}</td>
+        <td class="hide-sm">$${fmt(s.frac_cost_usd, 2)}</td><td>$${fmt(usd(s), 2)}</td><td class="hide-sm">${fmt(s.frac_krw)}원</td>
+        <td>${pctCell(plOf(usd(s), s.frac_cost_usd))}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td class="l">합계</td><td></td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td>
+        <td class="hide-sm">$${fmt(cost, 2)}</td><td>$${fmt(value, 2)}</td><td class="hide-sm">${fmt(krw)}원</td><td>${pctCell(plOf(value, cost))}</td></tr></tfoot>
+    </table></div>
+    <div id="frac-plan"></div>`;
+}
+
+// ---------------------------------------------------------------- 소수점 정기 구매 계획
+// 계획만 세우고 월 비용을 계산합니다. 실제 주문은 넣지 않으며, 설정은 이 브라우저(localStorage)에만 저장됩니다.
+const PLAN_KEY = "frac-plan";
+// ponytail: 월 비용은 평균 추정 (미국 거래일 연 252일, 연 52주). 휴장일과 달마다 다른 일수는 반영하지 않습니다.
+const FREQ = { day: { label: "매일", perMonth: 252 / 12 }, week: { label: "매주", perMonth: 52 / 12 }, month: { label: "매월", perMonth: 1 } };
+const plan = (() => { try { return JSON.parse(localStorage.getItem(PLAN_KEY)) || {}; } catch { return {}; } })();
+const savePlan = () => { try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); } catch {} };
+const perMonth = p => p && FREQ[p.freq] && p.amount > 0 ? p.amount * FREQ[p.freq].perMonth : 0;
+
+function renderPlan(fs) {
+  const host = $("#frac-plan");
+  if (!host) return;
+  const names = new Map(fs.map(s => [s.code, s.name]));
+  for (const [code, p] of Object.entries(plan)) if (!names.has(code)) names.set(code, p.name || code);
+  const ps = Object.values(plan), total = sum(ps, perMonth);
+  const count = f => ps.filter(p => p.freq === f && p.amount > 0).length;
+
+  host.innerHTML = `
+    <div class="card-head" style="margin-top:28px">
+      <div><h2>정기 구매 계획</h2><p class="sub">종목마다 주기(매일·매주·매월)와 1회 금액을 정하면 월 비용을 계산합니다 · 실제 주문은 하지 않습니다</p></div>
+      <div class="controls"><input id="plan-code" class="sm" placeholder="티커 (예: MSFT)" size="12" aria-label="추가할 종목 티커"><button id="plan-add" class="sm">종목 추가</button></div>
+    </div>
+    <div class="tiles four">
+      <div class="tile"><div class="label">월 예상 비용</div><div class="value">${fmt(total)}<span class="unit">원</span></div><div class="meta">평균 추정</div></div>
+      <div class="tile"><div class="label">연 예상 비용</div><div class="value">${compact(total * 12)}<span class="unit">원</span></div><div class="meta">월 비용 × 12</div></div>
+      <div class="tile"><div class="label">설정한 종목</div><div class="value">${ps.filter(p => perMonth(p)).length}<span class="unit">종목</span></div>
+        <div class="meta">매일 ${count("day")} · 매주 ${count("week")} · 매월 ${count("month")}</div></div>
+      <div class="tile"><div class="label">1회 합계</div><div class="value">${compact(sum(ps.filter(perMonth), p => p.amount))}<span class="unit">원</span></div><div class="meta">모든 종목이 같은 날 사면</div></div>
+    </div>
+    ${names.size ? `<div class="scroll" style="margin-top:12px"><table class="list">
+      <thead><tr><th class="l">종목</th><th class="l">주기</th><th>1회 금액 (원)</th><th class="hide-sm">월 횟수</th><th>월 비용</th><th></th></tr></thead>
+      <tbody>${[...names].map(([code, name]) => { const p = plan[code] || {}; return `<tr data-code="${esc(code)}">
+        <td class="l nm" title="${esc(code)}">${esc(name)} <span class="tag">${esc(code)}</span></td>
+        <td class="l"><select class="sm plan-freq" aria-label="${esc(name)} 주기"><option value="">설정 안 함</option>
+          ${Object.entries(FREQ).map(([k, f]) => `<option value="${k}" ${p.freq === k ? "selected" : ""}>${f.label}</option>`).join("")}</select></td>
+        <td><input class="sm amount plan-amount" type="number" min="0" step="1000" inputmode="numeric" value="${p.amount || ""}" placeholder="0" aria-label="${esc(name)} 1회 금액"></td>
+        <td class="hide-sm">${FREQ[p.freq] ? fmt(FREQ[p.freq].perMonth, 1) + "회" : ""}</td>
+        <td>${perMonth(p) ? fmt(perMonth(p)) + "원" : "—"}</td>
+        <td>${names.has(code) && !fs.some(s => s.code === code) ? `<button class="sm plan-del" aria-label="${esc(name)} 삭제">삭제</button>` : ""}</td></tr>`; }).join("")}</tbody>
+      <tfoot><tr><td class="l">합계</td><td></td><td></td><td class="hide-sm"></td><td>${fmt(total)}원</td><td></td></tr></tfoot>
+    </table></div>` : `<div class="empty">소수점 보유 종목이 없습니다. 티커를 입력해 종목을 추가하세요.</div>`}
+    <div class="note">월 횟수는 평균입니다: 매일 = 미국 거래일 기준 월 21회, 매주 = 월 4.3회, 매월 = 1회. 설정은 이 브라우저에만 저장되어 다른 기기에서는 보이지 않습니다.</div>`;
+
+  const update = tr => {
+    const code = tr.dataset.code, freq = $(".plan-freq", tr).value, amount = Math.max(0, Math.round(+$(".plan-amount", tr).value || 0));
+    const held = fs.some(s => s.code === code);
+    if (!freq && !amount && held) delete plan[code];  // 보유 종목은 비우면 설정 삭제 (행은 계속 보임)
+    else plan[code] = { name: names.get(code), freq, amount };
+    savePlan(); renderPlan(fs);
+  };
+  host.querySelectorAll("tr[data-code]").forEach(tr => {
+    $(".plan-freq", tr).onchange = () => update(tr);
+    $(".plan-amount", tr).onchange = () => update(tr);
+    const del = $(".plan-del", tr);
+    if (del) del.onclick = () => { delete plan[tr.dataset.code]; savePlan(); renderPlan(fs); };
+  });
+  const add = () => {
+    const code = $("#plan-code").value.trim().toUpperCase();
+    if (!/^[A-Z0-9.]{1,12}$/.test(code)) { $("#plan-code").focus(); return; }
+    if (!names.has(code)) { plan[code] = { name: code, freq: "", amount: 0 }; savePlan(); }
+    renderPlan(fs);
+  };
+  $("#plan-add").onclick = add;
+  $("#plan-code").onkeydown = e => { if (e.key === "Enter") add(); };
 }
 
 function drawHoldings(items, total, max) {

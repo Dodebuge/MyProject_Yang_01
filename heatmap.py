@@ -259,12 +259,17 @@ def fetch_my(client: KBClient) -> dict:
         h = holdings.setdefault(code, {
             "code": code, "name": r["is_nm"], "market": "미국", "exchange": r.get("mkt_clsf"), "qty": 0.0,
             "etf": False, "sector": US_SECTOR.get(code, "미분류"), "cap": 0, "cost_usd": 0.0,
+            "frac_qty": 0.0, "frac_cost_usd": 0.0, "frac_krw": 0,
         })
         qty = float(r.get("frgn_hld_q_p6") or 0)
         h["qty"] += qty
         h["cap"] = fx_value.get(code) or h["cap"] + int(r.get("krw_val_amt") or 0)
         h["cost_usd"] += qty * float(r.get("byng_avr_prc_p4") or 0)
         h["price"] = float(r.get("now_prc_p4") or 0)
+        if r.get("dcml_dl_f") == "1":  # 소수점 거래 행 ("0"은 온주 행)
+            h["frac_qty"] += qty
+            h["frac_cost_usd"] += qty * float(r.get("byng_avr_prc_p4") or 0)
+            h["frac_krw"] += int(r.get("krw_val_amt") or 0)
 
     def quote(h: dict) -> dict:
         try:
@@ -279,6 +284,7 @@ def fetch_my(client: KBClient) -> dict:
                 cost = h.pop("cost_usd")
                 h["pl"] = (h["qty"] * h["price"] / cost - 1) * 100 if cost else None
                 h["qty"] = round(h["qty"], 6)
+                h["frac_qty"] = round(h["frac_qty"], 6)
             h["change"] = float(q.get("up_dwn_r_p2") or 0)
         except KBApiError:
             h["change"] = 0.0
