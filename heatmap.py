@@ -295,12 +295,13 @@ def fetch_my(client: KBClient) -> dict:
     return {"stocks": [h for h in _parallel(quote, list(holdings.values())) if h["cap"] > 0], "cash": cash}
 
 
-def query_holdings(client: KBClient) -> dict:
-    """내 보유 종목 (내정보 화면). 하루 한 번만 KB에서 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다."""
+def query_holdings(client: KBClient, refresh: bool = False) -> dict:
+    """내 보유 종목 (내정보 화면). 하루 한 번만 KB에서 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+    refresh=True면 지금 다시 조회해 오늘 값을 덮어씁니다."""
     def fetch() -> dict:
         client.access_token
         return {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **fetch_my(client)}
-    return daily("holdings", fetch)
+    return daily("holdings", fetch, refresh)
 
 
 # ---------------------------------------------------------------------- 분기별 거래대금

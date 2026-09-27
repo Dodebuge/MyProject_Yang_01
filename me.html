@@ -162,6 +162,7 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
       <h1>내정보</h1>
     </div>
     <div class="controls">
+      <button id="kb-refresh" title="오늘 저장된 값을 건너뛰고 KB증권에서 보유 종목과 배당 내역을 지금 다시 조회해 저장합니다">KB에서 다시 조회</button>
       <button id="theme" aria-label="테마 전환">◐</button>
     </div>
   </header>
@@ -238,14 +239,15 @@ function aggregate(entries) {
 }
 
 // ---------------------------------------------------------------- 조회
-async function load() {
+// refresh: true면 서버가 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (KB에서 다시 조회 버튼)
+async function load(refresh = false) {
   const year = +$("#year").value;
   state.loading = true; state.month = null;
   $("#fetch").disabled = $("#year").disabled = true;
   $("#status").textContent = "";
-  $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${year}년 거래내역을 조회하고 있습니다. 거래가 많으면 10~20초 걸립니다.</div>`;
+  $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB증권에서 다시 조회하고 있습니다. " : ""}${year}년 거래내역을 불러오고 있습니다. KB 조회는 거래가 많으면 10~20초 걸립니다.</div>`;
   try {
-    const res = await fetch(`api/dividends?year=${year}`, { cache: "no-store" });
+    const res = await fetch(`api/dividends?year=${year}${refresh ? "&refresh=1" : ""}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     state.data = json;
@@ -464,11 +466,11 @@ const priceText = s => s.market === "미국" ? "$" + fmt(+s.price, 2) : fmt(+s.p
 const qtyText = q => fmt(q, Number.isInteger(q) ? 0 : 4);
 const share = (n, total) => fmt(n / total * 100, 1) + "%";
 
-async function loadHoldings() {
+async function loadHoldings(refresh = false) {
   $("#h-fetch").disabled = true;
-  $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>잔고와 시세를 조회하고 있습니다.</div>`;
+  $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB증권에서 잔고와 시세를 다시 조회하고 있습니다." : "잔고와 시세를 불러오고 있습니다."}</div>`;
   try {
-    const res = await fetch("api/holdings", { cache: "no-store" });
+    const res = await fetch(`api/holdings${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
     const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
     hold.data = json;
@@ -710,8 +712,8 @@ function drawHoldings(items, total, max) {
 (() => {
   const sel = $("#year");
   for (let y = THIS_YEAR; y >= THIS_YEAR - 5; y--) sel.add(new Option(`${y}년`, y));
-  $("#fetch").onclick = load;
-  sel.onchange = load;
+  $("#fetch").onclick = () => load();
+  sel.onchange = () => load();
 
   const saved = (() => { try { return localStorage.getItem("div-theme"); } catch { return null; } })();
   if (saved) document.documentElement.dataset.theme = saved;
@@ -722,7 +724,12 @@ function drawHoldings(items, total, max) {
     try { localStorage.setItem("div-theme", next); } catch {}
   };
 
-  $("#h-fetch").onclick = loadHoldings;
+  $("#h-fetch").onclick = () => loadHoldings();
+  $("#kb-refresh").onclick = async () => {
+    const b = $("#kb-refresh");
+    b.disabled = true;
+    try { await Promise.all([loadHoldings(true), load(true)]); } finally { b.disabled = false; }
+  };
   try { const c = localStorage.getItem("hold-color"); if (c === "change" || c === "pl") hold.color = c; } catch {}
   const syncColor = () => document.querySelectorAll("#h-color button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === hold.color));
   document.querySelectorAll("#h-color button").forEach(b => b.onclick = () => {

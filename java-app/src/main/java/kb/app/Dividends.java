@@ -34,15 +34,18 @@ final class Dividends {
         this.store = store;
     }
 
-    /** GET /api/dividends?year= : 연도별로 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다. */
-    Map<String, Object> query(int year) throws IOException {
+    /**
+     * GET /api/dividends?year= : 연도별로 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+     * refresh(?refresh=1)면 지금 다시 조회해 오늘 값을 덮어씁니다.
+     */
+    Map<String, Object> query(int year, boolean refresh) throws IOException {
         LocalDate today = LocalDate.now();
         if (year < 2000 || year > today.getYear()) {
             throw new IllegalArgumentException("조회할 수 없는 연도입니다: " + year);
         }
         String start = year + "0101";
         String end = year == today.getYear() ? today.format(YMD) : year + "1231";
-        return store.daily("dividends:" + year, () -> {
+        return store.daily("dividends:" + year, refresh, () -> {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("year", year);
             payload.put("start", start);

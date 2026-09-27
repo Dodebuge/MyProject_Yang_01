@@ -496,9 +496,12 @@ final class Heatmap {
 
     // ------------------------------------------------------------------ 보유 종목
 
-    /** GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다. */
-    Map<String, Object> queryHoldings() throws IOException {
-        return store.daily("holdings", () -> {
+    /**
+     * GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+     * refresh(?refresh=1)면 지금 다시 조회해 오늘 값을 덮어씁니다.
+     */
+    Map<String, Object> queryHoldings(boolean refresh) throws IOException {
+        return store.daily("holdings", refresh, () -> {
             client.accessToken();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("fetchedAt", now());

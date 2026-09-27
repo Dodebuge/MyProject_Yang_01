@@ -20,6 +20,7 @@ API:
     GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today"}}  잔고 TR
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     내정보 API 두 개는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+    ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html"}
 
 
-def query_dividends(client: KBClient, year: int) -> dict:
+def query_dividends(client: KBClient, year: int, refresh: bool = False) -> dict:
     today = date.today()
     if not 2000 <= year <= today.year:
         raise ValueError(f"조회할 수 없는 연도입니다: {year}")
@@ -58,7 +59,12 @@ def query_dividends(client: KBClient, year: int) -> dict:
             "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "entries": [{**asdict(e), "month": e.month, "net": e.net} for e in entries],
         }
-    return daily(f"dividends:{year}", fetch)  # 연도별로 하루 한 번만 KB 조회 (kb.db)
+    return daily(f"dividends:{year}", fetch, refresh)  # 연도별로 하루 한 번만 KB 조회 (kb.db)
+
+
+def _refresh(q: dict) -> bool:
+    """?refresh=1 : 저장된 오늘 값을 건너뛰고 KB에서 다시 조회 (화면의 'KB에서 다시 조회' 버튼)."""
+    return q.get("refresh", [""])[0] in ("1", "true")
 
 
 def make_handler(client: KBClient):
@@ -68,13 +74,13 @@ def make_handler(client: KBClient):
             if url.path in PAGES:
                 self._send(200, (HERE / PAGES[url.path]).read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/dividends":
-                self._api(lambda q: query_dividends(client, int(q.get("year", [date.today().year])[0])), parse_qs(url.query))
+                self._api(lambda q: query_dividends(client, int(q.get("year", [date.today().year])[0]), _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/heatmap":
                 self._api(lambda q: query_heatmap(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
             elif url.path == "/api/quarters":
                 self._api(lambda q: query_quarters(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
             elif url.path == "/api/holdings":
-                self._api(lambda q: query_holdings(client), {})
+                self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
             else:
                 self.send_error(404)
 

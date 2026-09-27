@@ -20,6 +20,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/quarters?market=kr|us   분기별 일평균 거래대금
  *   GET /api/holdings                보유 종목과 현금 (하루 한 번 조회해 kb.db에 저장)
  *   GET /api/dividends?year=2026     배당 내역
+ *   내정보 API 두 개는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
 @RequestMapping("/api")
@@ -44,13 +45,14 @@ class ApiController {
     }
 
     @GetMapping("/holdings")
-    ResponseEntity<Map<String, Object>> holdings() throws IOException {
-        return ok(heatmap.queryHoldings());
+    ResponseEntity<Map<String, Object>> holdings(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
+        return ok(heatmap.queryHoldings(refresh));
     }
 
     @GetMapping("/dividends")
-    ResponseEntity<Map<String, Object>> dividends(@RequestParam(required = false) Integer year) throws IOException {
-        return ok(dividends.query(year == null ? LocalDate.now().getYear() : year));
+    ResponseEntity<Map<String, Object>> dividends(@RequestParam(required = false) Integer year,
+                                                  @RequestParam(defaultValue = "false") boolean refresh) throws IOException {
+        return ok(dividends.query(year == null ? LocalDate.now().getYear() : year, refresh));
     }
 
     private static ResponseEntity<Map<String, Object>> ok(Map<String, Object> body) {

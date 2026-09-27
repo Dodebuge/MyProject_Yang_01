@@ -52,18 +52,22 @@ final class DailyStore {
         Map<String, Object> get() throws IOException;
     }
 
-    /** 오늘 저장된 kind 값을 돌려주고, 없으면 fetch로 조회해 저장한 뒤 돌려줍니다. */
-    Map<String, Object> daily(String kind, Fetch fetch) throws IOException {
+    /**
+     * 오늘 저장된 kind 값을 돌려주고, 없으면 fetch로 조회해 저장한 뒤 돌려줍니다.
+     * refresh가 true(화면의 'KB에서 다시 조회')면 저장된 값을 건너뛰고 다시 조회해 오늘 값을 덮어씁니다.
+     */
+    Map<String, Object> daily(String kind, boolean refresh, Fetch fetch) throws IOException {
         String today = LocalDate.now(SEOUL).toString();
         try {
-            String stored = select(kind, today);
+            String stored = refresh ? null : select(kind, today);
             if (stored != null) {
                 return GSON.fromJson(stored, MAP);
             }
             Map<String, Object> payload = fetch.get();  // KB 조회는 DB 연결 밖에서
+            String onConflict = refresh ? "DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload" : "DO NOTHING";
             try (Connection c = open();
                  PreparedStatement ps = c.prepareStatement(
-                         "INSERT INTO daily (kind, date, fetched_at, payload) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
+                         "INSERT INTO daily (kind, date, fetched_at, payload) VALUES (?, ?, ?, ?) ON CONFLICT (kind, date) " + onConflict)) {
                 ps.setString(1, kind);
                 ps.setString(2, today);
                 ps.setString(3, LocalDateTime.now(SEOUL).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
