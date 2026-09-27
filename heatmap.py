@@ -23,6 +23,7 @@ from pathlib import Path
 
 import requests
 
+from daily_store import daily
 from kb_client import KBApiError, KBClient
 
 # (티커, 거래소, 섹터). 거래소: NAS=나스닥, NYS=뉴욕
@@ -295,14 +296,11 @@ def fetch_my(client: KBClient) -> dict:
 
 
 def query_holdings(client: KBClient) -> dict:
-    """내 보유 종목 (내정보 화면). 서버 메모리에 60초만 캐시하고 파일로 저장하지 않습니다."""
-    hit = _cache.get("holdings")
-    if hit and time.time() - hit[0] < CACHE_SECONDS:
-        return hit[1]
-    client.access_token
-    payload = {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **fetch_my(client)}
-    _cache["holdings"] = (time.time(), payload)
-    return payload
+    """내 보유 종목 (내정보 화면). 하루 한 번만 KB에서 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다."""
+    def fetch() -> dict:
+        client.access_token
+        return {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **fetch_my(client)}
+    return daily("holdings", fetch)
 
 
 # ---------------------------------------------------------------------- 분기별 거래대금

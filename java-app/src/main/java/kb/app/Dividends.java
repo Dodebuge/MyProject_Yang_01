@@ -27,12 +27,14 @@ final class Dividends {
     private static final DateTimeFormatter YMD = DateTimeFormatter.BASIC_ISO_DATE;
 
     private final KBClient client;
+    private final DailyStore store;
 
-    Dividends(KBClient client) {
+    Dividends(KBClient client, DailyStore store) {
         this.client = client;
+        this.store = store;
     }
 
-    /** GET /api/dividends?year= */
+    /** GET /api/dividends?year= : 연도별로 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다. */
     Map<String, Object> query(int year) throws IOException {
         LocalDate today = LocalDate.now();
         if (year < 2000 || year > today.getYear()) {
@@ -40,13 +42,15 @@ final class Dividends {
         }
         String start = year + "0101";
         String end = year == today.getYear() ? today.format(YMD) : year + "1231";
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("year", year);
-        payload.put("start", start);
-        payload.put("end", end);
-        payload.put("fetchedAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        payload.put("entries", fetchEntries(start, end));
-        return payload;
+        return store.daily("dividends:" + year, () -> {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("year", year);
+            payload.put("start", start);
+            payload.put("end", end);
+            payload.put("fetchedAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            payload.put("entries", fetchEntries(start, end));
+            return payload;
+        });
     }
 
     List<Map<String, Object>> fetchEntries(String start, String end) throws IOException {

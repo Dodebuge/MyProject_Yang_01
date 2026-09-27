@@ -17,8 +17,9 @@ API:
     GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...], "etf": {...}}
     GET /api/quarters?market=kr|us -> {"quarters", "asOf", "sectors": [{"name", "values"}], "stocks": [...], "failed"}
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
-    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today"}}  잔고 TR 실시간 조회, 파일 저장 없음
+    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today"}}  잔고 TR
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
+    내정보 API 두 개는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from daily_store import daily
 from dividends import fetch_entries
 from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
@@ -46,14 +48,17 @@ def query_dividends(client: KBClient, year: int) -> dict:
         raise ValueError(f"조회할 수 없는 연도입니다: {year}")
     start = f"{year}0101"
     end = today.strftime("%Y%m%d") if year == today.year else f"{year}1231"
-    entries = fetch_entries(client, start, end)
-    return {
-        "year": year,
-        "start": start,
-        "end": end,
-        "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "entries": [{**asdict(e), "month": e.month, "net": e.net} for e in entries],
-    }
+
+    def fetch() -> dict:
+        entries = fetch_entries(client, start, end)
+        return {
+            "year": year,
+            "start": start,
+            "end": end,
+            "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "entries": [{**asdict(e), "month": e.month, "net": e.net} for e in entries],
+        }
+    return daily(f"dividends:{year}", fetch)  # 연도별로 하루 한 번만 KB 조회 (kb.db)
 
 
 def make_handler(client: KBClient):

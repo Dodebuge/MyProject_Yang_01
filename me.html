@@ -6,8 +6,8 @@
 <title>내정보</title>
 <!--
   내정보: 보유 종목 현황 + 배당 내역. dividends_web.py가 /me 로 이 파일을 제공하고,
-  보유 종목은 /api/holdings (잔고 TR 실시간 조회, 파일 저장 없음),
-  페이지는 /api/dividends?year=YYYY 로 KB OpenAPI 거래내역을 실시간 조회합니다.
+  보유 종목은 /api/holdings (잔고 TR), 배당은 /api/dividends?year=YYYY (거래내역 TR).
+  두 API 모두 서버가 하루(한국 날짜) 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
 -->
 <style>
 :root {
@@ -487,7 +487,7 @@ function renderHoldings() {
   const ss = [...d.stocks].sort((a, b) => b.cap - a.cap);
   const cash = d.cash.krw + d.cash.fx_krw;
   const stock = sum(ss, s => s.cap), total = stock + cash;
-  $("#h-status").textContent = `조회 ${d.fetchedAt} · 잔고 TR(SSQM2952, SPQM2226) 실시간 조회`;
+  $("#h-status").textContent = `조회 ${d.fetchedAt} · 잔고 TR(SSQM2952, SPQM2226) · 하루 한 번 조회해 저장, 날짜가 바뀌면 다시 조회`;
   if (!total) { $("#h-body").innerHTML = `<div class="empty">보유 종목과 현금이 없습니다.</div>`; return; }
 
   const kr = sum(ss.filter(s => s.market === "국내"), s => s.cap), us = sum(ss.filter(s => s.market === "미국"), s => s.cap);

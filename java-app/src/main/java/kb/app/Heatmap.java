@@ -148,11 +148,13 @@ final class Heatmap {
 
     private final KBClient client;
     private final Path snapshotFile;
+    private final DailyStore store;
     private final Map<String, Object[]> cache = new ConcurrentHashMap<>();  // key -> {저장 시각(ms), payload}
 
-    Heatmap(KBClient client, Path snapshotFile) {
+    Heatmap(KBClient client, Path snapshotFile, DailyStore store) {
         this.client = client;
         this.snapshotFile = snapshotFile;
+        this.store = store;
     }
 
     @SuppressWarnings("unchecked")
@@ -494,17 +496,15 @@ final class Heatmap {
 
     // ------------------------------------------------------------------ 보유 종목
 
-    /** GET /api/holdings : 내 보유 종목과 현금. 서버 메모리에 60초만 캐시하고 파일로 저장하지 않습니다. */
+    /** GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다. */
     Map<String, Object> queryHoldings() throws IOException {
-        Map<String, Object> hit = cached("holdings", CACHE_SECONDS);
-        if (hit != null) {
-            return hit;
-        }
-        client.accessToken();
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("fetchedAt", now());
-        payload.putAll(fetchMy());
-        return store("holdings", payload);
+        return store.daily("holdings", () -> {
+            client.accessToken();
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("fetchedAt", now());
+            payload.putAll(fetchMy());
+            return payload;
+        });
     }
 
     /**

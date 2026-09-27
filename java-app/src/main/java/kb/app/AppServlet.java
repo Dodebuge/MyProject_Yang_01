@@ -64,8 +64,9 @@ public class AppServlet extends HttpServlet {
         } catch (IOException | IllegalStateException e) {
             throw new ServletException("KB OpenAPI 설정을 읽지 못했습니다 (" + dataDir + "): " + e.getMessage(), e);
         }
-        heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"));
-        dividends = new Dividends(client);
+        DailyStore store = new DailyStore(dataDir.resolve("kb.db"));  // 내정보: 하루 한 번만 KB 조회
+        heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store);
+        dividends = new Dividends(client, store);
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));

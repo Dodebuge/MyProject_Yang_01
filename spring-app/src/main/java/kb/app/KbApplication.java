@@ -29,13 +29,19 @@ public class KbApplication {
         return KBClient.fromEnv(dataDir.resolve(".env"));
     }
 
+    /** 내정보(보유 종목·배당)를 하루 한 번만 KB에서 조회해 저장하는 SQLite. Python 버전과 같은 kb.db를 씁니다. */
     @Bean
-    Heatmap heatmap(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
-        return new Heatmap(client, dataDir.resolve("etf_snapshot.json"));
+    DailyStore dailyStore(@Value("${kb.data-dir}") Path dataDir) {
+        return new DailyStore(dataDir.resolve("kb.db"));
     }
 
     @Bean
-    Dividends dividends(KBClient client) {
-        return new Dividends(client);
+    Heatmap heatmap(KBClient client, @Value("${kb.data-dir}") Path dataDir, DailyStore store) {
+        return new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store);
+    }
+
+    @Bean
+    Dividends dividends(KBClient client, DailyStore store) {
+        return new Dividends(client, store);
     }
 }

@@ -18,7 +18,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * /api/* (dividends_web.py의 API와 같은 주소·같은 JSON).
  *   GET /api/heatmap?market=kr|us    섹터 히트맵
  *   GET /api/quarters?market=kr|us   분기별 일평균 거래대금
- *   GET /api/holdings                보유 종목과 현금 (잔고 TR 실시간, 파일 저장 없음)
+ *   GET /api/holdings                보유 종목과 현금 (하루 한 번 조회해 kb.db에 저장)
  *   GET /api/dividends?year=2026     배당 내역
  */
 @RestController

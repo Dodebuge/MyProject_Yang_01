@@ -31,6 +31,12 @@
       <artifactId>gson</artifactId>
       <version>2.11.0</version>
     </dependency>
+    <!-- 내정보를 하루 한 번만 조회해 저장하는 kb.db (DailyStore). spring-app과 같은 버전. -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <version>3.49.1.0</version>
+    </dependency>
   </dependencies>
 
   <build>
