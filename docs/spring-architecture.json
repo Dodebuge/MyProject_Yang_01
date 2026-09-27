@@ -1,0 +1,432 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Spring Boot 배포 아키텍처",
+    "output": "spring-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Dodebuge/MyProject_Yang_01",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "dc9fa8eaae52270292218584bcfddd3327ee1946"
+    },
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "사용자"
+        },
+        "backend": {
+          "label": "실행 구성요소"
+        },
+        "database": {
+          "label": "데이터 파일"
+        },
+        "security": {
+          "label": "보안·비밀값"
+        },
+        "external": {
+          "label": "외부 API"
+        },
+        "messagebus": {
+          "label": "빌드·배포"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "request",
+        "label": "요청 경로",
+        "focus": [
+          "browser",
+          "firewall",
+          "tomcat",
+          "mvc",
+          "core",
+          "kbapi"
+        ],
+        "note": "브라우저 → 방화벽 8080 → 내장 Tomcat → Spring MVC → 공통 코어 → KB OpenAPI(HTTPS). JVM 프로세스 하나가 모두 처리합니다."
+      },
+      {
+        "id": "deploy",
+        "label": "빌드·실행",
+        "focus": [
+          "prepare",
+          "systemd",
+          "tomcat"
+        ],
+        "note": "run.sh prepare가 jar를 target/app에 풀고 CDS(app.jsa)를 만듭니다. systemd가 그 jar를 kbapp 사용자로 실행·재시작합니다."
+      },
+      {
+        "id": "data",
+        "label": "데이터 파일",
+        "focus": [
+          "core",
+          "env",
+          "kbdb",
+          "snapshot"
+        ],
+        "note": "KB_DATA_DIR(/opt/kb_openapi_sample)에 .env, kb.db, etf_snapshot.json을 둡니다. kbapp에게 쓰기 권한이 필요합니다."
+      },
+      {
+        "id": "security",
+        "label": "보안 경계",
+        "focus": [
+          "browser",
+          "firewall",
+          "env",
+          "kbdb"
+        ],
+        "note": "외부에는 8080만 엽니다. 로그인이 없으니 공개 범위에 주의하세요. .env와 kb.db는 chmod 600, git 제외."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "브라우저",
+      "sublabel": "내 PC · 휴대폰",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "prepare",
+      "type": "messagebus",
+      "label": "run.sh prepare",
+      "sublabel": "빌드 · jar 풀기 · CDS",
+      "tag": "코드 변경 시",
+      "pos": [
+        215,
+        100
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/run.sh",
+          "line": 1,
+          "end_line": 37,
+          "label": "변경 시 빌드, CDS 생성"
+        }
+      ]
+    },
+    {
+      "id": "systemd",
+      "type": "backend",
+      "label": "systemd",
+      "sublabel": "kb-openapi-spring",
+      "tag": "User kbapp · 자동 재시작",
+      "pos": [
+        430,
+        100
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/kb-openapi-spring.service",
+          "line": 13,
+          "end_line": 22,
+          "label": "ExecStart · User · Restart"
+        }
+      ]
+    },
+    {
+      "id": "firewall",
+      "type": "security",
+      "label": "방화벽",
+      "sublabel": "8080/tcp만 허용",
+      "pos": [
+        230,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "tomcat",
+      "type": "backend",
+      "label": "내장 Tomcat",
+      "sublabel": "server.port=${PORT}",
+      "tag": "JVM 17 · CDS",
+      "pos": [
+        430,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/src/main/resources/application.properties",
+          "line": 1,
+          "end_line": 5,
+          "label": "포트 · 데이터 폴더"
+        }
+      ]
+    },
+    {
+      "id": "mvc",
+      "type": "backend",
+      "label": "Spring MVC",
+      "sublabel": "Page · ApiController",
+      "pos": [
+        660,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/src/main/java/kb/app/ApiController.java",
+          "line": 17,
+          "end_line": 24,
+          "label": "/api/* 주소"
+        },
+        {
+          "path": "spring-app/src/main/java/kb/app/KbApplication.java",
+          "line": 11,
+          "end_line": 47,
+          "label": "@Bean 구성"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "공통 코어",
+      "sublabel": "Heatmap · Dividends · KBClient",
+      "tag": "java-app 소스",
+      "pos": [
+        660,
+        480
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 26,
+          "end_line": 32,
+          "label": "KBClient: 토큰 · 재시도"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/DailyStore.java",
+          "line": 23,
+          "end_line": 28,
+          "label": "DailyStore: 하루 한 번 저장"
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "최근 60일 ETF 코드",
+      "pos": [
+        430,
+        622
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "env",
+      "type": "security",
+      "label": ".env",
+      "sublabel": "appKey · appSecret",
+      "tag": "chmod 600",
+      "pos": [
+        660,
+        622
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "kbdb",
+      "type": "database",
+      "label": "kb.db",
+      "sublabel": "SQLite · 내정보 일별",
+      "tag": "chmod 600",
+      "pos": [
+        890,
+        622
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "kbapi",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "developer.kbsec.com:32484",
+      "pos": [
+        1110,
+        480
+      ],
+      "size": [
+        190,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Linux 서버 · /opt/kb_openapi_sample",
+      "wraps": [
+        "prepare",
+        "systemd",
+        "firewall",
+        "tomcat",
+        "mvc",
+        "core",
+        "snapshot",
+        "env",
+        "kbdb"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "JVM 프로세스 (java -jar)",
+      "wraps": [
+        "tomcat",
+        "mvc",
+        "core"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-firewall",
+      "from": "browser",
+      "to": "firewall",
+      "label": "HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "firewall-tomcat",
+      "from": "firewall",
+      "to": "tomcat",
+      "label": ":8080",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tomcat-mvc",
+      "from": "tomcat",
+      "to": "mvc",
+      "label": "요청"
+    },
+    {
+      "id": "mvc-core",
+      "from": "mvc",
+      "to": "core",
+      "label": "@Bean 호출",
+      "labelAt": [
+        745,
+        422
+      ]
+    },
+    {
+      "id": "core-kbapi",
+      "from": "core",
+      "to": "kbapi",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "prepare-systemd",
+      "from": "prepare",
+      "to": "systemd",
+      "label": "target/app",
+      "variant": "dashed"
+    },
+    {
+      "id": "systemd-tomcat",
+      "from": "systemd",
+      "to": "tomcat",
+      "label": "ExecStart",
+      "variant": "dashed",
+      "labelAt": [
+        515,
+        232
+      ]
+    },
+    {
+      "id": "env-core",
+      "from": "env",
+      "to": "core",
+      "label": "키 읽기",
+      "variant": "security"
+    },
+    {
+      "id": "core-kbdb",
+      "from": "core",
+      "to": "kbdb",
+      "label": "하루 한 번",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "core-snapshot",
+      "from": "core",
+      "to": "snapshot",
+      "label": "ETF 비교",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "배포 순서",
+      "items": [
+        "git pull → spring-app/run.sh prepare",
+        "sudo systemctl restart kb-openapi-spring",
+        "로그: journalctl -u kb-openapi-spring -f"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "보안",
+      "items": [
+        "외부에는 8080만 공개, 로그인 없음",
+        ".env · kb.db는 chmod 600, git 제외",
+        "원격 디버그 5005는 SSH 터널로만"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "필요한 것",
+      "items": [
+        "JDK 17 이상 (Maven은 mvnw가 자동 설치)",
+        "Tomcat·Python 설치 불필요",
+        "JDK를 바꾸면 target/app 삭제 후 prepare"
+      ]
+    }
+  ]
+}

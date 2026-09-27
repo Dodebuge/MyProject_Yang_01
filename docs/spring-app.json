@@ -1,0 +1,482 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "spring-app 구조 (java-app 코어 공유)",
+    "output": "spring-app.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Dodebuge/MyProject_Yang_01",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "dc9fa8eaae52270292218584bcfddd3327ee1946"
+    },
+    "views": [
+      {
+        "id": "spring-layer",
+        "label": "Spring 연결부",
+        "focus": [
+          "browser",
+          "page",
+          "api",
+          "boot"
+        ],
+        "note": "spring-app에는 파일 3개뿐입니다. KbApplication이 @Bean으로 코어 객체를 만들고, 두 컨트롤러가 주소를 받습니다."
+      },
+      {
+        "id": "shared-core",
+        "label": "java-app 공통 코어",
+        "focus": [
+          "api",
+          "heatmap",
+          "dividends",
+          "store",
+          "client"
+        ],
+        "note": "pom.xml의 build-helper가 ../java-app/src/main/java를 함께 컴파일합니다. Tomcat WAR 버전도 같은 코어를 씁니다."
+      },
+      {
+        "id": "daily-db",
+        "label": "하루 한 번 저장",
+        "focus": [
+          "api",
+          "heatmap",
+          "dividends",
+          "store",
+          "kbdb"
+        ],
+        "note": "내정보(보유·배당)는 DailyStore가 kb.db에 하루 한 번 저장합니다. ?refresh=1이면 KB를 다시 조회해 덮어씁니다."
+      },
+      {
+        "id": "kb-call",
+        "label": "KB 호출",
+        "focus": [
+          "heatmap",
+          "dividends",
+          "client",
+          "env",
+          "kbapi"
+        ],
+        "note": "KBClient가 .env의 키로 토큰을 받고 POST /api/v1/{tr}을 호출합니다. 5xx는 세 번까지 재시도합니다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "브라우저",
+      "sublabel": "home · heatmap · me",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "page",
+      "type": "backend",
+      "label": "PageController",
+      "sublabel": "/, /heatmap, /me → static",
+      "pos": [
+        290,
+        120
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/src/main/java/kb/app/PageController.java",
+          "line": 6,
+          "end_line": 24,
+          "label": "화면 주소 → static/*.html"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "ApiController",
+      "sublabel": "@RestController /api/*",
+      "tag": "?refresh=1 · 400/502",
+      "pos": [
+        290,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/src/main/java/kb/app/ApiController.java",
+          "line": 17,
+          "end_line": 24,
+          "label": "처리 주소 목록"
+        },
+        {
+          "path": "spring-app/src/main/java/kb/app/ApiController.java",
+          "line": 37,
+          "end_line": 56,
+          "label": "@GetMapping 4개와 refresh"
+        },
+        {
+          "path": "spring-app/src/main/java/kb/app/ApiController.java",
+          "line": 64,
+          "end_line": 74,
+          "label": "@ExceptionHandler 400/502"
+        }
+      ]
+    },
+    {
+      "id": "boot",
+      "type": "backend",
+      "label": "KbApplication",
+      "sublabel": "@SpringBootApplication",
+      "tag": "@Bean 4개 생성",
+      "pos": [
+        290,
+        500
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "spring-app/src/main/java/kb/app/KbApplication.java",
+          "line": 11,
+          "end_line": 47,
+          "label": "@Bean: KBClient·DailyStore·코어"
+        },
+        {
+          "path": "spring-app/pom.xml",
+          "line": 66,
+          "end_line": 78,
+          "label": "build-helper: java-app 소스 추가"
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "etf_snapshot.json",
+      "sublabel": "날짜별 ETF 코드",
+      "pos": [
+        580,
+        20
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "heatmap",
+      "type": "backend",
+      "label": "Heatmap",
+      "sublabel": "히트맵 · 분기 · 보유",
+      "pos": [
+        580,
+        170
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java",
+          "line": 27,
+          "end_line": 33,
+          "label": "클래스 주석"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Heatmap.java",
+          "line": 499,
+          "end_line": 511,
+          "label": "queryHoldings(refresh)"
+        }
+      ]
+    },
+    {
+      "id": "dividends",
+      "type": "backend",
+      "label": "Dividends",
+      "sublabel": "SWQA2301 배당 분류",
+      "pos": [
+        580,
+        380
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/Dividends.java",
+          "line": 16,
+          "end_line": 19,
+          "label": "클래스 주석"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/Dividends.java",
+          "line": 37,
+          "end_line": 57,
+          "label": "query(year, refresh)"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DailyStore",
+      "sublabel": "daily(kind, refresh, fetch)",
+      "tag": "하루 한 번",
+      "pos": [
+        580,
+        560
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/DailyStore.java",
+          "line": 23,
+          "end_line": 28,
+          "label": "클래스 주석: 하루 한 번 저장"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/DailyStore.java",
+          "line": 55,
+          "end_line": 81,
+          "label": "daily(): 조회·저장·덮어쓰기"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "backend",
+      "label": "KBClient",
+      "sublabel": "토큰 · TR 호출 · 값 정리",
+      "tag": "5xx 3회 재시도",
+      "pos": [
+        870,
+        270
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 26,
+          "end_line": 32,
+          "label": "클래스 주석: 4가지 동작"
+        },
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 119,
+          "end_line": 126,
+          "label": "call(TR)"
+        }
+      ]
+    },
+    {
+      "id": "kbapi",
+      "type": "external",
+      "label": "KB증권 OpenAPI",
+      "sublabel": "POST /api/v1/{tr}",
+      "pos": [
+        1150,
+        270
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "env",
+      "type": "security",
+      "label": ".env",
+      "sublabel": "appKey / appSecret",
+      "pos": [
+        1150,
+        430
+      ],
+      "size": [
+        180,
+        60
+      ],
+      "sources": [
+        {
+          "path": "java-app/src/main/java/kb/app/KBClient.java",
+          "line": 56,
+          "end_line": 69,
+          "label": "fromEnv(): 환경변수 우선"
+        }
+      ]
+    },
+    {
+      "id": "kbdb",
+      "type": "database",
+      "label": "kb.db (SQLite)",
+      "sublabel": "daily(kind, date)",
+      "pos": [
+        1150,
+        562
+      ],
+      "size": [
+        180,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "spring-app · 파일 3개",
+      "wraps": [
+        "page",
+        "api",
+        "boot"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "java-app 공통 코어 · 함께 컴파일",
+      "wraps": [
+        "heatmap",
+        "dividends",
+        "store",
+        "client"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-page",
+      "from": "browser",
+      "to": "page",
+      "label": "GET 화면",
+      "fromSide": "top"
+    },
+    {
+      "id": "browser-api",
+      "from": "browser",
+      "to": "api",
+      "label": "fetch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "boot-api",
+      "from": "boot",
+      "to": "api",
+      "label": "@Bean 주입",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-heatmap",
+      "from": "api",
+      "to": "heatmap",
+      "label": "holdings · heatmap"
+    },
+    {
+      "id": "api-dividends",
+      "from": "api",
+      "to": "dividends",
+      "label": "dividends"
+    },
+    {
+      "id": "heatmap-snapshot",
+      "from": "heatmap",
+      "to": "snapshot",
+      "label": "ETF 비교",
+      "variant": "dashed",
+      "labelAt": [
+        665,
+        108
+      ]
+    },
+    {
+      "id": "heatmap-client",
+      "from": "heatmap",
+      "to": "client",
+      "label": "call()"
+    },
+    {
+      "id": "dividends-client",
+      "from": "dividends",
+      "to": "client",
+      "label": "callPages()"
+    },
+    {
+      "id": "dividends-store",
+      "from": "dividends",
+      "to": "store",
+      "label": "daily()",
+      "labelAt": [
+        665,
+        502
+      ]
+    },
+    {
+      "id": "store-kbdb",
+      "from": "store",
+      "to": "kbdb",
+      "label": "SQLite JDBC"
+    },
+    {
+      "id": "client-kbapi",
+      "from": "client",
+      "to": "kbapi",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "env-client",
+      "from": "env",
+      "to": "client",
+      "label": "fromEnv()",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "spring-app이 하는 일",
+      "items": [
+        "KbApplication: @Bean으로 코어 객체 생성·연결",
+        "ApiController: /api/* 주소, refresh 파라미터, 오류 코드",
+        "PageController: 화면 3개를 static/으로"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "java-app 코어 공유",
+      "items": [
+        "pom.xml build-helper가 ../java-app 소스를 추가",
+        "같은 패키지 kb.app으로 jar 하나에 합쳐짐",
+        "코어를 고치면 Tomcat WAR와 Spring에 같이 반영"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "주의",
+      "items": [
+        "코어 생성자가 바뀌면 KbApplication도 수정",
+        "코어가 쓰는 라이브러리는 spring-app/pom.xml에도 추가",
+        "Heatmap도 daily()로 보유 종목을 저장 (선 생략)"
+      ]
+    }
+  ]
+}
