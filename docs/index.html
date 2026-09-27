@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>구조 문서</title>
+<!-- 구조 문서 목록: 첫 화면 맨 아래의 '구조 문서' 링크로 들어옵니다. 서버가 /docs/*.html로 제공합니다. -->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04); --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05); --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05); --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink); min-height: 100vh;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 960px; margin: 0 auto; padding: 48px 16px; }
+header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 24px; }
+.back { color: var(--muted); text-decoration: none; font-size: 13px; }
+.back:hover { color: var(--ink); }
+h1 { font-size: 24px; margin: 6px 0 0; font-weight: 650; }
+.sub { color: var(--muted); margin: 4px 0 0; }
+button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .groups { grid-template-columns: 1fr; } }
+.group { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+h2 { font-size: 13px; margin: 0 0 8px; color: var(--ink-2); font-weight: 600; }
+a.doc {
+  display: block; padding: 8px 10px; margin-top: 6px; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--ink); text-decoration: none; font-size: 13px;
+}
+a.doc:hover, a.doc:focus-visible { border-color: var(--accent); background: var(--hover); outline: none; }
+a.doc small { display: block; color: var(--muted); font-size: 12px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <a class="back" href="../">← 처음으로</a>
+      <h1>구조 문서</h1>
+      <p class="sub">Archify로 그린 구조도·순서도입니다. 새 탭에서 열리며, 노드를 누르면 설명과 소스 링크를 볼 수 있습니다.</p>
+    </div>
+    <button id="theme" aria-label="테마 전환">◐</button>
+  </header>
+
+  <div class="groups">
+    <section class="group">
+      <h2>아키텍처</h2>
+      <a class="doc" href="spring-architecture.html" target="_blank" rel="noopener">Spring Boot 배포 아키텍처<small>서버 · systemd · JVM · 데이터 파일</small></a>
+      <a class="doc" href="architecture.html" target="_blank" rel="noopener">리눅스 서버 배포 구조<small>Tomcat 10 + Python 구성</small></a>
+      <a class="doc" href="heatmap-request.sequence.html" target="_blank" rel="noopener">히트맵 조회 시퀀스<small>Tomcat 경유 요청 순서</small></a>
+    </section>
+    <section class="group">
+      <h2>코드 구조</h2>
+      <a class="doc" href="spring-app.html" target="_blank" rel="noopener">spring-app 구조<small>java-app 코어 공유 · DailyStore</small></a>
+      <a class="doc" href="java-app.html" target="_blank" rel="noopener">java-app 구조와 주석 가이드<small>클래스별 주석 · 소스 링크</small></a>
+      <a class="doc" href="java-structure.html" target="_blank" rel="noopener">Java · Spring 코드 구조 (이전)<small>kb.db 도입 전 버전</small></a>
+    </section>
+    <section class="group">
+      <h2>순서도</h2>
+      <a class="doc" href="flow-request.html" target="_blank" rel="noopener">요청 처리 순서도<small>GET /api/heatmap</small></a>
+      <a class="doc" href="flow-kbclient.html" target="_blank" rel="noopener">KBClient.call() 순서도<small>토큰 · 재시도 · 응답 검사</small></a>
+      <a class="doc" href="flow-c-style.html" target="_blank" rel="noopener">C 스타일 흐름도<small>C 함수 이름으로 본 전체 흐름</small></a>
+    </section>
+  </div>
+  <p class="note">그림 안의 소스 링크는 GitHub 저장소의 특정 커밋을 가리킵니다.</p>
+</div>
+<script>
+try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+document.getElementById("theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("div-theme", next); } catch {}
+};
+</script>
+</body>
+</html>
