@@ -6,12 +6,20 @@ JDK 17 이상만 있으면 됩니다. Maven은 `mvnw`(Maven Wrapper)가 처음 �
 
 ```bash
 spring-app\run.cmd        # Windows: 빌드 후 실행 → http://localhost:8080 (.env는 저장소 루트에서 읽음)
-spring-app/run.sh         # Linux/macOS
+spring-app/run.sh         # Linux/macOS: 코드가 바뀌었을 때만 빌드, CDS로 빠르게 시작
+spring-app/run.sh prepare # 빌드·CDS 준비만 (systemd 서비스용)
 
 # 직접 실행
 cd spring-app && ./mvnw -q -DskipTests package
 KB_DATA_DIR=/opt/kb_openapi_sample java -jar target/kb-openapi-spring.jar   # http://서버IP:8080/
 ```
+
+`run.sh`는 시작 시간을 줄이려고 세 가지를 합니다 (이 PC 측정: 빌드 포함 약 5.2초 → 1.3초).
+
+1. `pom.xml`, `src/`, `../java-app/src/`, 화면 HTML이 jar보다 새로울 때만 Maven 빌드
+2. jar를 `target/app/`에 풀고, 한 번 띄웠다 끝내며 읽은 클래스를 `target/app/app.jsa`(CDS)로 저장해 다음 시작부터 재사용.
+   jar가 바뀌면 자동으로 다시 만듭니다. JDK를 바꾸면 `target/app`을 지우세요.
+3. `-XX:TieredStopAtLevel=1`: JIT를 가볍게 해서 시작을 줄임. 끄려면 `JAVA_OPTS="" ./run.sh`
 
 리눅스 서비스 등록은 [deploy/README.md](../deploy/README.md)의 "방법 A"와 `deploy/kb-openapi-spring.service`를 보세요.
 

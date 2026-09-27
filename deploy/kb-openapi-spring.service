@@ -1,6 +1,6 @@
 # systemd 서비스: Spring Boot 버전(spring-app)을 계속 실행합니다. Tomcat·Python 설치가 필요 없습니다.
 #
-#   cd /opt/kb_openapi_sample/spring-app && ./mvnw -q -DskipTests package
+#   /opt/kb_openapi_sample/spring-app/run.sh prepare   # 빌드 + jar 풀기 + CDS 아카이브 (코드를 바꿀 때마다 다시)
 #   sudo cp deploy/kb-openapi-spring.service /etc/systemd/system/
 #   (아래 WorkingDirectory, User, 포트를 서버에 맞게 수정)
 #   sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
@@ -15,7 +15,8 @@ Wants=network-online.target
 WorkingDirectory=/opt/kb_openapi_sample
 Environment=KB_DATA_DIR=/opt/kb_openapi_sample
 Environment=PORT=8080
-ExecStart=/usr/bin/java -Xmx512m -jar /opt/kb_openapi_sample/spring-app/target/kb-openapi-spring.jar
+# run.sh prepare가 만든 푼 jar와 CDS 아카이브로 빠르게 시작합니다. app.jsa가 없으면 CDS 없이 그냥 실행됩니다.
+ExecStart=/usr/bin/java -Xmx512m -XX:SharedArchiveFile=/opt/kb_openapi_sample/spring-app/target/app/app.jsa -XX:TieredStopAtLevel=1 -jar /opt/kb_openapi_sample/spring-app/target/app/kb-openapi-spring.jar
 User=kbapp
 Restart=on-failure
 RestartSec=5

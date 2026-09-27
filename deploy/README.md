@@ -10,8 +10,8 @@
 git clone https://github.com/Dodebuge/MyProject_Yang_01.git /opt/kb_openapi_sample
 cd /opt/kb_openapi_sample
 vi .env && chmod 600 .env                     # KB_OPENAPI_BASE_URL, KB_OPENAPI_APP_KEY, KB_OPENAPI_APP_SECRET
-cd spring-app && ./mvnw -q -DskipTests package   # JDK 17 이상 필요
-sudo cp ../deploy/kb-openapi-spring.service /etc/systemd/system/   # WorkingDirectory, User 확인
+spring-app/run.sh prepare                     # JDK 17 이상 필요. 빌드 + CDS 준비 (코드를 바꾸면 다시 실행 후 restart)
+sudo cp deploy/kb-openapi-spring.service /etc/systemd/system/      # WorkingDirectory, User 확인
 sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
 ```
 
