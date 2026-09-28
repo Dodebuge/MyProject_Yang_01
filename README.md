@@ -15,6 +15,7 @@
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
 | `spring-app/` | Spring Boot 버전, 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)) |
+| `toss_openapi_sample/` | 같은 화면을 토스증권 OpenAPI로 만든 버전 ([toss_openapi_sample/README.md](toss_openapi_sample/README.md), 리눅스 테스트 방법 포함) |
 | `heatmap.py` / `heatmap.html` | 국내·미국 섹터 히트맵 (같은 서버의 `/heatmap`) |
 
 ## 실행

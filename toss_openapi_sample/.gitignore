@@ -1,0 +1,7 @@
+.env
+!.env.example
+__pycache__/
+etf_snapshot.json
+toss.db
+toss.db-*
+.venv/
