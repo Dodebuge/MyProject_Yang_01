@@ -462,6 +462,11 @@ const weightedBy = (ss, f) => {
   const xs = ss.filter(x => f(x) != null), w = sum(xs, x => x.cap);
   return w ? sum(xs, x => f(x) * x.cap) / w : null;
 };
+// 총 수익률 = 평가손익 합 / 매입금액 합. 매입금액 = 평가금액 / (1 + 수익률). 결제 전(null) 종목은 뺍니다.
+const plTotal = ss => {
+  const xs = ss.filter(x => x.pl != null), cost = sum(xs, x => x.cap / (1 + x.pl / 100));
+  return cost ? (sum(xs, x => x.cap) / cost - 1) * 100 : null;
+};
 const priceText = s => s.market === "미국" ? "$" + fmt(+s.price, 2) : fmt(+s.price) + "원";
 const qtyText = q => fmt(q, Number.isInteger(q) ? 0 : 4);
 const share = (n, total) => fmt(n / total * 100, 1) + "%";
@@ -500,7 +505,7 @@ function renderHoldings() {
     <div class="tiles">
       <div class="tile hero"><div class="label">총자산</div><div class="value">${fmt(total)}<span class="unit">원</span></div>
         <div class="meta">주식 ${fmt(stock)}원 + 현금 ${fmt(cash)}원</div></div>
-      <div class="tile"><div class="label">수익률</div><div class="value">${pctCell(weightedBy(ss, s => s.pl))}</div><div class="meta">보유 종목 평가금액 가중</div></div>
+      <div class="tile"><div class="label">수익률</div><div class="value">${pctCell(plTotal(ss))}</div><div class="meta">평가손익 ÷ 매입금액</div></div>
       <div class="tile"><div class="label">오늘</div><div class="value">${pctCell(weightedBy(ss, s => s.change))}</div><div class="meta">보유 종목 평가금액 가중</div></div>
       <div class="tile"><div class="label">국내 · 미국</div><div class="value">${share(kr, total)} · ${share(us, total)}</div>
         <div class="meta">${compact(kr)}원 · ${compact(us)}원</div></div>
@@ -521,7 +526,7 @@ function renderHoldings() {
         <tr><td class="l">현금 <span class="tag">예수금</span></td><td class="l hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td>
           <td>${fmt(cash)}</td><td>${share(cash, total)}</td><td></td><td></td></tr></tbody>
       <tfoot><tr><td class="l">합계</td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td><td>${fmt(total)}</td><td>100%</td>
-        <td>${pctCell(weightedBy(ss, s => s.change))}</td><td>${pctCell(weightedBy(ss, s => s.pl))}</td></tr></tfoot>
+        <td>${pctCell(weightedBy(ss, s => s.change))}</td><td>${pctCell(plTotal(ss))}</td></tr></tfoot>
     </table></div>
     <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>
     ${fractionalSection(ss)}`;
