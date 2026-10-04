@@ -20,7 +20,8 @@ API:
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
     GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
-    내정보 API 두 개는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+    GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
+    내정보 API(holdings, dividends, recurring)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
 """
 
@@ -31,13 +32,13 @@ import json
 import re
 import webbrowser
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from daily_store import daily
-from dividends import fetch_entries
+from dividends import fetch_entries, fetch_recurring
 from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
 
@@ -65,6 +66,21 @@ def query_dividends(client: KBClient, year: int, refresh: bool = False) -> dict:
     return daily(f"dividends:{year}", fetch, refresh)  # 연도별로 하루 한 번만 KB 조회 (kb.db)
 
 
+RECURRING_DAYS = 180  # 정기 구매 내역 조회 기간 (거래내역이 많으면 조회가 오래 걸려 반년으로 제한)
+
+
+def query_recurring(client: KBClient, refresh: bool = False) -> dict:
+    """KB 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년). 하루 한 번만 조회해 kb.db에 저장합니다.
+    토스 OpenAPI에는 정기 구매·거래내역 API가 없어 토스 계좌는 포함하지 않습니다."""
+    def fetch() -> dict:
+        end = date.today()
+        start = end - timedelta(days=RECURRING_DAYS)
+        return {"start": start.isoformat(), "end": end.isoformat(),
+                "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "plans": fetch_recurring(client, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))}
+    return daily("recurring", fetch, refresh)
+
+
 def _refresh(q: dict) -> bool:
     """?refresh=1 : 저장된 오늘 값을 건너뛰고 KB에서 다시 조회 (화면의 'KB에서 다시 조회' 버튼)."""
     return q.get("refresh", [""])[0] in ("1", "true")
@@ -84,6 +100,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: query_quarters(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
             elif url.path == "/api/holdings":
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/recurring":
+                self._api(lambda q: query_recurring(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
                 self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:

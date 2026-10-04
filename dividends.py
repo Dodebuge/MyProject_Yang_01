@@ -117,6 +117,63 @@ def fetch_entries(client: KBClient, start: str, end: str) -> list[Entry]:
     return sorted(entries, key=lambda e: e.date)
 
 
+# ---------------------------------------------------------------------- 정기 구매 (소수점 모으기)
+
+FRACTIONAL_BUY = "A23"   # 소수단위매수: KB 해외주식 소수점 정기 구매가 체결될 때마다 남는 거래
+FX_BUY = "A69"           # 글로벌원마켓플러스외화매수 출금: 같은 날 원화 -> 달러 환전 (exch_r = 그날 환율)
+
+
+def _day(yyyymmdd: str) -> date:
+    return date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:]))
+
+
+def summarize_recurring(rows: list[dict], today: date) -> list[dict]:
+    """거래내역 행에서 소수단위매수만 골라 종목별 정기 구매 요약을 만듭니다. 최근 구매일 순.
+
+    KB OpenAPI에 정기 구매 설정 TR이 없어 실제 체결 내역에서 주기를 추정합니다.
+    ponytail: 주기 = 구매일 간격의 중앙값 (3일 이하 매일, 10일 이하 매주, 그 밖은 매월). 수동 소수점 매수도 섞일 수 있습니다.
+    원화 = 달러 × 같은 날 환전(A69) 환율의 평균, 그날 환전이 없으면 가장 가까운 이전 날의 평균.
+    """
+    by_day: dict[str, list[float]] = {}
+    for r in rows:
+        if r.get("smry_typ_cd") == FX_BUY and float(r.get("exch_r") or 0):
+            by_day.setdefault(r["dl_dt"], []).append(float(r["exch_r"]))
+    rates = sorted((day, sum(xs) / len(xs)) for day, xs in by_day.items())
+
+    def rate_on(d: str) -> float:
+        before = [x for day, x in rates if day <= d]
+        return before[-1] if before else (rates[0][1] if rates else 0.0)
+
+    by: dict[str, list[dict]] = {}
+    for r in rows:
+        if r.get("smry_typ_cd") == FRACTIONAL_BUY:
+            by.setdefault(r.get("stnd_is_cd") or r["is_nm"], []).append(r)
+
+    out = []
+    for code, rs in by.items():
+        rs.sort(key=lambda r: r["dl_dt"])
+        days = sorted({_day(r["dl_dt"]) for r in rs})
+        gaps = sorted((b - a).days for a, b in zip(days, days[1:]))
+        gap = gaps[len(gaps) // 2] if gaps else None
+        freq = None if gap is None else "매일" if gap <= 3 else "매주" if gap <= 10 else "매월"
+        usd = [float(r.get("fcrncy_amt") or 0) for r in rs]  # 체결금액 + 해외 수수료
+        last = days[-1]
+        out.append({
+            "code": code, "name": rs[-1]["is_nm"], "count": len(rs), "freq": freq,
+            "first": days[0].isoformat(), "last": last.isoformat(),
+            "daysAgo": (today - last).days,  # 진행 중·중단 여부는 연휴가 끼면 헷갈려 판단하지 않고 경과일만 줍니다
+            "lastUsd": usd[-1], "usd": round(sum(usd), 2),
+            "krw": round(sum(u * rate_on(r["dl_dt"]) for u, r in zip(usd, rs))),
+            "usd30": round(sum(u for u, r in zip(usd, rs) if (today - _day(r["dl_dt"])).days < 30), 2),
+        })
+    return sorted(out, key=lambda p: p["last"], reverse=True)
+
+
+def fetch_recurring(client: KBClient, start: str, end: str) -> list[dict]:
+    rows = client.call_pages("SWQA2301", {"strt_dt": start, "end_dt": end, "is_no": "", "srt_clsf": ""})
+    return summarize_recurring(list(rows), _day(end))
+
+
 # ---------------------------------------------------------------------- 출력
 
 

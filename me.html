@@ -162,7 +162,7 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
       <h1>내정보</h1>
     </div>
     <div class="controls">
-      <button id="kb-refresh" title="오늘 저장된 값을 건너뛰고 KB증권에서 보유 종목과 배당 내역을 지금 다시 조회해 저장합니다">KB에서 다시 조회</button>
+      <button id="kb-refresh" title="오늘 저장된 값을 건너뛰고 KB증권에서 보유 종목·정기 구매·배당 내역을 지금 다시 조회해 저장합니다">KB에서 다시 조회</button>
       <button id="theme" aria-label="테마 전환">◐</button>
     </div>
   </header>
@@ -178,6 +178,11 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
       </div>
     </div>
     <div id="h-body"></div>
+  </section>
+
+  <section class="card" id="recurring" style="margin-top:12px">
+    <div class="card-head"><div><h2>정기 구매 내역</h2><p class="sub" id="r-status"></p></div></div>
+    <div id="r-body"></div>
   </section>
 
   <div class="section-head">
@@ -535,6 +540,48 @@ function renderHoldings() {
   drawHoldings([...ss, { name: "현금", code: "", cash: true, cap: cash }], total, max);
 }
 
+// ---------------------------------------------------------------- 정기 구매 내역 (/api/recurring)
+async function loadRecurring(refresh = false) {
+  $("#r-body").innerHTML = `<div class="loading"><div class="spinner"></div>거래내역에서 정기 구매를 모으고 있습니다. (수십 초 걸릴 수 있습니다)</div>`;
+  try {
+    const res = await fetch(`api/recurring${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    renderRecurring(d);
+  } catch (err) {
+    $("#r-body").innerHTML = `<div class="error"><b>정기 구매 내역을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
+  }
+}
+
+function renderRecurring(d) {
+  const ps = d.plans;
+  $("#r-status").textContent = `KB 소수점 정기 구매 · ${d.start} ~ ${d.end} · 조회 ${d.fetchedAt} · 거래내역 TR(SWQA2301) 소수단위매수`;
+  const note = `<div class="note">KB OpenAPI에는 정기 구매 설정 조회가 없어 실제 체결된 소수단위매수 거래로 모았습니다. 주기는 구매일 간격으로 추정했고, 직접 넣은 소수점 매수도 섞일 수 있습니다. 원화는 같은 날 외화매수 환율로 환산했습니다.
+    토스증권은 OpenAPI에 정기 구매·거래내역 API가 없어(주문 목록만 제공) 포함하지 않았습니다.</div>`;
+  if (!ps.length) { $("#r-body").innerHTML = `<div class="empty">조회 기간에 소수점 정기 구매가 없습니다.</div>` + note; return; }
+  const usd = sum(ps, p => p.usd), krw = sum(ps, p => p.krw), usd30 = sum(ps, p => p.usd30);
+  const last = ps.reduce((a, p) => p.last > a.last ? p : a);
+  $("#r-body").innerHTML = `
+    <div class="tiles four">
+      <div class="tile"><div class="label">구매 종목</div><div class="value">${ps.length}<span class="unit">종목</span></div>
+        <div class="meta">최근 30일 구매 ${ps.filter(p => p.usd30 > 0).length}종목</div></div>
+      <div class="tile"><div class="label">최근 30일</div><div class="value">$${fmt(usd30, 2)}</div><div class="meta">수수료 포함</div></div>
+      <div class="tile"><div class="label">기간 합계</div><div class="value">$${fmt(usd, 2)}</div><div class="meta">≈ ${fmt(krw)}원 · ${fmt(sum(ps, p => p.count))}회</div></div>
+      <div class="tile"><div class="label">마지막 구매</div><div class="value">${last.last.slice(5).replace("-", "/")}</div><div class="meta">${last.daysAgo}일 전</div></div>
+    </div>
+    <div class="scroll" style="margin-top:12px"><table class="list">
+      <thead><tr><th class="l">종목</th><th>주기(추정)</th><th class="hide-sm">횟수</th><th class="hide-sm">최근 1회</th><th>최근 30일</th>
+        <th>기간 합계</th><th class="hide-sm">원화</th><th class="hide-sm">첫 구매</th><th>마지막 구매</th></tr></thead>
+      <tbody>${ps.map(p => `<tr>
+        <td class="l nm" title="${esc(p.code)}">${esc(p.name)} <span class="tag">KB</span></td>
+        <td>${p.freq ?? "—"}</td><td class="hide-sm">${fmt(p.count)}</td><td class="hide-sm">$${fmt(p.lastUsd, 2)}</td>
+        <td>${p.usd30 ? "$" + fmt(p.usd30, 2) : "—"}</td><td>$${fmt(p.usd, 2)}</td><td class="hide-sm">${fmt(p.krw)}원</td>
+        <td class="hide-sm">${p.first}</td><td>${p.last} <span style="color:var(--muted)">(${p.daysAgo}일 전)</span></td></tr>`).join("")}</tbody>
+      <tfoot><tr><td class="l">합계</td><td></td><td class="hide-sm">${fmt(sum(ps, p => p.count))}</td><td class="hide-sm"></td>
+        <td>$${fmt(usd30, 2)}</td><td>$${fmt(usd, 2)}</td><td class="hide-sm">${fmt(krw)}원</td><td class="hide-sm"></td><td></td></tr></tfoot>
+    </table></div>` + note;
+}
+
 // 소수점 구매 현황: 해외 잔고(SPQM2226)에서 소수점 거래 행(dcml_dl_f = "1")만 모은 값
 function fractionalSection(ss) {
   const fs = ss.filter(s => s.frac_qty > 0).sort((a, b) => b.frac_krw - a.frac_krw);
@@ -734,7 +781,7 @@ function drawHoldings(items, total, max) {
   $("#kb-refresh").onclick = async () => {
     const b = $("#kb-refresh");
     b.disabled = true;
-    try { await Promise.all([loadHoldings(true), load(true)]); } finally { b.disabled = false; }
+    try { await Promise.all([loadHoldings(true), load(true), loadRecurring(true)]); } finally { b.disabled = false; }
   };
   try { const c = localStorage.getItem("hold-color"); if (c === "change" || c === "pl") hold.color = c; } catch {}
   const syncColor = () => document.querySelectorAll("#h-color button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === hold.color));
@@ -756,6 +803,7 @@ function drawHoldings(items, total, max) {
     return;
   }
   loadHoldings();
+  loadRecurring();
   load();
 })();
 </script>
