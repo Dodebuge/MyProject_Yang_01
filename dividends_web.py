@@ -18,7 +18,7 @@ API:
     GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...], "etf": {...}}
     GET /api/quarters?market=kr|us -> {"quarters", "asOf", "sectors": [{"name", "values"}], "stocks": [...], "failed"}
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
-    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today"}}  잔고 TR
+    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     내정보 API 두 개는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.

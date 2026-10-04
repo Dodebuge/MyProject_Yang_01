@@ -15,7 +15,7 @@
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
 | `spring-app/` | Spring Boot 버전, 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)) |
-| `toss_openapi_sample/` | 같은 화면을 토스증권 OpenAPI로 만든 버전 ([toss_openapi_sample/README.md](toss_openapi_sample/README.md), 리눅스 테스트 방법 포함) |
+| `../toss_openapi_sample/` | 같은 화면을 토스증권 OpenAPI로 만든 버전 ([toss_openapi_sample/README.md](../toss_openapi_sample/README.md), 리눅스 테스트 방법 포함) |
 | `heatmap.py` / `heatmap.html` | 국내·미국 섹터 히트맵 (같은 서버의 `/heatmap`) |
 
 ## 실행
@@ -81,6 +81,7 @@ appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1
 - 국내 상장 ETF 섹터별 개수: 전체 상장 종목(`IVS10920`, 약 4,300개)에서 운용사 브랜드로 ETF를 골라(ETN 제외) `heatmap.py`의 `ETF_RULES` 이름 키워드로 섹터를 나눕니다.
   조회할 때마다 ETF 코드 목록을 `etf_snapshot.json`에 날짜별로 저장하고, 직전 날짜 대비 새로 상장된 ETF 수를 "신규"로 보여 줍니다.
 - 내 보유 (`/me`, `/api/holdings`): 잔고 TR(`SSQM2952` 국내, `SPQM2226` 해외·소수점 포함)로 보유 종목을 조회하고 오늘 등락률은 `IVU10140`·`GSS10030`으로 받습니다.
+- 토스 계좌 합산: `toss_openapi_sample/.env`(저장소 안 또는 옆 폴더)가 있으면 토스 보유 종목·매수 가능 금액(`fetch_my`)도 함께 조회해 종목마다 `KB`/`토스` 태그로 보여 줍니다. 토스 조회가 실패해도 KB 값은 보여 줍니다.
   현금은 `SSQM2952`의 D+2 추정예수금 + 외화예수금 원화환산이고, 종목도 같은 D+2 기준인 결제 후 잔량(`ec_q`)으로 셉니다
   (매도 후 결제 대기 중인 종목은 빼고 그 대금은 현금에 포함). 원화 평가금액은 KB 앱과 같은 `SSQM2952`의 `val_amt`를 씁니다.
   히트맵 칸 크기 = 총자산(현금 포함) 대비 비중, 색 = 오늘 등락률(±3%) 또는 수익률(±10%). 보유 내역과 배당 내역은 하루(한국 날짜) 한 번만 KB를 조회해 `kb.db`(SQLite, `.env`와 같은 폴더)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.

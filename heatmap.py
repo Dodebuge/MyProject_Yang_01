@@ -295,12 +295,50 @@ def fetch_my(client: KBClient) -> dict:
     return {"stocks": [h for h in _parallel(quote, list(holdings.values())) if h["cap"] > 0], "cash": cash}
 
 
+# 저장소 안(git clone) 또는 저장소 옆 폴더
+TOSS_DIR = next((d for d in (Path(__file__).resolve().parent / "toss_openapi_sample",
+                             Path(__file__).resolve().parent.parent / "toss_openapi_sample") if d.exists()),
+                Path(__file__).resolve().parent / "toss_openapi_sample")
+
+
+def fetch_toss() -> dict | None:
+    """토스증권 계좌의 보유 종목과 현금 (../toss_openapi_sample의 fetch_my). 토스 .env가 없으면 None.
+
+    토스 샘플에도 heatmap.py·daily_store.py가 있어 이름이 겹치므로 toss_heatmap 이름으로 따로 불러옵니다.
+    토스 토큰은 클라이언트당 1개만 유효해, 토스 web.py가 같은 키로 돌고 있으면 그쪽 토큰이 무효화됩니다(자동 재발급).
+    """
+    if not (TOSS_DIR / ".env").exists():
+        return None
+    import importlib.util
+    if str(TOSS_DIR) not in sys.path:
+        sys.path.append(str(TOSS_DIR))  # 뒤에 붙여 daily_store 등은 KB 것을 쓰고, toss_client만 토스 폴더에서 찾음
+    from dotenv import load_dotenv
+    load_dotenv(TOSS_DIR / ".env")
+    spec = importlib.util.spec_from_file_location("toss_heatmap", TOSS_DIR / "heatmap.py")
+    toss = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(toss)
+    return toss.fetch_my(toss.TossClient.from_env())
+
+
 def query_holdings(client: KBClient, refresh: bool = False) -> dict:
-    """내 보유 종목 (내정보 화면). 하루 한 번만 KB에서 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
-    refresh=True면 지금 다시 조회해 오늘 값을 덮어씁니다."""
+    """내 보유 종목 (내정보 화면). 하루 한 번만 KB·토스에서 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+    refresh=True면 지금 다시 조회해 오늘 값을 덮어씁니다. 종목마다 broker("KB"/"토스")가 붙고, cash.toss는 토스 현금(원)입니다.
+    토스 조회가 실패해도 KB 값은 보여 주고 tossError에 이유를 남깁니다."""
     def fetch() -> dict:
         client.access_token
-        return {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **fetch_my(client)}
+        my = fetch_my(client)
+        for s in my["stocks"]:
+            s["broker"] = "KB"
+        result = {"fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **my}
+        try:
+            toss = fetch_toss()
+        except Exception as e:  # 허용 IP 미등록(403) 등
+            result["tossError"] = f"{type(e).__name__}: {e}"
+            return result
+        if toss:
+            my["stocks"] += [{**s, "broker": "토스"} for s in toss["stocks"]]
+            my["cash"]["toss"] = toss["cash"]["krw"] + toss["cash"]["fx_krw"]
+        return result
     return daily("holdings", fetch, refresh)
 
 

@@ -473,7 +473,7 @@ const share = (n, total) => fmt(n / total * 100, 1) + "%";
 
 async function loadHoldings(refresh = false) {
   $("#h-fetch").disabled = true;
-  $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB증권에서 잔고와 시세를 다시 조회하고 있습니다." : "잔고와 시세를 불러오고 있습니다."}</div>`;
+  $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB·토스증권에서 잔고와 시세를 다시 조회하고 있습니다." : "잔고와 시세를 불러오고 있습니다."}</div>`;
   try {
     const res = await fetch(`api/holdings${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
     const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
@@ -492,9 +492,9 @@ function renderHoldings() {
   const d = hold.data;
   if (!d) return;
   const ss = [...d.stocks].sort((a, b) => b.cap - a.cap);
-  const cash = d.cash.krw + d.cash.fx_krw;
+  const cash = d.cash.krw + d.cash.fx_krw + (d.cash.toss || 0);
   const stock = sum(ss, s => s.cap), total = stock + cash;
-  $("#h-status").textContent = `조회 ${d.fetchedAt} · 잔고 TR(SSQM2952, SPQM2226) · 하루 한 번 조회해 저장, 날짜가 바뀌면 다시 조회`;
+  $("#h-status").textContent = `조회 ${d.fetchedAt} · KB 잔고 TR(SSQM2952, SPQM2226)${d.cash.toss != null ? " + 토스 /holdings" : ""} · 하루 한 번 조회해 저장, 날짜가 바뀌면 다시 조회`;
   if (!total) { $("#h-body").innerHTML = `<div class="empty">보유 종목과 현금이 없습니다.</div>`; return; }
 
   const kr = sum(ss.filter(s => s.market === "국내"), s => s.cap), us = sum(ss.filter(s => s.market === "미국"), s => s.cap);
@@ -520,7 +520,7 @@ function renderHoldings() {
     <div class="scroll" style="margin-top:16px"><table class="list">
       <thead><tr><th class="l">종목</th><th class="l hide-sm">섹터</th><th class="hide-sm">수량</th><th class="hide-sm">현재가</th><th>평가금액</th><th>비중</th><th>오늘</th><th>수익률</th></tr></thead>
       <tbody>${ss.map(s => `<tr>
-        <td class="l nm" title="${esc(s.code)}">${esc(s.name)} <span class="tag">${s.market}</span></td>
+        <td class="l nm" title="${esc(s.code)}">${esc(s.name)} <span class="tag">${s.broker ?? "KB"}</span> <span class="tag">${s.market}</span></td>
         <td class="l hide-sm">${esc(s.sector)}</td><td class="hide-sm">${qtyText(s.qty)}</td><td class="hide-sm">${priceText(s)}</td>
         <td>${fmt(s.cap)}</td><td>${share(s.cap, total)}</td><td>${pctCell(s.change)}</td><td>${pctCell(s.pl)}</td></tr>`).join("")}
         <tr><td class="l">현금 <span class="tag">예수금</span></td><td class="l hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td>
@@ -528,7 +528,8 @@ function renderHoldings() {
       <tfoot><tr><td class="l">합계</td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td><td>${fmt(total)}</td><td>100%</td>
         <td>${pctCell(weightedBy(ss, s => s.change))}</td><td>${pctCell(plTotal(ss))}</td></tr></tfoot>
     </table></div>
-    <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>
+    <div class="note">현금은 D+2 추정예수금(결제 예정 매매 반영, 오늘 예수금 ${fmt(d.cash.today)}원)과 외화예수금 원화환산${d.cash.toss != null ? `, 토스 매수 가능 금액 ${fmt(d.cash.toss)}원` : ""}입니다. 해외 수익률은 달러 기준(환차손익 제외)이고, 수익률 —는 결제 전이라 매입금액이 아직 없는 종목입니다.</div>
+    ${d.tossError ? `<div class="error" style="margin-top:12px"><b>토스 계좌를 조회하지 못해 KB만 보여 줍니다</b><br>${esc(d.tossError)}</div>` : ""}
     ${fractionalSection(ss)}`;
   renderPlan(ss.filter(s => s.frac_qty > 0).sort((a, b) => b.frac_krw - a.frac_krw));
   drawHoldings([...ss, { name: "현금", code: "", cash: true, cap: cash }], total, max);
@@ -700,7 +701,7 @@ function drawHoldings(items, total, max) {
     g.addEventListener("pointermove", e => {
       tip.innerHTML = s.cash
         ? `<b>현금</b>` + row("금액", fmt(s.cap) + "원") + row("비중", share(s.cap, total))
-        : `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)} · ${s.market}</span></b>` +
+        : `<b>${esc(s.name)} <span style="color:var(--muted);font-weight:400">${esc(s.code)} · ${s.broker ?? "KB"} · ${s.market}</span></b>` +
           row("비중", share(s.cap, total)) + row("평가금액", fmt(s.cap) + "원") + row("섹터", esc(s.sector)) +
           row("보유 수량", qtyText(s.qty)) + row("현재가", priceText(s)) + row("오늘", pctCell(s.change)) + row("수익률", pctCell(s.pl));
       tip.style.opacity = 1;
