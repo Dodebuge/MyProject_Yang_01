@@ -29,6 +29,20 @@ cp target/kb-openapi.war /opt/tomcat/webapps/    # -> http://서버IP:8080/kb-op
   또는 `toss_openapi_sample/.env`(설정 폴더 안이나 옆)에 두면 켜집니다. 없으면 KB만 보여 줍니다.
 - `etf_snapshot.json`: 자동 생성. Tomcat 실행 사용자에게 쓰기 권한이 있어야 합니다.
 
+## 토스 연결 테스트 (JUnit)
+
+`src/test/java/kb/app/TossClientTest.java`: 토큰 발급, 계좌, 보유 종목, 환율, 매수 가능 금액을 실제로 호출해 토스 연결을 검사합니다.
+평소 빌드(`mvn package`)에서는 건너뛰고, `-Dtoss.live=true`를 줄 때만 실행합니다.
+
+```bash
+cd java-app
+mvn test -Dtoss.live=true                                   # 키는 서버와 같은 순서로 찾음 (환경변수 > .env > toss_openapi_sample/.env)
+mvn test -Dtoss.live=true -Dkb.data.dir=/opt/kb_openapi_sample
+../spring-app/mvnw test -Dtoss.live=true                    # Maven이 없을 때
+```
+
+실패하면 대부분 허용 IP 미등록(403)이나 키 오류(401 `invalid_client`)입니다. 토스 토큰은 키당 1개만 유효해, 같은 키로 돌고 있는 서버의 토큰은 무효화됩니다(서버가 자동 재발급).
+
 ## 확인한 것
 
 Windows의 Tomcat 9.0.122 + JDK 17에서 Python 서버와 같은 요청으로 비교했고, jakarta로 바꾼 뒤 Tomcat 10.1.60(Java 11 대상 빌드)에서 다시 확인했습니다.
