@@ -6,7 +6,8 @@
 | Java | Python |
 |---|---|
 | `KBClient.java` | `kb_client.py` (토큰 캐싱, processFlag 검사, 고정길이 값 정리, 5xx 재시도) |
-| `Dividends.java` | `dividends.py`, `dividends_web.query_dividends` |
+| `Dividends.java` | `dividends.py`, `dividends_web.query_dividends`, `query_recurring` (소수점 정기 구매 내역) |
+| `TossClient.java` | `toss_openapi_sample`의 `toss_client.py` + `heatmap.fetch_my` (내정보에 토스 계좌 합산) |
 | `Heatmap.java` | `heatmap.py` (섹터 히트맵, ETF 분류·스냅숏, 분기별 거래대금, 보유 종목) |
 | `AppServlet.java` | `dividends_web.py` (페이지와 `/api/*` 경로) |
 
@@ -24,6 +25,8 @@ cp target/kb-openapi.war /opt/tomcat/webapps/    # -> http://서버IP:8080/kb-op
 설정 폴더(기본 `/opt/kb_openapi_sample`, `web.xml`의 `dataDir` 또는 환경변수 `KB_DATA_DIR`)에
 
 - `.env`: `KB_OPENAPI_BASE_URL`, `KB_OPENAPI_APP_KEY`, `KB_OPENAPI_APP_SECRET` (환경변수로 줘도 됨, 환경변수가 우선)
+- 토스 계좌 합산(선택): `TOSS_OPENAPI_CLIENT_ID`, `TOSS_OPENAPI_CLIENT_SECRET`(, `TOSS_OPENAPI_ACCOUNT_SEQ`)을 `.env`나 환경변수,
+  또는 `toss_openapi_sample/.env`(설정 폴더 안이나 옆)에 두면 켜집니다. 없으면 KB만 보여 줍니다.
 - `etf_snapshot.json`: 자동 생성. Tomcat 실행 사용자에게 쓰기 권한이 있어야 합니다.
 
 ## 확인한 것

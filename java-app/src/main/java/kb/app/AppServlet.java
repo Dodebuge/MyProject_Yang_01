@@ -27,11 +27,13 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /docs/*.html                    -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
- *   GET /api/holdings                   -> 보유 종목과 현금
+ *   GET /api/holdings                   -> 보유 종목과 현금 (KB + 토스)
  *   GET /api/dividends?year=2026        -> 배당 내역
- *   (내정보 API 두 개는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
+ *   GET /api/recurring                  -> 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
+ *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
+ * 토스 계좌 합산: .env(또는 dataDir/toss_openapi_sample/.env)에 TOSS_OPENAPI_CLIENT_ID/SECRET이 있으면 켜집니다.
  * 환경변수 KB_DATA_DIR가 있으면 그 값을 씁니다. KB_OPENAPI_* 환경변수는 .env보다 우선합니다.
  */
 public class AppServlet extends HttpServlet {
@@ -70,12 +72,19 @@ public class AppServlet extends HttpServlet {
             throw new ServletException("KB OpenAPI 설정을 읽지 못했습니다 (" + dataDir + "): " + e.getMessage(), e);
         }
         DailyStore store = new DailyStore(dataDir.resolve("kb.db"));  // 내정보: 하루 한 번만 KB 조회
-        heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store);
+        TossClient toss;
+        try {
+            toss = TossClient.fromDataDir(dataDir);  // 토스 키가 있으면 내정보에 토스 계좌 합산
+        } catch (IOException e) {
+            throw new ServletException("토스 OpenAPI 설정을 읽지 못했습니다 (" + dataDir + "): " + e.getMessage(), e);
+        }
+        heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, toss);
         dividends = new Dividends(client, store);
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
+        apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
         apis.put("/api/dividends", req -> {
             String year = param(req, "year", String.valueOf(LocalDate.now().getYear()));
             try {

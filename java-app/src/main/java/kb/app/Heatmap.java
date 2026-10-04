@@ -149,12 +149,14 @@ final class Heatmap {
     private final KBClient client;
     private final Path snapshotFile;
     private final DailyStore store;
+    private final TossClient toss;  // null이면 내정보에 토스 계좌를 합산하지 않음
     private final Map<String, Object[]> cache = new ConcurrentHashMap<>();  // key -> {저장 시각(ms), payload}
 
-    Heatmap(KBClient client, Path snapshotFile, DailyStore store) {
+    Heatmap(KBClient client, Path snapshotFile, DailyStore store, TossClient toss) {
         this.client = client;
         this.snapshotFile = snapshotFile;
         this.store = store;
+        this.toss = toss;
     }
 
     @SuppressWarnings("unchecked")
@@ -497,15 +499,38 @@ final class Heatmap {
     // ------------------------------------------------------------------ 보유 종목
 
     /**
-     * GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+     * GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB·토스를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
      * refresh(?refresh=1)면 지금 다시 조회해 오늘 값을 덮어씁니다.
+     * 종목마다 broker("KB"/"토스")가 붙고 cash.toss는 토스 현금(원). 토스 조회가 실패해도 KB 값은 돌려주고 tossError에 이유를 남깁니다.
      */
+    @SuppressWarnings("unchecked")
     Map<String, Object> queryHoldings(boolean refresh) throws IOException {
         return store.daily("holdings", refresh, () -> {
             client.accessToken();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("fetchedAt", now());
             payload.putAll(fetchMy());
+            List<Map<String, Object>> stocks = (List<Map<String, Object>>) payload.get("stocks");
+            stocks.forEach(s -> s.put("broker", "KB"));
+            if (toss == null) {
+                return payload;
+            }
+            try {
+                Map<String, Object> my = toss.fetchMy();
+                for (Map<String, Object> s : (List<Map<String, Object>>) my.get("stocks")) {
+                    if (s.get("sector") == null) {  // 국내 일반 종목: KB 투자지표의 업종
+                        Map<String, Object> m = orNull(() -> client.call("IVM10050", body("is_cd", (String) s.get("code"))));
+                        String sector = m == null ? "" : Values.str(m.get("indx_nm")).replace("코스피 ", "").replace("코스닥 ", "").trim();
+                        s.put("sector", sector.isEmpty() ? "미분류" : sector);
+                    }
+                    s.put("broker", "토스");
+                    stocks.add(s);
+                }
+                Map<String, Object> cash = (Map<String, Object>) my.get("cash");
+                ((Map<String, Object>) payload.get("cash")).put("toss", (Long) cash.get("krw") + (Long) cash.get("fx_krw"));
+            } catch (IOException | RuntimeException e) {  // 허용 IP 미등록(403) 등
+                payload.put("tossError", e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
             return payload;
         });
     }

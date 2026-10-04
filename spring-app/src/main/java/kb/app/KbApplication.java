@@ -36,8 +36,9 @@ public class KbApplication {
     }
 
     @Bean
-    Heatmap heatmap(KBClient client, @Value("${kb.data-dir}") Path dataDir, DailyStore store) {
-        return new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store);
+    Heatmap heatmap(KBClient client, @Value("${kb.data-dir}") Path dataDir, DailyStore store) throws IOException {
+        // 토스 키(TOSS_OPENAPI_CLIENT_ID/SECRET)가 있으면 내정보에 토스 계좌 합산, 없으면 null
+        return new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, TossClient.fromDataDir(dataDir));
     }
 
     @Bean
