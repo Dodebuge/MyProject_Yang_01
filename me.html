@@ -17,7 +17,7 @@
   --series-1: #2a78d6;   /* 국내 */
   --series-2: #eb6834;   /* 해외 */
   --select: rgba(42,120,214,0.08);
-  --bad: #d03b3b;
+  --bad: #d03b3b; --good: #1f8a4c;
   --up: #e34948; --down: #2a78d6; --flat: #e1e0d9;
 }
 @media (prefers-color-scheme: dark) {
@@ -25,7 +25,7 @@
     color-scheme: dark;
     --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
-    --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+    --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767; --good: #3fb36d;
     --up: #e66767; --down: #3987e5; --flat: #383835;
   }
 }
@@ -33,7 +33,7 @@
   color-scheme: dark;
   --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
-  --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767;
+  --series-1: #3987e5; --series-2: #d95926; --select: rgba(57,135,229,0.14); --bad: #e66767; --good: #3fb36d;
     --up: #e66767; --down: #3987e5; --flat: #383835;
 }
 
@@ -106,6 +106,8 @@ table.list tr.selected td { background: var(--select); }
 table.list tfoot td { font-weight: 650; border-bottom: 0; border-top: 1px solid var(--axis); }
 td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .neg { color: var(--bad); }
+.conn { font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: nowrap; margin-left: 6px; }
+.conn i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--ink-2); }
 .scroll { overflow-x: auto; }
 .show-sm { display: none; }
@@ -169,7 +171,7 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 
   <section class="card" id="holdings">
     <div class="card-head">
-      <div><h2>보유 종목 현황</h2><p class="sub" id="h-status"></p></div>
+      <div><h2>보유 종목 현황 <span class="conn" id="toss-conn"></span></h2><p class="sub" id="h-status"></p></div>
       <div class="controls">
         <div class="seg" id="h-color" role="group" aria-label="색 기준">
           <button data-v="change">오늘 등락률</button><button data-v="pl">수익률</button>
@@ -476,6 +478,14 @@ const priceText = s => s.market === "미국" ? "$" + fmt(+s.price, 2) : fmt(+s.p
 const qtyText = q => fmt(q, Number.isInteger(q) ? 0 : 4);
 const share = (n, total) => fmt(n / total * 100, 1) + "%";
 
+// 토스 연결 상태: 실패면 tossError, 성공이면 cash.toss가 오고, 둘 다 없으면 서버에 토스 키가 없는 것 (Python·Java 서버 공통)
+function tossConn(d) {
+  const [color, text, title] = d.tossError ? ["var(--bad)", "토스 연결 실패", d.tossError]
+    : d.cash.toss != null ? ["var(--good)", "토스 연결됨", `토스 현금 ${fmt(d.cash.toss)}원 · 보유 ${d.stocks.filter(s => s.broker === "토스").length}종목`]
+    : ["var(--muted)", "토스 미설정", "서버에 TOSS_OPENAPI_CLIENT_ID/SECRET이 없어 KB만 조회했습니다"];
+  return `<i style="background:${color}"></i><span title="${esc(title)}">${text}</span>`;
+}
+
 async function loadHoldings(refresh = false) {
   $("#h-fetch").disabled = true;
   $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB·토스증권에서 잔고와 시세를 다시 조회하고 있습니다." : "잔고와 시세를 불러오고 있습니다."}</div>`;
@@ -499,6 +509,7 @@ function renderHoldings() {
   const ss = [...d.stocks].sort((a, b) => b.cap - a.cap);
   const cash = d.cash.krw + d.cash.fx_krw + (d.cash.toss || 0);
   const stock = sum(ss, s => s.cap), total = stock + cash;
+  $("#toss-conn").innerHTML = tossConn(d);
   $("#h-status").textContent = `조회 ${d.fetchedAt} · KB 잔고 TR(SSQM2952, SPQM2226)${d.cash.toss != null ? " + 토스 /holdings" : ""} · 하루 한 번 조회해 저장, 날짜가 바뀌면 다시 조회`;
   if (!total) { $("#h-body").innerHTML = `<div class="empty">보유 종목과 현금이 없습니다.</div>`; return; }
 

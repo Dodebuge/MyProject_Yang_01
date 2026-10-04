@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.zip.GZIPInputStream;
 
 /**
  * 토스증권 OpenAPI 클라이언트 + 내 보유 종목 (toss_openapi_sample의 toss_client.py, heatmap.fetch_my).
@@ -163,7 +164,9 @@ final class TossClient {
                 continue;
             }
             String text;
-            try (InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+            try (InputStream raw = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                 // 토스는 요청하지 않아도 오류 응답을 gzip으로 보내는데, HttpURLConnection은 자동으로 풀지 않습니다.
+                 InputStream in = raw != null && "gzip".equalsIgnoreCase(conn.getContentEncoding()) ? new GZIPInputStream(raw) : raw) {
                 text = in == null ? "" : new Scanner(in, "UTF-8").useDelimiter("\\A").next();
             } catch (java.util.NoSuchElementException e) {
                 text = "";

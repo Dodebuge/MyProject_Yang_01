@@ -528,8 +528,10 @@ final class Heatmap {
                 }
                 Map<String, Object> cash = (Map<String, Object>) my.get("cash");
                 ((Map<String, Object>) payload.get("cash")).put("toss", (Long) cash.get("krw") + (Long) cash.get("fx_krw"));
+                System.out.println("[토스] 연결 성공: " + ((List<?>) my.get("stocks")).size() + "종목, 현금 " + ((Map<String, Object>) payload.get("cash")).get("toss") + "원");
             } catch (IOException | RuntimeException e) {  // 허용 IP 미등록(403) 등
                 payload.put("tossError", e.getClass().getSimpleName() + ": " + e.getMessage());
+                System.out.println("[토스] 연결 실패: " + payload.get("tossError"));
             }
             return payload;
         });
