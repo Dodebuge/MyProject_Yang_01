@@ -33,7 +33,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
- * 토스 계좌 합산: .env(또는 dataDir/toss_openapi_sample/.env)에 TOSS_OPENAPI_CLIENT_ID/SECRET이 있으면 켜집니다.
+ * 토스 계좌 합산: 같은 .env(또는 환경변수)에 TOSS_OPENAPI_CLIENT_ID/SECRET이 있으면 켜집니다.
  * 환경변수 KB_DATA_DIR가 있으면 그 값을 씁니다. KB_OPENAPI_* 환경변수는 .env보다 우선합니다.
  */
 public class AppServlet extends HttpServlet {

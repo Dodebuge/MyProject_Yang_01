@@ -55,21 +55,21 @@ final class TossClient {
     }
 
     /**
-     * 환경변수 > dataDir/.env > dataDir/toss_openapi_sample/.env > dataDir/../toss_openapi_sample/.env 순으로
-     * TOSS_OPENAPI_CLIENT_ID/SECRET을 찾습니다. 없으면 null (토스 합산 안 함).
+     * 환경변수 > dataDir/.env(저장소 루트, KB 키와 같은 파일) 순으로 TOSS_OPENAPI_CLIENT_ID/SECRET을 찾습니다.
+     * 없으면 null (토스 합산 안 함). 어디서 찾았는지(또는 못 찾았는지) 콘솔에 한 줄 남깁니다.
      */
     static TossClient fromDataDir(Path dataDir) throws IOException {
-        Map<String, String> env = new LinkedHashMap<>();
-        for (Path p : Arrays.asList(dataDir.resolve("../toss_openapi_sample/.env"), dataDir.resolve("toss_openapi_sample/.env"),
-                dataDir.resolve(".env"))) {
-            env.putAll(readEnvFile(p));  // 뒤에 읽은 것이 우선
-        }
+        Path file = dataDir.resolve(".env").toAbsolutePath().normalize();
+        Map<String, String> env = readEnvFile(file);
+        String from = System.getenv().getOrDefault("TOSS_OPENAPI_CLIENT_ID", "").isEmpty() ? file.toString() : "환경변수";
         env.putAll(System.getenv());
         String id = env.getOrDefault("TOSS_OPENAPI_CLIENT_ID", "");
         String secret = env.getOrDefault("TOSS_OPENAPI_CLIENT_SECRET", "");
         if (id.isEmpty() || secret.isEmpty()) {
+            System.out.println("[토스] 미설정: 환경변수와 " + file + "에 TOSS_OPENAPI_CLIENT_ID/SECRET 없음 -> KB만 조회");
             return null;
         }
+        System.out.println("[토스] 설정됨: " + from + " -> 내정보에 토스 계좌 합산");
         return new TossClient(id, secret, env.getOrDefault("TOSS_OPENAPI_BASE_URL", DEFAULT_BASE_URL),
                 env.getOrDefault("TOSS_OPENAPI_ACCOUNT_SEQ", ""));
     }

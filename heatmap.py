@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -295,29 +296,35 @@ def fetch_my(client: KBClient) -> dict:
     return {"stocks": [h for h in _parallel(quote, list(holdings.values())) if h["cap"] > 0], "cash": cash}
 
 
-# 저장소 안(git clone) 또는 저장소 옆 폴더
+# 토스 API 코드(toss_client.py, heatmap.fetch_my)가 있는 폴더: 저장소 안(git clone) 또는 저장소 옆 폴더
 TOSS_DIR = next((d for d in (Path(__file__).resolve().parent / "toss_openapi_sample",
                              Path(__file__).resolve().parent.parent / "toss_openapi_sample") if d.exists()),
                 Path(__file__).resolve().parent / "toss_openapi_sample")
 
 
+def toss_settings() -> dict | None:
+    """토스 키. 환경변수 또는 저장소 루트 .env(kb_client가 읽어 둠)의 TOSS_OPENAPI_*. 없으면 None (토스 합산 안 함)."""
+    s = {k: os.environ.get(f"TOSS_OPENAPI_{k.upper()}", "") for k in ("client_id", "client_secret", "base_url", "account_seq")}
+    return s if s["client_id"] and s["client_secret"] else None
+
+
 def fetch_toss() -> dict | None:
-    """토스증권 계좌의 보유 종목과 현금 (../toss_openapi_sample의 fetch_my). 토스 .env가 없으면 None.
+    """토스증권 계좌의 보유 종목과 현금 (toss_openapi_sample의 fetch_my). 루트 .env에 토스 키가 없으면 None.
 
     토스 샘플에도 heatmap.py·daily_store.py가 있어 이름이 겹치므로 toss_heatmap 이름으로 따로 불러옵니다.
+    키는 불러오기 전에 읽습니다: toss_client.py가 import될 때 toss_openapi_sample/.env를 읽어 환경변수를 채우기 때문입니다.
     토스 토큰은 클라이언트당 1개만 유효해, 토스 web.py가 같은 키로 돌고 있으면 그쪽 토큰이 무효화됩니다(자동 재발급).
     """
-    if not (TOSS_DIR / ".env").exists():
+    settings = toss_settings()
+    if not settings:
         return None
     import importlib.util
     if str(TOSS_DIR) not in sys.path:
         sys.path.append(str(TOSS_DIR))  # 뒤에 붙여 daily_store 등은 KB 것을 쓰고, toss_client만 토스 폴더에서 찾음
-    from dotenv import load_dotenv
-    load_dotenv(TOSS_DIR / ".env")
     spec = importlib.util.spec_from_file_location("toss_heatmap", TOSS_DIR / "heatmap.py")
     toss = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(toss)
-    return toss.fetch_my(toss.TossClient.from_env())
+    return toss.fetch_my(toss.TossClient(**{k: v for k, v in settings.items() if v}))  # 빈 값(base_url 등)은 기본값
 
 
 def query_holdings(client: KBClient, refresh: bool = False) -> dict:
@@ -339,7 +346,8 @@ def query_holdings(client: KBClient, refresh: bool = False) -> dict:
             my["stocks"] += [{**s, "broker": "토스"} for s in toss["stocks"]]
             my["cash"]["toss"] = toss["cash"]["krw"] + toss["cash"]["fx_krw"]
         return result
-    return daily("holdings", fetch, refresh)
+    # 토스 설정 여부로 저장 이름을 나눕니다: 키를 넣기 전에 저장된(토스 없는) 오늘 값을 그대로 돌려주지 않도록. (Java와 같은 이름)
+    return daily("holdings+toss" if toss_settings() else "holdings", fetch, refresh)
 
 
 # ---------------------------------------------------------------------- 분기별 거래대금

@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  *   ../spring-app/mvnw test -Dtoss.live=true                  (java-app 폴더에서)
  *   ../spring-app/mvnw test -Dtoss.live=true -Dkb.data.dir=/opt/kb_openapi_sample
  *
- * 키는 서버와 같은 순서로 찾습니다: 환경변수 > {dataDir}/.env > {dataDir}/toss_openapi_sample/.env > {dataDir}/../toss_openapi_sample/.env
+ * 키는 서버와 같은 곳에서 찾습니다: 환경변수 > {dataDir}/.env (저장소 루트 .env)
  * dataDir 기본값은 KB_DATA_DIR 환경변수, 없으면 저장소 루트(java-app의 상위 폴더).
  * 실패하면 대부분 허용 IP 미등록(403)이나 키 오류(401 invalid_client)입니다.
  * 토스 토큰은 클라이언트당 1개만 유효해, 같은 키로 돌고 있는 서버의 토큰은 무효화됩니다(서버가 자동 재발급).

@@ -30,7 +30,7 @@ KB_DATA_DIR=/opt/kb_openapi_sample java -jar target/kb-openapi-spring.jar   # ht
 | `PageController.java` | `/`, `/heatmap`, `/me` → `static/*.html` |
 | `application.properties` | `server.port`(환경변수 `PORT`), `kb.data-dir`(환경변수 `KB_DATA_DIR`) |
 
-- 토스 계좌 합산은 `kb.data-dir`의 `.env`(또는 `toss_openapi_sample/.env`)에 `TOSS_OPENAPI_CLIENT_ID/SECRET`이 있을 때만 켜집니다.
+- 토스 계좌 합산은 `kb.data-dir`의 `.env`(`run.sh`/`run.cmd`는 저장소 루트 `.env`) 또는 환경변수에 `TOSS_OPENAPI_CLIENT_ID/SECRET`이 있을 때만 켜집니다.
 - 핵심 로직은 새로 쓰지 않고 `../java-app/src/main/java`(KBClient, TossClient, Heatmap, Dividends)를 함께 컴파일합니다
   (`build-helper-maven-plugin`). 로직을 고치면 Tomcat WAR 버전과 Spring 버전에 같이 반영됩니다.
 - 화면은 저장소 루트의 `home.html`, `heatmap.html`, `me.html`을 빌드할 때 `static/`으로 복사합니다.

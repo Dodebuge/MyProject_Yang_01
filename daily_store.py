@@ -20,7 +20,7 @@ DB = Path(__file__).resolve().parent / "kb.db"
 KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없어 고정 오프셋으로 충분합니다
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS daily (
-  kind       TEXT NOT NULL,   -- 'holdings', 'dividends:2026'
+  kind       TEXT NOT NULL,   -- 'holdings'(토스 합산이면 'holdings+toss'), 'dividends:2026', 'recurring'
   date       TEXT NOT NULL,   -- 한국 날짜 '2026-09-28'
   fetched_at TEXT NOT NULL,
   payload    TEXT NOT NULL,   -- API 응답 JSON 그대로

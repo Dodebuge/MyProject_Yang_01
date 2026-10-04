@@ -505,7 +505,8 @@ final class Heatmap {
      */
     @SuppressWarnings("unchecked")
     Map<String, Object> queryHoldings(boolean refresh) throws IOException {
-        return store.daily("holdings", refresh, () -> {
+        // 토스 설정 여부로 저장 이름을 나눕니다: 키를 넣기 전에 저장된(토스 없는) 오늘 값을 그대로 돌려주지 않도록.
+        return store.daily(toss == null ? "holdings" : "holdings+toss", refresh, () -> {
             client.accessToken();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("fetchedAt", now());
