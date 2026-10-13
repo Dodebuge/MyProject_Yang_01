@@ -21,6 +21,7 @@ API:
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
     GET /api/search?q=삼성         -> {"query", "results": [{"market", "code", "name", "exchange"}]}  국내 이름·종목번호, 미국 티커
     GET /api/chart?market=kr|us&code=005930[&exchange=NAS] -> {"market", "code", "name", "exchange", "currency", "candles": [{"d","o","h","l","c","v","amt"}]}
+    GET /api/recent                -> {"items": [{"market", "code", "exchange", "name"}]}  최근 검색 종목 (recent_searches.txt, 최대 10개)
     GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
@@ -125,6 +126,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: chart.search(client, q.get("q", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/chart":
                 self._api(lambda q: chart.chart(client, q.get("market", ["kr"])[0], q.get("code", [""])[0], q.get("exchange", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/recent":
+                self._api(lambda q: {"items": chart.recent()}, {})
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():

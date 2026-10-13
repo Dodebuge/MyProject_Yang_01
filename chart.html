@@ -68,6 +68,12 @@ input { cursor: text; }
 .results button { width: 100%; display: flex; gap: 10px; align-items: baseline; text-align: left; border: 0; border-radius: 8px; background: none; padding: 8px 10px; }
 .results button:hover, .results button:focus-visible { background: var(--hover); }
 .results .code { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.recent { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.recent .label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.recent button { padding: 3px 10px; font-size: 13px; border-radius: 999px; }
+.recent button:hover { background: var(--hover); }
+.recent button[aria-current="true"] { background: var(--select); color: var(--series-1); border-color: transparent; font-weight: 600; }
+.recent .code { color: var(--muted); font-size: 11px; margin-left: 4px; }
 .tag { font-size: 11px; color: var(--ink-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; margin-left: auto; white-space: nowrap; }
 
 .head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 12px; }
@@ -105,6 +111,7 @@ input { cursor: text; }
       <input id="q" type="search" placeholder="종목이름 · 종목번호 · 티커 (예: 삼성전자, 005930, AAPL)" autocomplete="off" aria-label="종목 검색" autofocus>
       <ul class="results" id="results"></ul>
     </div>
+    <div class="recent" id="recent" hidden></div>
   </section>
 
   <section class="card" id="chart-card" hidden>
@@ -180,9 +187,22 @@ async function load(params) {
     S.data = d; S.hover = null;
     document.title = `${d.name} 차트`;
     render();
+    loadRecent();  // 서버가 방금 연 종목을 최근 검색 맨 앞에 저장함
   } catch (err) {
     if (seq === loadSeq) $("#chart-body").innerHTML = `<div class="error"><b>차트를 불러오지 못했습니다</b><br>${esc(err.message)}</div>`;
   }
+}
+
+// ---------------------------------------------------------------- 최근 검색 (서버의 recent_searches.txt, 최대 10개)
+async function loadRecent() {
+  try {
+    const { items } = await getJson("api/recent");
+    const box = $("#recent");
+    box.hidden = !items.length;
+    box.innerHTML = `<span class="label">최근 검색</span>` + items.map((s, i) => `<button data-i="${i}"
+      aria-current="${S.data?.market === s.market && S.data?.code === s.code}" title="${s.market === "kr" ? "국내" : "미국"} ${esc(s.exchange)}">${esc(s.name)}<span class="code">${esc(s.code)}</span></button>`).join("");
+    box.querySelectorAll("button").forEach(b => b.onclick = () => pick(items[b.dataset.i]));
+  } catch { /* 최근 검색이 없어도 검색·차트는 그대로 */ }
 }
 
 function render() {
@@ -281,6 +301,7 @@ function draw(cs, dp, unit) {
     return;
   }
   fromUrl();
+  loadRecent();
 })();
 </script>
 </body>

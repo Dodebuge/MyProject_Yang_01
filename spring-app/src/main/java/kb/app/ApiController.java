@@ -24,6 +24,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/transactions            최근 1달 거래내역
  *   GET /api/search?q=               종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
+ *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
@@ -63,6 +64,11 @@ class ApiController {
     @GetMapping("/search")
     ResponseEntity<Map<String, Object>> search(@RequestParam(defaultValue = "") String q) throws IOException {
         return ok(chart.search(q));
+    }
+
+    @GetMapping("/recent")
+    ResponseEntity<Map<String, Object>> recent() throws IOException {
+        return ok(chart.recent());
     }
 
     @GetMapping("/chart")

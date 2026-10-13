@@ -33,6 +33,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/transactions               -> 최근 1달 거래내역
  *   GET /api/search?q=                  -> 종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
+ *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
@@ -84,13 +85,14 @@ public class AppServlet extends HttpServlet {
         }
         heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, toss);
         dividends = new Dividends(client, store);
-        Chart chart = new Chart(client);
+        Chart chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
+        apis.put("/api/recent", req -> chart.recent());
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", "")));
         apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {

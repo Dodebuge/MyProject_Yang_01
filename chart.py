@@ -3,12 +3,16 @@
 검색: 국내는 전체 상장 종목(IVS10920, 약 4,300개)의 이름·종목번호로, 미국은 티커로 찾습니다.
      KB OpenAPI에 미국 종목 목록 TR이 없어, 티커 모양(영문)이면 heatmap.US_STOCKS에 없어도 후보로 내고 차트 조회 때 거래소를 찾습니다.
 차트: 국내 IVS11560, 미국 GSC10060 일봉 최근 약 1년(250거래일).
+최근 검색: 차트를 연 종목을 recent_searches.txt에 최신순으로 RECENT_MAX개까지 저장합니다.
+     한 줄에 한 종목 "market<탭>code<탭>exchange<탭>name". 직접 고치거나 지워도 됩니다 (형식이 맞지 않는 줄은 무시).
 """
 
 from __future__ import annotations
 
 import re
+import threading
 import time
+from pathlib import Path
 
 from heatmap import US_STOCKS, _valid_day
 from kb_client import KBApiError, KBClient
@@ -18,7 +22,34 @@ CHART_DAYS = "250"
 US_EXCHANGES = ("NAS", "NYS", "AMX")  # 나스닥, 뉴욕, 아멕스(NYSE Arca ETF 포함)
 TICKER = re.compile(r"[A-Z][A-Z.]{0,5}")
 
+RECENT_FILE = Path(__file__).resolve().parent / "recent_searches.txt"
+RECENT_MAX = 10  # 최근 검색 종목 수
+
 _kr: tuple[float, list[dict]] = (0.0, [])
+_recent_lock = threading.Lock()
+
+
+def recent() -> list[dict]:
+    """최근 검색 종목 (최신순, 최대 RECENT_MAX개)."""
+    try:
+        lines = RECENT_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in lines:
+        p = line.split("\t")
+        if len(p) == 4 and p[0] in ("kr", "us") and p[1]:
+            out.append({"market": p[0], "code": p[1], "exchange": p[2], "name": p[3]})
+    return out[:RECENT_MAX]
+
+
+def remember(s: dict) -> None:
+    """차트를 연 종목을 맨 앞에 넣고(같은 종목은 앞으로 옮김) RECENT_MAX개만 남깁니다."""
+    with _recent_lock:
+        items = [s] + [r for r in recent() if (r["market"], r["code"]) != (s["market"], s["code"])]
+        flat = lambda v: re.sub(r"[\t\r\n]", " ", str(v))
+        RECENT_FILE.write_text("".join(
+            "\t".join(flat(r[k]) for k in ("market", "code", "exchange", "name")) + "\n" for r in items[:RECENT_MAX]), encoding="utf-8")
 
 
 def kr_stocks(client: KBClient) -> list[dict]:
@@ -75,8 +106,10 @@ def chart(client: KBClient, market: str, code: str, exchange: str = "") -> dict:
             "info_ccd": "1", "mkt_clsf": "1" if board == "KOSDAQ" else "0", "chrt_clsf": "D", "minute_tck_indx": "",
             "is_cd": code, "inq_clsf": "2", "strt_dy": "", "inq_cnt": CHART_DAYS}).get("out2", [])
         name = next((s["name"] for s in kr_stocks(client) if s["code"] == code), code)
-        return {"market": "kr", "code": code, "name": name, "exchange": board, "currency": "KRW",
-                "candles": _candles(rows, "p2", 10)}  # 국내 차트 거래대금은 10원 단위
+        out = {"market": "kr", "code": code, "name": name, "exchange": board, "currency": "KRW",
+               "candles": _candles(rows, "p2", 10)}  # 국내 차트 거래대금은 10원 단위
+        remember(out)
+        return out
     if market != "us":
         raise ValueError(f"market은 kr 또는 us입니다: {market}")
     code = code.upper()
@@ -94,7 +127,9 @@ def chart(client: KBClient, market: str, code: str, exchange: str = "") -> dict:
         candles = _candles(out.get("out2", []), "p4", 1)
         if candles:
             name = str(out.get("hngl_is_nm") or "").strip() or str(out.get("eng_is_nm") or "").strip() or code
-            return {"market": "us", "code": code, "name": name, "exchange": x, "currency": "USD", "candles": candles}
+            out = {"market": "us", "code": code, "name": name, "exchange": x, "currency": "USD", "candles": candles}
+            remember(out)
+            return out
     raise ValueError(f"미국 거래소(나스닥·뉴욕·아멕스)에서 {code} 차트를 찾지 못했습니다.")
 
 
@@ -118,4 +153,16 @@ if __name__ == "__main__":
                    {"dt": "20260101", "opn_prc_p2": 9, "hgh_prc_p2": 9, "lw_prc_p2": 9, "cls_prc_p2": 9, "vlm": 1, "dl_tw_amt": 1},
                    {"dt": "5803-3893", "opn_prc_p2": 1, "hgh_prc_p2": 1, "lw_prc_p2": 1, "cls_prc_p2": 1}], "p2", 10)
     assert [c["d"] for c in cs] == ["20260101", "20260102"] and cs[1]["amt"] == 30, cs
+    # 최근 검색: 최신순, 중복은 앞으로, RECENT_MAX개 유지, 깨진 줄 무시
+    import tempfile
+    RECENT_FILE = Path(tempfile.mkdtemp()) / "recent.txt"
+    assert recent() == []
+    for i in range(RECENT_MAX + 3):
+        remember({"market": "kr", "code": f"{i:06d}", "exchange": "KOSPI", "name": f"종목\t{i}"})
+    remember({"market": "kr", "code": "000005", "exchange": "KOSPI", "name": "다시"})
+    rs = recent()
+    assert len(rs) == RECENT_MAX and rs[0] == {"market": "kr", "code": "000005", "exchange": "KOSPI", "name": "다시"}, rs
+    assert [r["code"] for r in rs].count("000005") == 1 and rs[1]["name"] == "종목 12", rs
+    RECENT_FILE.write_text("깨진 줄\nus\tAAPL\tNAS\t애플\n", encoding="utf-8")
+    assert recent() == [{"market": "us", "code": "AAPL", "exchange": "NAS", "name": "애플"}]
     print("ok")

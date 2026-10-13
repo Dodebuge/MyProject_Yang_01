@@ -1,6 +1,10 @@
 package kb.app;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -19,6 +23,8 @@ import java.util.regex.Pattern;
  * 검색: 국내는 전체 상장 종목(IVS10920)의 이름·종목번호로, 미국은 티커로 찾습니다.
  *      미국 종목 목록 TR이 없어 티커 모양이면 US_STOCKS에 없어도 후보로 내고 차트 조회 때 거래소를 찾습니다.
  * 차트: 국내 IVS11560, 미국 GSC10060 일봉 최근 약 1년(250거래일).
+ * 최근 검색: 차트를 연 종목을 recent_searches.txt에 최신순으로 RECENT_MAX개까지 저장합니다 (chart.py와 같은 파일 형식).
+ *      한 줄에 한 종목 "market<탭>code<탭>exchange<탭>name". 직접 고치거나 지워도 됩니다 (형식이 맞지 않는 줄은 무시).
  */
 final class Chart {
 
@@ -27,13 +33,60 @@ final class Chart {
     private static final List<String> US_EXCHANGES = Arrays.asList("NAS", "NYS", "AMX");  // 나스닥, 뉴욕, 아멕스(NYSE Arca ETF 포함)
     private static final Pattern TICKER = Pattern.compile("[A-Z][A-Z.]{0,5}");
     private static final Pattern KR_CODE = Pattern.compile("[0-9A-Z]{6}");
+    static final int RECENT_MAX = 10;  // 최근 검색 종목 수
+    private static final String[] RECENT_KEYS = {"market", "code", "exchange", "name"};
 
     private final KBClient client;
     private volatile long krAt;
     private volatile List<Map<String, Object>> kr = Collections.emptyList();
+    private final Path recentFile;
 
-    Chart(KBClient client) {
+    Chart(KBClient client, Path recentFile) {
         this.client = client;
+        this.recentFile = recentFile;
+    }
+
+    /** GET /api/recent : 최근 검색 종목 (최신순, 최대 RECENT_MAX개). */
+    Map<String, Object> recent() throws IOException {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("items", readRecent());
+        return out;
+    }
+
+    private List<Map<String, Object>> readRecent() throws IOException {
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(recentFile, StandardCharsets.UTF_8);
+        } catch (NoSuchFileException e) {
+            return new ArrayList<>();
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (String line : lines) {
+            String[] p = line.split("\t", -1);
+            if (p.length == 4 && ("kr".equals(p[0]) || "us".equals(p[0])) && !p[1].isEmpty() && items.size() < RECENT_MAX) {
+                Map<String, Object> r = new LinkedHashMap<>();
+                for (int i = 0; i < 4; i++) {
+                    r.put(RECENT_KEYS[i], p[i]);
+                }
+                items.add(r);
+            }
+        }
+        return items;
+    }
+
+    /** 차트를 연 종목을 맨 앞에 넣고(같은 종목은 앞으로 옮김) RECENT_MAX개만 남깁니다. */
+    synchronized void remember(Map<String, Object> s) throws IOException {
+        List<Map<String, Object>> items = readRecent();
+        items.removeIf(r -> r.get("market").equals(s.get("market")) && r.get("code").equals(s.get("code")));
+        items.add(0, s);
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> r : items.subList(0, Math.min(RECENT_MAX, items.size()))) {
+            for (int i = 0; i < 4; i++) {
+                sb.append(i == 0 ? "" : "\t").append(Values.str(r.get(RECENT_KEYS[i])).replaceAll("[\\t\\r\\n]", " "));
+            }
+            sb.append('\n');
+        }
+        Files.write(recentFile, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private List<Map<String, Object>> krStocks() throws IOException {
@@ -129,6 +182,7 @@ final class Chart {
             out.put("exchange", board);
             out.put("currency", "KRW");
             out.put("candles", candles(rows, "p2", 10));  // 국내 차트 거래대금은 10원 단위
+            remember(out);
             return out;
         }
         if (!"us".equals(market)) {
@@ -170,6 +224,7 @@ final class Chart {
                 out.put("exchange", x);
                 out.put("currency", "USD");
                 out.put("candles", cs);
+                remember(out);
                 return out;
             }
         }

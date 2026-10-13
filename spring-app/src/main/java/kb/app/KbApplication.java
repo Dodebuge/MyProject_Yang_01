@@ -47,7 +47,7 @@ public class KbApplication {
     }
 
     @Bean
-    Chart chart(KBClient client) {
-        return new Chart(client);
+    Chart chart(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
+        return new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
     }
 }

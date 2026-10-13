@@ -6,3 +6,4 @@ java-app/target/
 spring-app/target/
 kb.db
 kb.db-*
+recent_searches.txt
