@@ -50,6 +50,8 @@ h1 { font-size: 20px; margin: 0; font-weight: 650; }
 .nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
 .nav a.home { color: var(--muted); }
 .status { color: var(--muted); font-size: 13px; min-height: 20px; }
+.stale { color: var(--series-1); }
+.stale.bad { color: var(--bad); }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 button {
   font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -139,6 +141,30 @@ const MAX_CHG = 3;  // ±3% 이상은 가장 진한 색
 
 // ---------------------------------------------------------------- 유틸
 const $ = (s, el = document) => el.querySelector(s);
+
+// 첫 로딩: 서버가 last_api/*.txt에 저장해 둔 마지막 응답(?cached=1)을 먼저 onCached로 그리고,
+// 실제 API 응답(Promise)을 돌려줍니다. 실제 응답이 먼저 오면 onCached는 부르지 않습니다. (me.html과 같은 함수)
+function fetchFresh(url, onCached) {
+  const get = u => fetch(u, { cache: "no-store" }).then(async res => {
+    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    return d;
+  });
+  const fresh = get(url);
+  if (onCached) {
+    let done = false;
+    fresh.finally(() => done = true).catch(() => {});
+    get(url + (url.includes("?") ? "&" : "?") + "cached=1").then(d => done || onCached(d)).catch(() => {});
+  }
+  return fresh;
+}
+function stale(sel, err) {
+  const el = $(sel);
+  el.querySelector(".stale")?.remove();
+  el.insertAdjacentHTML("beforeend", err
+    ? ` <span class="stale bad">· 새로 조회하지 못해 이전 값을 보여 줍니다: ${esc(err.message)}</span>`
+    : ` <span class="stale">· 이전 조회 값 · 새로 불러오는 중…</span>`);
+}
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const pct = n => `${n > 0 ? "+" : ""}${fmt(n, 2)}%`;
@@ -178,13 +204,15 @@ async function load(force = false) {
   state.loading = true;
   document.querySelectorAll("button").forEach(b => b.id !== "theme" && (b.disabled = true));
   $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>KB증권에서 ${market === "kr" ? "국내" : "미국"} 시세를 조회하고 있습니다.</div>`;
+  let shown = false;
   try {
-    const res = await fetch(`api/heatmap?market=${market}`, { cache: "no-store" });
-    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
-    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
-    state.data[market] = json;
-    render();
+    state.data[market] = await fetchFresh(`api/heatmap?market=${market}`, !force && (d => {
+      if (state.market !== market) return;  // 그 사이 다른 시장으로 바꿈
+      shown = true; state.data[market] = d; render(); stale("#status");
+    }));
+    if (state.market === market) render();
   } catch (err) {
+    if (shown) return stale("#status", err);
     $("#app").innerHTML = `<div class="error"><b>조회하지 못했습니다</b><br>${esc(err.message)}<div class="note">서버(dividends_web.py)를 다시 시작했는지 확인하세요.</div></div>`;
   } finally {
     state.loading = false;
@@ -354,12 +382,14 @@ function drawMap(focus, sectors, key, cur, etfN) {
 // ---------------------------------------------------------------- 분기별 거래대금 (/api/quarters)
 async function loadQuarters(market) {
   state.quarters[market] = { loading: true };
+  let shown = false;
   try {
-    const res = await fetch(`api/quarters?market=${market}`, { cache: "no-store" });
-    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
-    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
-    state.quarters[market] = json;
+    state.quarters[market] = await fetchFresh(`api/quarters?market=${market}`, d => {
+      shown = true; state.quarters[market] = d;
+      if (state.market === market) renderQuarters(state.sector && { name: state.sector });
+    });
   } catch (err) {
+    if (shown) return;  // 이전 값을 그대로 둠
     state.quarters[market] = { error: err.message };
   }
   if (state.market === market) renderQuarters(state.sector && { name: state.sector });

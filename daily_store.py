@@ -10,6 +10,8 @@ Java 버전(java-app/.../DailyStore.java)과 같은 파일·같은 테이블을 
 from __future__ import annotations
 
 import json
+import os
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -47,6 +49,39 @@ def daily(kind: str, fetch: Callable[[], dict], refresh: bool = False) -> dict:
     return json.loads(row[0])
 
 
+# ---------------------------------------------------------------------- 마지막 응답 (화면 첫 로딩용)
+# API가 성공할 때마다 응답 JSON을 last_api/<경로>[_<파라미터>].txt에 덮어써 둡니다.
+# 화면은 먼저 ?cached=1로 이 값을 받아 바로 그리고, 실제 API 응답이 오면 교체합니다.
+# 파일 이름에 들어가는 파라미터는 market·year처럼 값이 몇 개 안 되는 것뿐이라 파일 수가 늘지 않습니다.
+
+LAST_DIR = Path(__file__).resolve().parent / "last_api"
+LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions"}  # 첫 로딩이 느린 API만
+_IGNORED = {"refresh", "cached"}
+
+
+def last_file(api: str, params: dict[str, str]) -> Path | None:
+    """저장할 API면 파일 경로, 아니면 None. 예: ("heatmap", {"market": "kr"}) -> last_api/heatmap_market=kr.txt"""
+    if api not in LAST_APIS:
+        return None
+    kv = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k not in _IGNORED)
+    name = re.sub(r"[^\w=&.-]", "_", api + ("_" + kv if kv else ""))
+    return LAST_DIR / f"{name}.txt"
+
+
+def save_last(file: Path, body: str) -> None:
+    file.parent.mkdir(exist_ok=True)
+    tmp = file.with_suffix(".tmp")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, file)  # 읽는 쪽이 반쯤 쓴 파일을 보지 않게 통째로 교체
+
+
+def read_last(file: Path) -> str | None:
+    try:
+        return file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
 if __name__ == "__main__":
     # 자체 점검: 같은 날 두 번째 호출은 fetch를 부르지 않고 첫 값을 돌려줘야 합니다.
     import tempfile
@@ -61,4 +96,12 @@ if __name__ == "__main__":
     assert daily("t", lambda: calls.append(4) or {"n": 4}, refresh=True) == {"n": 4}
     assert daily("t", lambda: calls.append(5) or {"n": 5}) == {"n": 4}
     assert calls == [1, 4], calls
+    # 마지막 응답: refresh·cached는 파일 이름에서 빠지고, 저장 대상이 아닌 API는 None
+    LAST_DIR = DB.parent / "last_api"
+    f = last_file("heatmap", {"market": "kr", "refresh": "1", "cached": "1"})
+    assert f.name == "heatmap_market=kr.txt" and last_file("search", {"q": "a"}) is None, f
+    assert last_file("dividends", {"year": "../x"}).parent == LAST_DIR  # 경로 문자는 _로 바뀜
+    assert read_last(f) is None
+    save_last(f, '{"a": "첫"}'); save_last(f, '{"a": "둘"}')
+    assert read_last(f) == '{"a": "둘"}'
     print("ok")

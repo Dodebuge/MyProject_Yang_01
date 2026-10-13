@@ -7,3 +7,4 @@ spring-app/target/
 kb.db
 kb.db-*
 recent_searches.txt
+last_api/

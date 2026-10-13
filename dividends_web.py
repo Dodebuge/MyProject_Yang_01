@@ -28,6 +28,8 @@ API:
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
+    heatmap, quarters, holdings, dividends, recurring, transactions는 성공한 마지막 응답을 last_api/*.txt에 저장하고,
+    ?cached=1 을 붙이면 KB를 부르지 않고 그 값을 바로 돌려줍니다(없으면 404). 화면은 이 값을 먼저 그리고 실제 응답으로 교체합니다.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import chart
-from daily_store import daily
+from daily_store import daily, last_file, read_last, save_last
 from dividends import fetch_entries, fetch_recurring, fetch_transactions
 from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
@@ -101,9 +103,13 @@ def query_transactions(client: KBClient, refresh: bool = False) -> dict:
     return daily("transactions", fetch, refresh)
 
 
+def _flag(q: dict, name: str) -> bool:
+    return q.get(name, [""])[0] in ("1", "true")
+
+
 def _refresh(q: dict) -> bool:
     """?refresh=1 : 저장된 오늘 값을 건너뛰고 KB에서 다시 조회 (화면의 'KB에서 다시 조회' 버튼)."""
-    return q.get("refresh", [""])[0] in ("1", "true")
+    return _flag(q, "refresh")
 
 
 def make_handler(client: KBClient):
@@ -136,13 +142,21 @@ def make_handler(client: KBClient):
                 self.send_error(404)
 
         def _api(self, handler, query: dict) -> None:
+            last = last_file(urlparse(self.path).path.removeprefix("/api/"), {k: v[0] for k, v in query.items()})
+            if last and _flag(query, "cached"):  # ?cached=1 : 마지막으로 성공한 응답 (없으면 404)
+                body = read_last(last)
+                self._send(200 if body else 404, (body or '{"error": "저장된 응답이 없습니다"}').encode("utf-8"), "application/json; charset=utf-8")
+                return
             try:
                 status, payload = 200, handler(query)
             except (ValueError, KBApiError) as e:
                 status, payload = 400, {"error": str(e)}
             except Exception as e:  # 네트워크 오류 등
                 status, payload = 502, {"error": f"{type(e).__name__}: {e}"}
-            self._send(status, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+            body = json.dumps(payload, ensure_ascii=False)
+            if last and status == 200:
+                save_last(last, body)
+            self._send(status, body.encode("utf-8"), "application/json; charset=utf-8")
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status)

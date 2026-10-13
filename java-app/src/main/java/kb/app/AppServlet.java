@@ -35,6 +35,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
+ *   (heatmap·quarters·holdings·dividends·recurring·transactions는 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
  * 토스 계좌 합산: 같은 .env(또는 환경변수)에 TOSS_OPENAPI_CLIENT_ID/SECRET이 있으면 켜집니다.
@@ -56,6 +57,7 @@ public class AppServlet extends HttpServlet {
 
     private Heatmap heatmap;
     private Dividends dividends;
+    private LastResponse last;  // 마지막 응답 (?cached=1)
 
     private interface Api {
         Map<String, Object> handle(HttpServletRequest req) throws IOException;
@@ -85,6 +87,7 @@ public class AppServlet extends HttpServlet {
         }
         heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, toss);
         dividends = new Dividends(client, store);
+        last = new LastResponse(dataDir.resolve("last_api"));
         Chart chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
@@ -142,6 +145,16 @@ public class AppServlet extends HttpServlet {
             resp.sendError(404);
             return;
         }
+        Path lastFile = last.file(path, req.getParameterMap());
+        if (lastFile != null && LastResponse.cached(req.getParameterMap())) {  // ?cached=1 : 마지막으로 성공한 응답 (없으면 404)
+            String saved = LastResponse.read(lastFile);
+            byte[] body = (saved != null ? saved : GSON.toJson(error("저장된 응답이 없습니다"))).getBytes(StandardCharsets.UTF_8);
+            resp.setStatus(saved != null ? 200 : 404);
+            resp.setContentType("application/json; charset=utf-8");
+            resp.setContentLength(body.length);
+            resp.getOutputStream().write(body);
+            return;
+        }
         int status;
         Object payload;
         try {
@@ -154,7 +167,11 @@ public class AppServlet extends HttpServlet {
             status = 502;
             payload = error(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
-        byte[] body = GSON.toJson(payload).getBytes(StandardCharsets.UTF_8);
+        String json = GSON.toJson(payload);
+        if (lastFile != null && status == 200) {
+            LastResponse.save(lastFile, json);
+        }
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
         resp.setStatus(status);
         resp.setContentType("application/json; charset=utf-8");
         resp.setContentLength(body.length);

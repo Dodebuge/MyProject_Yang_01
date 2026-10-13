@@ -106,6 +106,8 @@ table.list tr.selected td { background: var(--select); }
 table.list tfoot td { font-weight: 650; border-bottom: 0; border-top: 1px solid var(--axis); }
 td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .neg { color: var(--bad); }
+.stale { color: var(--series-1); }
+.stale.bad { color: var(--bad); }
 .conn { font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: nowrap; margin-left: 6px; }
 .conn i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--ink-2); }
@@ -213,6 +215,31 @@ const KIND = { DIV: "배당금 입금", FTAX: "해외원천세 출금", KTAX: "�
 
 // ---------------------------------------------------------------- 유틸
 const $ = (s, el = document) => el.querySelector(s);
+
+// 첫 로딩: 서버가 last_api/*.txt에 저장해 둔 마지막 응답(?cached=1)을 먼저 onCached로 그리고,
+// 실제 API 응답(Promise)을 돌려줍니다. 실제 응답이 먼저 오면 onCached는 부르지 않습니다.
+function fetchFresh(url, onCached) {
+  const get = u => fetch(u, { cache: "no-store" }).then(async res => {
+    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    return d;
+  });
+  const fresh = get(url);
+  if (onCached) {
+    let done = false;
+    fresh.finally(() => done = true).catch(() => {});
+    get(url + (url.includes("?") ? "&" : "?") + "cached=1").then(d => done || onCached(d)).catch(() => {});
+  }
+  return fresh;
+}
+// 이전 값을 보여 주는 중이라는 표시 (실제 응답으로 다시 그리면 사라짐). err가 있으면 새 조회 실패 표시
+function stale(sel, err) {
+  const el = $(sel);
+  el.querySelector(".stale")?.remove();
+  el.insertAdjacentHTML("beforeend", err
+    ? ` <span class="stale bad">· 새로 조회하지 못해 이전 값을 보여 줍니다: ${esc(err.message)}</span>`
+    : ` <span class="stale">· 이전 조회 값 · 새로 불러오는 중…</span>`);
+}
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const won = n => `<span class="${n < 0 ? "neg" : ""}">${fmt(n)}</span>`;
@@ -261,15 +288,18 @@ async function load(refresh = false) {
   $("#fetch").disabled = $("#year").disabled = true;
   $("#status").textContent = "";
   $("#app").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB증권에서 다시 조회하고 있습니다. " : ""}${year}년 거래내역을 불러오고 있습니다. KB 조회는 거래가 많으면 10~20초 걸립니다.</div>`;
-  try {
-    const res = await fetch(`api/dividends?year=${year}${refresh ? "&refresh=1" : ""}`, { cache: "no-store" });
-    const json = await res.json();
-    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+  const show = json => {
     state.data = json;
     if (json.year === THIS_YEAR) recentDiv = latestDividendMonth(json.entries);
     $("#status").textContent = `${json.start.slice(0, 4)}.${json.start.slice(4, 6)}.${json.start.slice(6)} – ${json.end.slice(0, 4)}.${json.end.slice(4, 6)}.${json.end.slice(6)} · 조회 ${json.fetchedAt}`;
     render();
+  };
+  let shown = false;
+  try {
+    show(await fetchFresh(`api/dividends?year=${year}${refresh ? "&refresh=1" : ""}`,
+      !refresh && (d => { if (+$("#year").value !== year) return; shown = true; show(d); stale("#status"); renderPlan(planFs); })));
   } catch (err) {
+    if (shown) return stale("#status", err);
     state.data = null;
     $("#app").innerHTML = `<div class="error"><b>조회하지 못했습니다</b><br>${esc(err.message)}<div class="note">서버(dividends_web.py)가 실행 중인지, .env의 appKey/appSecret이 맞는지 확인하세요.</div></div>`;
   } finally {
@@ -497,13 +527,13 @@ function tossConn(d) {
 async function loadHoldings(refresh = false) {
   $("#h-fetch").disabled = true;
   $("#h-body").innerHTML = `<div class="loading"><div class="spinner"></div>${refresh ? "KB·토스증권에서 잔고와 시세를 다시 조회하고 있습니다." : "잔고와 시세를 불러오고 있습니다."}</div>`;
+  let shown = false;
   try {
-    const res = await fetch(`api/holdings${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
-    const json = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
-    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
-    hold.data = json;
+    hold.data = await fetchFresh(`api/holdings${refresh ? "?refresh=1" : ""}`,
+      !refresh && (d => { shown = true; hold.data = d; renderHoldings(); stale("#h-status"); }));
     renderHoldings();
   } catch (err) {
+    if (shown) return stale("#h-status", err);
     hold.data = null;
     $("#h-body").innerHTML = `<div class="error"><b>보유 종목을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
   } finally {
@@ -562,12 +592,12 @@ function renderHoldings() {
 // ---------------------------------------------------------------- 정기 구매 내역 (/api/recurring)
 async function loadRecurring(refresh = false) {
   $("#r-body").innerHTML = `<div class="loading"><div class="spinner"></div>거래내역에서 정기 구매를 모으고 있습니다. (수십 초 걸릴 수 있습니다)</div>`;
+  let shown = false;
   try {
-    const res = await fetch(`api/recurring${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
-    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
-    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
-    renderRecurring(d);
+    renderRecurring(await fetchFresh(`api/recurring${refresh ? "?refresh=1" : ""}`,
+      !refresh && (d => { shown = true; renderRecurring(d); stale("#r-status"); })));
   } catch (err) {
+    if (shown) return stale("#r-status", err);
     $("#r-body").innerHTML = `<div class="error"><b>정기 구매 내역을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
   }
 }
@@ -605,16 +635,19 @@ function renderRecurring(d) {
 let txData = null;
 async function loadTransactions(refresh = false) {
   $("#t-body").innerHTML = `<div class="loading"><div class="spinner"></div>최근 1달 거래내역을 불러오고 있습니다.</div>`;
-  try {
-    const res = await fetch(`api/transactions${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
-    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
-    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+  const show = d => {
     txData = d;
     const sel = $("#t-kind"), cur = sel.value;
     sel.innerHTML = `<option value="">전체 구분</option>` + [...new Set(d.rows.map(r => r.kind))].sort().map(k => `<option>${esc(k)}</option>`).join("");
     sel.value = d.rows.some(r => r.kind === cur) ? cur : "";
     renderTransactions();
+  };
+  let shown = false;
+  try {
+    show(await fetchFresh(`api/transactions${refresh ? "?refresh=1" : ""}`,
+      !refresh && (d => { shown = true; show(d); stale("#t-status"); })));
   } catch (err) {
+    if (shown) return stale("#t-status", err);
     $("#t-body").innerHTML = `<div class="error"><b>거래내역을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
   }
 }
