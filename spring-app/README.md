@@ -25,15 +25,15 @@ KB_DATA_DIR=/opt/kb_openapi_sample java -jar target/kb-openapi-spring.jar   # ht
 
 | 파일 | 역할 |
 |---|---|
-| `KbApplication.java` | `@SpringBootApplication`, `KBClient`·`Heatmap`·`Dividends`를 Bean으로 등록 |
-| `ApiController.java` | `@RestController` `/api/heatmap`, `/api/quarters`, `/api/holdings`(KB + 토스), `/api/dividends`, `/api/recurring`(정기 구매), 오류 → `{"error"}` (400/502) |
-| `PageController.java` | `/`, `/heatmap`, `/me` → `static/*.html` |
+| `KbApplication.java` | `@SpringBootApplication`, `KBClient`·`Heatmap`·`Dividends`·`Chart`를 Bean으로 등록 |
+| `ApiController.java` | `@RestController` `/api/heatmap`, `/api/quarters`, `/api/holdings`(KB + 토스), `/api/dividends`, `/api/recurring`(정기 구매), `/api/transactions`(최근 1달 거래내역), `/api/search`·`/api/chart`(종목 검색·일봉), 오류 → `{"error"}` (400/502) |
+| `PageController.java` | `/`, `/heatmap`, `/me`, `/chart` → `static/*.html` |
 | `application.properties` | `server.port`(환경변수 `PORT`), `kb.data-dir`(환경변수 `KB_DATA_DIR`) |
 
 - 토스 계좌 합산은 `kb.data-dir`의 `.env`(`run.sh`/`run.cmd`는 저장소 루트 `.env`) 또는 환경변수에 `TOSS_OPENAPI_CLIENT_ID/SECRET`이 있을 때만 켜집니다.
-- 핵심 로직은 새로 쓰지 않고 `../java-app/src/main/java`(KBClient, TossClient, Heatmap, Dividends)를 함께 컴파일합니다
+- 핵심 로직은 새로 쓰지 않고 `../java-app/src/main/java`(KBClient, TossClient, Heatmap, Dividends, Chart)를 함께 컴파일합니다
   (`build-helper-maven-plugin`). 로직을 고치면 Tomcat WAR 버전과 Spring 버전에 같이 반영됩니다.
-- 화면은 저장소 루트의 `home.html`, `heatmap.html`, `me.html`을 빌드할 때 `static/`으로 복사합니다.
+- 화면은 저장소 루트의 `home.html`, `heatmap.html`, `me.html`, `chart.html`을 빌드할 때 `static/`으로 복사합니다.
 - `kb.data-dir` 폴더에 `.env`(appKey/appSecret)를 두고, `etf_snapshot.json`이 여기에 저장됩니다. `KB_OPENAPI_*` 환경변수가 `.env`보다 우선합니다.
 - 접근 제한 없음. 필요하면 `spring-boot-starter-security`를 추가하세요.
 

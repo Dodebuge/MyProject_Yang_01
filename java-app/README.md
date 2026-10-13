@@ -1,12 +1,13 @@
 # Java 버전 (Tomcat 10, Python 없이)
 
 `dividends_web.py` + `heatmap.py` + `dividends.py` + `kb_client.py`를 Java 서블릿으로 옮긴 코드입니다.
-같은 주소, 같은 JSON을 돌려주므로 화면(`../home.html`, `../heatmap.html`, `../me.html`)은 그대로 씁니다.
+같은 주소, 같은 JSON을 돌려주므로 화면(`../home.html`, `../heatmap.html`, `../me.html`, `../chart.html`)은 그대로 씁니다.
 
 | Java | Python |
 |---|---|
 | `KBClient.java` | `kb_client.py` (토큰 캐싱, processFlag 검사, 고정길이 값 정리, 5xx 재시도) |
-| `Dividends.java` | `dividends.py`, `dividends_web.query_dividends`, `query_recurring` (소수점 정기 구매 내역) |
+| `Dividends.java` | `dividends.py`, `dividends_web.query_dividends`, `query_recurring` (소수점 정기 구매 내역), `query_transactions` (최근 1달 거래내역) |
+| `Chart.java` | `chart.py` (종목 검색: 국내 이름·종목번호, 미국 티커 / 일봉 차트) |
 | `TossClient.java` | `toss_openapi_sample`의 `toss_client.py` + `heatmap.fetch_my` (내정보에 토스 계좌 합산) |
 | `Heatmap.java` | `heatmap.py` (섹터 히트맵, ETF 분류·스냅숏, 분기별 거래대금, 보유 종목) |
 | `AppServlet.java` | `dividends_web.py` (페이지와 `/api/*` 경로) |

@@ -16,7 +16,7 @@ export KB_DATA_DIR="${KB_DATA_DIR:-$(cd .. && pwd)}"
 JAR=target/kb-openapi-spring.jar
 APP=target/app   # 푼 jar(kb-openapi-spring.jar + lib/)와 CDS 아카이브(app.jsa)
 
-if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../home.html ../heatmap.html ../me.html ../docs -newer "$JAR" -print -quit)" ]; then
+if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
   ./mvnw -q -B -DskipTests package
 fi
 
