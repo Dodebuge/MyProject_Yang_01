@@ -1,6 +1,7 @@
 # systemd 서비스: Spring Boot 버전(spring-app)을 계속 실행합니다. Tomcat·Python 설치가 필요 없습니다.
 #
-#   /opt/kb_openapi_sample/spring-app/run.sh prepare   # 빌드 + jar 풀기 + CDS 아카이브 (코드를 바꿀 때마다 다시)
+#   /opt/kb_openapi_sample/spring-app/run.sh prepare   # 처음 한 번: 빌드 + jar 풀기 + CDS 아카이브 (kbapp 사용자로 실행)
+#   이후에는 git pull 뒤 sudo systemctl restart kb-openapi-spring 만 하면 됩니다 (ExecStartPre가 바뀐 것만 다시 빌드)
 #   sudo cp deploy/kb-openapi-spring.service /etc/systemd/system/
 #   (아래 WorkingDirectory, User, 포트를 서버에 맞게 수정)
 #   sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
@@ -15,6 +16,11 @@ Wants=network-online.target
 WorkingDirectory=/opt/kb_openapi_sample
 Environment=KB_DATA_DIR=/opt/kb_openapi_sample
 Environment=PORT=8080
+# 시작할 때마다 run.sh prepare: 코드·화면(HTML)이 jar보다 새로우면 다시 빌드하고, 아니면 바로 끝납니다.
+# 이게 없으면 git pull 후 restart해도 예전 jar(예전 화면)가 그대로 실행됩니다.
+# 앞의 '-': 빌드가 실패해도(권한, 네트워크 등) 기존 jar로 시작합니다. 처음 빌드는 1~2분 걸려 시작 제한 시간을 늘렸습니다.
+ExecStartPre=-/opt/kb_openapi_sample/spring-app/run.sh prepare
+TimeoutStartSec=600
 # run.sh prepare가 만든 푼 jar와 CDS 아카이브로 빠르게 시작합니다. app.jsa가 없으면 CDS 없이 그냥 실행됩니다.
 ExecStart=/usr/bin/java -Xmx512m -XX:SharedArchiveFile=/opt/kb_openapi_sample/spring-app/target/app/app.jsa -XX:TieredStopAtLevel=1 -jar /opt/kb_openapi_sample/spring-app/target/app/kb-openapi-spring.jar
 User=kbapp

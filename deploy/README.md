@@ -10,10 +10,13 @@
 git clone https://github.com/Dodebuge/MyProject_Yang_01.git /opt/kb_openapi_sample
 cd /opt/kb_openapi_sample
 vi .env && chmod 600 .env                     # KB_OPENAPI_BASE_URL, KB_OPENAPI_APP_KEY, KB_OPENAPI_APP_SECRET
-spring-app/run.sh prepare                     # JDK 17 이상 필요. 빌드 + CDS 준비 (코드를 바꾸면 다시 실행 후 restart)
+sudo -u kbapp spring-app/run.sh prepare      # JDK 17 이상 필요. 빌드 + CDS 준비 (서비스와 같은 kbapp 사용자로)
 sudo cp deploy/kb-openapi-spring.service /etc/systemd/system/      # WorkingDirectory, User 확인
 sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
 ```
+
+코드 업데이트: `git pull` 후 `sudo systemctl restart kb-openapi-spring`. 서비스가 시작할 때 `run.sh prepare`로 바뀐 것만 다시 빌드합니다.
+화면이 예전 그대로 보이면 브라우저에서 Ctrl+F5로 한 번 새로고침하세요 (이전 버전은 화면에 캐시 금지 헤더가 없었습니다).
 
 방화벽에서 8080만 열면 됩니다 (아래 "방화벽"). 접근 제한은 없습니다.
 
