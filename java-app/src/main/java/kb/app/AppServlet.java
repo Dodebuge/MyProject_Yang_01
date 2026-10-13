@@ -23,7 +23,7 @@ import jakarta.servlet.http.HttpServletResponse;
 /**
  * dividends_web.py와 같은 주소를 처리합니다. 화면(HTML)은 Python 버전과 같은 파일을 씁니다.
  *
- *   GET /, /heatmap, /me                -> home.html, heatmap.html, me.html
+ *   GET /, /heatmap, /me, /chart        -> home.html, heatmap.html, me.html, chart.html
  *   GET /docs/*.html                    -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
@@ -31,6 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/dividends?year=2026        -> 배당 내역
  *   GET /api/recurring                  -> 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
  *   GET /api/transactions               -> 최근 1달 거래내역
+ *   GET /api/search?q=                  -> 종목 검색 (국내 이름·종목번호, 미국 티커)
+ *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
@@ -48,6 +50,7 @@ public class AppServlet extends HttpServlet {
         PAGES.put("/", "/home.html");
         PAGES.put("/heatmap", "/heatmap.html");
         PAGES.put("/me", "/me.html");
+        PAGES.put("/chart", "/chart.html");
     }
 
     private Heatmap heatmap;
@@ -81,11 +84,14 @@ public class AppServlet extends HttpServlet {
         }
         heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, toss);
         dividends = new Dividends(client, store);
+        Chart chart = new Chart(client);
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
+        apis.put("/api/search", req -> chart.search(param(req, "q", "")));
+        apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", "")));
         apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {
             String year = param(req, "year", String.valueOf(LocalDate.now().getYear()));

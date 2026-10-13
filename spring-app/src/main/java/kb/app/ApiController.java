@@ -22,6 +22,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/dividends?year=2026     배당 내역
  *   GET /api/recurring               소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
  *   GET /api/transactions            최근 1달 거래내역
+ *   GET /api/search?q=               종목 검색 (국내 이름·종목번호, 미국 티커)
+ *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
@@ -30,10 +32,12 @@ class ApiController {
 
     private final Heatmap heatmap;
     private final Dividends dividends;
+    private final Chart chart;
 
-    ApiController(Heatmap heatmap, Dividends dividends) {
+    ApiController(Heatmap heatmap, Dividends dividends, Chart chart) {
         this.heatmap = heatmap;
         this.dividends = dividends;
+        this.chart = chart;
     }
 
     @GetMapping("/heatmap")
@@ -54,6 +58,17 @@ class ApiController {
     @GetMapping("/recurring")
     ResponseEntity<Map<String, Object>> recurring(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
         return ok(dividends.queryRecurring(refresh));
+    }
+
+    @GetMapping("/search")
+    ResponseEntity<Map<String, Object>> search(@RequestParam(defaultValue = "") String q) throws IOException {
+        return ok(chart.search(q));
+    }
+
+    @GetMapping("/chart")
+    ResponseEntity<Map<String, Object>> chart(@RequestParam(defaultValue = "kr") String market, @RequestParam(defaultValue = "") String code,
+                                              @RequestParam(defaultValue = "") String exchange) throws IOException {
+        return ok(chart.chart(market, code, exchange));
     }
 
     @GetMapping("/transactions")

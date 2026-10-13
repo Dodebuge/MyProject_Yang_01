@@ -11,6 +11,7 @@
 | `dividends.py` | 배당 내역 조회·월별 집계 (콘솔 출력, CSV 저장) |
 | `dividends_web.py` | 로컬 웹서버: `/` 첫 화면, `/heatmap`, `/me` 페이지와 `/api/*` |
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
+| `chart.py` / `chart.html` | 종목 검색(이름·종목번호·미국 티커) + 일봉 차트 (같은 서버의 `/chart`) |
 | `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
@@ -58,6 +59,7 @@ python dividends_web.py --port 8080 --no-open
 
 - `/` 첫 화면: 히트맵과 내정보 중 선택
 - `/heatmap` 섹터 히트맵 (아래 "섹터 히트맵" 참고)
+- `/chart` 종목 차트: 종목이름·종목번호·티커로 검색해 최근 약 1년 일봉(캔들·거래량)을 그립니다. `/chart?market=kr&code=005930`처럼 주소로 바로 열 수 있습니다.
 - `/me` 내정보: 보유 종목 현황(총자산·수익률·현금 비율, 총자산 대비 금액 비중 히트맵, 보유 종목 표)과 배당 내역
 
 ### 배당 내역 (내정보 아래쪽)
@@ -66,6 +68,13 @@ python dividends_web.py --port 8080 --no-open
 실수령·세전·세금 요약, 월별 국내/해외 누적 막대, 종목별 배당, 월별 합계표, 상세 내역(월 선택, CSV 저장)을 보여 줍니다.
 appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1에만 열려 다른 기기에서 접속할 수 없습니다.
 화면을 바꾸려면 `me.html`만 수정하면 됩니다.
+
+## 종목 차트
+
+`python dividends_web.py` 실행 후 http://localhost:8000/chart
+
+- 검색(`/api/search?q=`): 국내는 전체 상장 종목(`IVS10920`, 1시간 캐시)의 이름·종목번호, 미국은 티커. KB OpenAPI에 미국 종목 목록 TR이 없어 영문 티커 모양이면 후보로 내고, 차트를 열 때 나스닥(`NAS`)·뉴욕(`NYS`)·아멕스(`AMX`, NYSE Arca ETF 포함) 순으로 찾습니다.
+- 차트(`/api/chart?market=kr|us&code=`): 국내 `IVS11560`(코스피·코스닥은 `IVM10050` 지수명으로 구분), 미국 `GSC10060` 일봉 250거래일. 1M·3M·6M·1Y 기간, 마우스를 올리면 시고저종·등락률·거래량. 점검: `python chart.py`
 
 ## 섹터 히트맵
 

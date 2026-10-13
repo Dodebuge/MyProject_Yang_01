@@ -45,4 +45,9 @@ public class KbApplication {
     Dividends dividends(KBClient client, DailyStore store) {
         return new Dividends(client, store);
     }
+
+    @Bean
+    Chart chart(KBClient client) {
+        return new Chart(client);
+    }
 }

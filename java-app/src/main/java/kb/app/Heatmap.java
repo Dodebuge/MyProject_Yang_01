@@ -187,7 +187,7 @@ final class Heatmap {
         }
     }
 
-    private static Map<String, String> body(String... keyValues) {
+    static Map<String, String> body(String... keyValues) {
         Map<String, String> m = new LinkedHashMap<>();
         for (int i = 0; i < keyValues.length; i += 2) {
             m.put(keyValues[i], keyValues[i + 1]);
@@ -361,7 +361,7 @@ final class Heatmap {
     // ------------------------------------------------------------------ 분기별 거래대금
 
     /** 실제 달력 날짜이고 오늘 이전인지. 필드가 밀린 행은 날짜 자리에 엉뚱한 숫자가 옵니다. */
-    private static boolean validDay(String d) {
+    static boolean validDay(String d) {
         try {
             LocalDate day = LocalDate.parse(d, YMD);
             return !day.isBefore(LocalDate.of(2000, 1, 1)) && !day.isAfter(LocalDate.now());

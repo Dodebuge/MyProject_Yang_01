@@ -12,12 +12,15 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /         -> 첫 화면: 히트맵 / 내정보 선택 (home.html)
     GET /heatmap  -> 국내·해외 섹터 히트맵 (heatmap.html)
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
+    GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
     GET /api/heatmap?market=kr|us  -> {"market", "currency", "fetchedAt", "stocks": [...], "etf": {...}}
     GET /api/quarters?market=kr|us -> {"quarters", "asOf", "sectors": [{"name", "values"}], "stocks": [...], "failed"}
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
+    GET /api/search?q=삼성         -> {"query", "results": [{"market", "code", "name", "exchange"}]}  국내 이름·종목번호, 미국 티커
+    GET /api/chart?market=kr|us&code=005930[&exchange=NAS] -> {"market", "code", "name", "exchange", "currency", "candles": [{"d","o","h","l","c","v","amt"}]}
     GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
@@ -38,13 +41,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import chart
 from daily_store import daily
 from dividends import fetch_entries, fetch_recurring, fetch_transactions
 from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
-PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html"}
+PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html"}
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
 
@@ -117,6 +121,10 @@ def make_handler(client: KBClient):
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/recurring":
                 self._api(lambda q: query_recurring(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/search":
+                self._api(lambda q: chart.search(client, q.get("q", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/chart":
+                self._api(lambda q: chart.chart(client, q.get("market", ["kr"])[0], q.get("code", [""])[0], q.get("exchange", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():

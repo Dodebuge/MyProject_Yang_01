@@ -21,4 +21,9 @@ class PageController {
     String me() {
         return "forward:/me.html";
     }
+
+    @GetMapping("/chart")
+    String chart() {
+        return "forward:/chart.html";
+    }
 }
