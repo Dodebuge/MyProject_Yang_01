@@ -92,10 +92,10 @@ input { cursor: text; }
 #plot text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .inds { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -4px 0 8px; font-size: 12px; }
 .inds .label { color: var(--muted); margin-right: 2px; }
-.inds button { padding: 2px 9px; font-size: 12px; border-radius: 999px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
-.inds button i { width: 12px; height: 3px; border-radius: 2px; background: currentColor; opacity: .35; }
-.inds button[aria-pressed="true"] { color: var(--ink); }
-.inds button[aria-pressed="true"] i { opacity: 1; }
+.inds label { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px; border-radius: 6px; cursor: pointer; color: var(--ink-2); user-select: none; }
+.inds label:hover { background: var(--hover); }
+.inds input { margin: 0; width: 14px; height: 14px; cursor: pointer; }
+.inds label i { width: 12px; height: 3px; border-radius: 2px; }
 .tip .ind { margin-right: 8px; white-space: nowrap; }
 .tip { position: absolute; top: 4px; left: 8px; font-size: 12px; color: var(--ink-2); background: var(--surface); padding: 2px 6px; border-radius: 6px; pointer-events: none; font-variant-numeric: tabular-nums; }
 .empty { color: var(--muted); padding: 32px 0; text-align: center; }
@@ -142,8 +142,20 @@ const S = { data: null, period: "6M", hover: null };
 // ---------------------------------------------------------------- 보조지표: 이동평균선, 볼린저밴드(20일, ±2σ)
 const MAS = [5, 20, 60, 120];
 const BB = { n: 20, k: 2 };
-const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false };  // 켜고 끈 상태는 이 브라우저에 기억
-try { Object.assign(IND, JSON.parse(localStorage.getItem("chart-ind") || "{}")); } catch {}
+const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false };  // 시작할 때 서버의 chart_settings.json 값으로 바뀜
+
+// 차트 설정(기간, 지표 체크)은 서버의 chart_settings.json에 저장해 다음에 열 때도 그대로 씁니다
+async function loadSettings() {
+  try {
+    const s = await getJson("api/settings");
+    if (s.period in PERIODS) S.period = s.period;
+    for (const k in IND) if (typeof s[k] === "boolean") IND[k] = s[k];
+  } catch { /* 저장된 설정을 못 읽어도 기본값으로 차트는 그림 */ }
+}
+function saveSettings() {
+  fetch("api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period: S.period, ...IND }) })
+    .catch(() => {});  // 저장 실패해도 화면은 그대로 (다음에 열 때 이전 설정)
+}
 
 // n일 단순이동평균. 앞쪽 n-1일은 null
 const sma = (xs, n) => {
@@ -253,9 +265,9 @@ function render() {
       <div class="seg" role="group" aria-label="기간">${Object.keys(PERIODS).map(p => `<button data-p="${p}" aria-pressed="${p === S.period}">${p}</button>`).join("")}</div>
     </div>
     <div class="inds" role="group" aria-label="보조지표"><span class="label">이평선</span>
-      ${MAS.map(n => `<button data-ind="ma${n}" aria-pressed="${IND["ma" + n]}" style="color:${IND["ma" + n] ? `var(--ma${n})` : ""}"><i></i>${n}</button>`).join("")}
+      ${MAS.map(n => `<label><input type="checkbox" data-ind="ma${n}" ${IND["ma" + n] ? "checked" : ""}><i style="background:var(--ma${n})"></i>${n}</label>`).join("")}
       <span class="label" style="margin-left:6px">밴드</span>
-      <button data-ind="bb" aria-pressed="${IND.bb}" style="color:${IND.bb ? "var(--bb)" : ""}"><i></i>볼린저 ${BB.n},${BB.k}</button>
+      <label><input type="checkbox" data-ind="bb" ${IND.bb ? "checked" : ""}><i style="background:var(--bb)"></i>볼린저 ${BB.n},${BB.k}</label>
     </div>
     <div id="plot"><div class="tip" id="tip"></div></div>
     <div class="stats">
@@ -264,11 +276,12 @@ function render() {
       <div><span>기간 최저</span>${unit}${fmt(Math.min(...cs.map(c => c.l)), dp)}</div>
       <div><span>최근 거래대금</span>${unit}${compact(last.amt)}${d.currency === "USD" ? "" : "원"}</div>
     </div>`;
-  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { S.period = b.dataset.p; S.hover = null; render(); });
-  document.querySelectorAll(".inds button").forEach(b => b.onclick = () => {
-    IND[b.dataset.ind] = !IND[b.dataset.ind];
-    try { localStorage.setItem("chart-ind", JSON.stringify(IND)); } catch {}
+  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { S.period = b.dataset.p; S.hover = null; saveSettings(); render(); });
+  document.querySelectorAll(".inds input").forEach(c => c.onchange = () => {
+    IND[c.dataset.ind] = c.checked;
+    saveSettings();
     render();
+    $(`.inds input[data-ind="${c.dataset.ind}"]`).focus();  // 다시 그려도 키보드 위치 유지
   });
   // 지표는 1년 전체로 계산한 뒤 보이는 구간만 잘라 씁니다 (짧은 기간에서도 120일선이 왼쪽 끝부터 나옴)
   const closes = all.map(c => c.c), from = all.length - cs.length;
@@ -356,7 +369,7 @@ function draw(cs, dp, unit, lines = [], band = null) {
     $("#results").innerHTML = `<li class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000/chart 를 여세요.</li>`;
     return;
   }
-  fromUrl();
+  loadSettings().then(fromUrl);  // 저장된 기간·지표 설정을 먼저 읽고 차트를 엶 (설정 파일은 작아 바로 옴)
   loadRecent();
 })();
 </script>

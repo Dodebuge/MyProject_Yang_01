@@ -34,6 +34,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/search?q=                  -> 종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
+ *   GET /api/settings, POST /api/settings -> 차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *   (heatmap·quarters·holdings·dividends·recurring·transactions는 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
  *
@@ -58,6 +59,8 @@ public class AppServlet extends HttpServlet {
     private Heatmap heatmap;
     private Dividends dividends;
     private LastResponse last;  // 마지막 응답 (?cached=1)
+    private Chart chart;
+    private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
 
     private interface Api {
         Map<String, Object> handle(HttpServletRequest req) throws IOException;
@@ -88,7 +91,7 @@ public class AppServlet extends HttpServlet {
         heatmap = new Heatmap(client, dataDir.resolve("etf_snapshot.json"), store, toss);
         dividends = new Dividends(client, store);
         last = new LastResponse(dataDir.resolve("last_api"));
-        Chart chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
+        chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
@@ -96,6 +99,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
         apis.put("/api/recent", req -> chart.recent());
+        apis.put("/api/settings", req -> chart.settings());
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", "")));
         apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {
@@ -117,6 +121,39 @@ public class AppServlet extends HttpServlet {
     private static String param(HttpServletRequest req, String name, String fallback) {
         String v = req.getParameter(name);
         return v == null || v.isEmpty() ? fallback : v;
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.setHeader("Cache-Control", "no-store");
+        if (!"/api/settings".equals(req.getPathInfo())) {
+            resp.sendError(404);
+            return;
+        }
+        int status = 200;
+        Object payload;
+        if (req.getContentLength() <= 0 || req.getContentLength() > SETTINGS_MAX_BYTES) {
+            status = 400;
+            payload = error("설정 크기가 올바르지 않습니다");
+        } else {
+            byte[] buf = new byte[req.getContentLength()];
+            int n = 0;
+            try (InputStream in = req.getInputStream()) {
+                for (int r; n < buf.length && (r = in.read(buf, n, buf.length - n)) > 0; n += r) {
+                }
+            }
+            try {
+                payload = chart.saveSettings(new String(buf, 0, n, StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException e) {
+                status = 400;
+                payload = error(e.getMessage());
+            }
+        }
+        byte[] body = GSON.toJson(payload).getBytes(StandardCharsets.UTF_8);
+        resp.setStatus(status);
+        resp.setContentType("application/json; charset=utf-8");
+        resp.setContentLength(body.length);
+        resp.getOutputStream().write(body);
     }
 
     @Override

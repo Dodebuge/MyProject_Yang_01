@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +27,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/search?q=               종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
+ *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
@@ -64,6 +67,19 @@ class ApiController {
     @GetMapping("/search")
     ResponseEntity<Map<String, Object>> search(@RequestParam(defaultValue = "") String q) throws IOException {
         return ok(chart.search(q));
+    }
+
+    @GetMapping("/settings")
+    ResponseEntity<Map<String, Object>> settings() throws IOException {
+        return ok(chart.settings());
+    }
+
+    @PostMapping("/settings")
+    ResponseEntity<Map<String, Object>> saveSettings(@RequestBody String body) throws IOException {
+        if (body.length() > 4096) {  // 설정은 수십 바이트
+            throw new IllegalArgumentException("설정 크기가 올바르지 않습니다");
+        }
+        return ok(chart.saveSettings(body));
     }
 
     @GetMapping("/recent")

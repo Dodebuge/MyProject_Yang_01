@@ -5,10 +5,13 @@
 차트: 국내 IVS11560, 미국 GSC10060 일봉 최근 약 1년(250거래일).
 최근 검색: 차트를 연 종목을 recent_searches.txt에 최신순으로 RECENT_MAX개까지 저장합니다.
      한 줄에 한 종목 "market<탭>code<탭>exchange<탭>name". 직접 고치거나 지워도 됩니다 (형식이 맞지 않는 줄은 무시).
+차트 설정: 기간과 이평선·볼린저밴드 체크 상태를 chart_settings.json에 저장합니다 (GET/POST /api/settings).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import threading
 import time
@@ -27,6 +30,42 @@ RECENT_MAX = 10  # 최근 검색 종목 수
 
 _kr: tuple[float, list[dict]] = (0.0, [])
 _recent_lock = threading.Lock()
+
+# 차트 설정 (기간, 이평선·볼린저밴드 표시): 화면에서 바꿀 때마다 chart_settings.json에 저장해 다음에도 그대로 엽니다.
+SETTINGS_FILE = Path(__file__).resolve().parent / "chart_settings.json"
+DEFAULT_SETTINGS = {"period": "6M", "ma5": True, "ma20": True, "ma60": True, "ma120": False, "bb": False}
+PERIODS = ("1M", "3M", "6M", "1Y")
+
+
+def settings() -> dict:
+    """저장된 설정. 파일이 없거나 깨졌거나 모르는 값은 기본값으로."""
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        saved = {}
+    return _valid_settings(DEFAULT_SETTINGS, saved if isinstance(saved, dict) else {})
+
+
+def _valid_settings(base: dict, d: dict) -> dict:
+    """base에 d의 올바른 값만 덮어씁니다."""
+    out = dict(base)
+    if d.get("period") in PERIODS:
+        out["period"] = d["period"]
+    for k in ("ma5", "ma20", "ma60", "ma120", "bb"):
+        if isinstance(d.get(k), bool):
+            out[k] = d[k]
+    return out
+
+
+def save_settings(d: dict) -> dict:
+    """화면에서 보낸 설정을 검사해 저장하고, 저장된 값을 돌려줍니다 (모르는 키는 버림)."""
+    if not isinstance(d, dict):
+        raise ValueError("설정은 JSON 객체여야 합니다.")
+    out = _valid_settings(settings(), d)
+    tmp = SETTINGS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, SETTINGS_FILE)  # 반쯤 쓴 파일을 읽지 않게 통째로 교체
+    return out
 
 
 def recent() -> list[dict]:
@@ -165,4 +204,12 @@ if __name__ == "__main__":
     assert [r["code"] for r in rs].count("000005") == 1 and rs[1]["name"] == "종목 12", rs
     RECENT_FILE.write_text("깨진 줄\nus\tAAPL\tNAS\t애플\n", encoding="utf-8")
     assert recent() == [{"market": "us", "code": "AAPL", "exchange": "NAS", "name": "애플"}]
+    # 차트 설정: 없으면 기본값, 바꾼 키만 반영·유지, 모르는 키·잘못된 값은 버림, 깨진 파일은 기본값
+    SETTINGS_FILE = RECENT_FILE.parent / "settings.json"
+    assert settings() == DEFAULT_SETTINGS
+    assert save_settings({"bb": True, "period": "1Y"})["bb"] is True
+    s = save_settings({"ma5": False, "period": "10Y", "evil": 1, "ma20": "yes"})
+    assert s == {**DEFAULT_SETTINGS, "bb": True, "period": "1Y", "ma5": False} == settings(), s
+    SETTINGS_FILE.write_text("{broken", encoding="utf-8")
+    assert settings() == DEFAULT_SETTINGS
     print("ok")

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -17,6 +18,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 
 /**
  * 종목 검색 + 일봉 차트 (chart.py와 같은 계산·같은 JSON).
@@ -44,6 +52,77 @@ final class Chart {
     Chart(KBClient client, Path recentFile) {
         this.client = client;
         this.recentFile = recentFile;
+    }
+
+    // ------------------------------------------------------------------ 차트 설정 (chart.py settings/save_settings와 같은 파일·같은 규칙)
+
+    private static final List<String> PERIODS = Arrays.asList("1M", "3M", "6M", "1Y");
+    private static final List<String> FLAGS = Arrays.asList("ma5", "ma20", "ma60", "ma120", "bb");
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    static Map<String, Object> defaultSettings() {
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("period", "6M");
+        d.put("ma5", true);
+        d.put("ma20", true);
+        d.put("ma60", true);
+        d.put("ma120", false);
+        d.put("bb", false);
+        return d;
+    }
+
+    /** base에 d의 올바른 값만 덮어씁니다 (모르는 키·잘못된 값은 버림). */
+    static Map<String, Object> validSettings(Map<String, Object> base, JsonObject d) {
+        Map<String, Object> out = new LinkedHashMap<>(base);
+        JsonElement p = d.get("period");
+        if (p != null && p.isJsonPrimitive() && PERIODS.contains(p.getAsString())) {
+            out.put("period", p.getAsString());
+        }
+        for (String k : FLAGS) {
+            JsonElement v = d.get(k);
+            if (v != null && v.isJsonPrimitive() && v.getAsJsonPrimitive().isBoolean()) {
+                out.put(k, v.getAsBoolean());
+            }
+        }
+        return out;
+    }
+
+    private Path settingsFile() {
+        return recentFile.resolveSibling("chart_settings.json");
+    }
+
+    /** GET /api/settings : 저장된 차트 설정. 파일이 없거나 깨졌으면 기본값. */
+    Map<String, Object> settings() throws IOException {
+        String text;
+        try {
+            text = new String(Files.readAllBytes(settingsFile()), StandardCharsets.UTF_8);
+        } catch (NoSuchFileException e) {
+            return defaultSettings();
+        }
+        try {
+            JsonElement saved = JsonParser.parseString(text);
+            return validSettings(defaultSettings(), saved.isJsonObject() ? saved.getAsJsonObject() : new JsonObject());
+        } catch (JsonParseException e) {
+            return defaultSettings();
+        }
+    }
+
+    /** POST /api/settings : 바꾼 설정을 검사해 저장하고, 저장된 값을 돌려줍니다. */
+    synchronized Map<String, Object> saveSettings(String body) throws IOException {
+        JsonElement d;
+        try {
+            d = JsonParser.parseString(body);
+        } catch (JsonParseException e) {
+            throw new IllegalArgumentException("설정이 올바른 JSON이 아닙니다.");
+        }
+        if (d == null || !d.isJsonObject()) {
+            throw new IllegalArgumentException("설정은 JSON 객체여야 합니다.");
+        }
+        Map<String, Object> out = validSettings(settings(), d.getAsJsonObject());
+        Path tmp = settingsFile().resolveSibling("chart_settings.json.tmp");
+        Files.write(tmp, (GSON.toJson(out) + "\n").getBytes(StandardCharsets.UTF_8));
+        Files.move(tmp, settingsFile(), StandardCopyOption.REPLACE_EXISTING);  // 반쯤 쓴 파일을 읽지 않게 통째로 교체
+        return out;
     }
 
     /** GET /api/recent : 최근 검색 종목 (최신순, 최대 RECENT_MAX개). */

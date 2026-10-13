@@ -22,7 +22,9 @@ API:
     GET /api/search?q=삼성         -> {"query", "results": [{"market", "code", "name", "exchange"}]}  국내 이름·종목번호, 미국 티커
     GET /api/chart?market=kr|us&code=005930[&exchange=NAS] -> {"market", "code", "name", "exchange", "currency", "candles": [{"d","o","h","l","c","v","amt"}]}
     GET /api/recent                -> {"items": [{"market", "code", "exchange", "name"}]}  최근 검색 종목 (recent_searches.txt, 최대 10개)
-    GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
+    GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb"}  차트 설정 (chart_settings.json)
+    POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
+    GET /api/holdings             -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
@@ -52,6 +54,7 @@ from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
 PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html"}
+SETTINGS_MAX_BYTES = 4096  # POST /api/settings 본문 크기 제한 (설정은 수십 바이트)
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
 
@@ -132,6 +135,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: chart.search(client, q.get("q", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/chart":
                 self._api(lambda q: chart.chart(client, q.get("market", ["kr"])[0], q.get("code", [""])[0], q.get("exchange", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/settings":
+                self._api(lambda q: chart.settings(), {})
             elif url.path == "/api/recent":
                 self._api(lambda q: {"items": chart.recent()}, {})
             elif url.path == "/api/transactions":
@@ -140,6 +145,15 @@ def make_handler(client: KBClient):
                 self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:
                 self.send_error(404)
+
+        def do_POST(self):
+            if urlparse(self.path).path != "/api/settings":
+                return self.send_error(404)
+            size = int(self.headers.get("Content-Length") or 0)
+            if not 0 < size <= SETTINGS_MAX_BYTES:
+                return self._send(400, '{"error": "설정 크기가 올바르지 않습니다"}'.encode("utf-8"), "application/json; charset=utf-8")
+            body = self.rfile.read(size)
+            self._api(lambda q: chart.save_settings(json.loads(body.decode("utf-8"))), {})
 
         def _api(self, handler, query: dict) -> None:
             last = last_file(urlparse(self.path).path.removeprefix("/api/"), {k: v[0] for k, v in query.items()})
