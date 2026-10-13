@@ -21,6 +21,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/holdings                보유 종목과 현금, KB + 토스 (하루 한 번 조회해 kb.db에 저장)
  *   GET /api/dividends?year=2026     배당 내역
  *   GET /api/recurring               소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
+ *   GET /api/transactions            최근 1달 거래내역
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
@@ -53,6 +54,11 @@ class ApiController {
     @GetMapping("/recurring")
     ResponseEntity<Map<String, Object>> recurring(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
         return ok(dividends.queryRecurring(refresh));
+    }
+
+    @GetMapping("/transactions")
+    ResponseEntity<Map<String, Object>> transactions(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
+        return ok(dividends.queryTransactions(refresh));
     }
 
     @GetMapping("/dividends")

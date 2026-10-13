@@ -174,6 +174,33 @@ def fetch_recurring(client: KBClient, start: str, end: str) -> list[dict]:
     return summarize_recurring(list(rows), _day(end))
 
 
+# ---------------------------------------------------------------------- 최근 거래내역
+
+
+def _num(value) -> float:
+    """'1,234.5', 1234.5, '' 모두 실수로."""
+    s = str(value).replace(",", "").strip()
+    return float(s) if s else 0.0
+
+
+def to_transaction(t: dict) -> dict:
+    """거래내역(SWQA2301) 1행을 화면용으로 줄입니다. 원화 금액은 dl_amt, 해외는 외화 금액(fcrncy_amt)도 함께."""
+    currency = t.get("crncy_clsf_nm") or "KRW"
+    return {
+        "date": t["dl_dt"], "seq": t.get("dl_sq", ""), "kind": t.get("smry_nm", ""),
+        "name": t.get("is_nm", ""), "code": t.get("stnd_is_cd", ""),
+        "qty": _num(t.get("q")), "price": _num(t.get("dl_uprc")), "amount": _won(t.get("dl_amt")),
+        "currency": currency, "fxAmount": _num(t.get("fcrncy_amt")) if currency != "KRW" else 0.0,
+        "fee": _won(t.get("fee")), "tax": _won(t.get("tx")), "balance": _won(t.get("tfnd_blnc")),  # balance: 거래 후 예수금
+    }
+
+
+def fetch_transactions(client: KBClient, start: str, end: str) -> list[dict]:
+    """기간의 거래내역 전체. 최근 거래가 위로 (같은 날은 거래 순번 역순)."""
+    rows = client.call_pages("SWQA2301", {"strt_dt": start, "end_dt": end, "is_no": "", "srt_clsf": ""})
+    return sorted(map(to_transaction, rows), key=lambda x: (x["date"], x["seq"]), reverse=True)
+
+
 # ---------------------------------------------------------------------- 출력
 
 

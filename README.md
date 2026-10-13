@@ -11,7 +11,7 @@
 | `dividends.py` | 배당 내역 조회·월별 집계 (콘솔 출력, CSV 저장) |
 | `dividends_web.py` | 로컬 웹서버: `/` 첫 화면, `/heatmap`, `/me` 페이지와 `/api/*` |
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
-| `me.html` | 내정보: 보유 종목 현황 + 배당 내역 |
+| `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
 | `spring-app/` | Spring Boot 버전, 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)) |
@@ -83,6 +83,7 @@ appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1
 - 내 보유 (`/me`, `/api/holdings`): 잔고 TR(`SSQM2952` 국내, `SPQM2226` 해외·소수점 포함)로 보유 종목을 조회하고 오늘 등락률은 `IVU10140`·`GSS10030`으로 받습니다.
 - 토스 계좌 합산: 저장소 루트 `.env`(또는 환경변수)에 `TOSS_OPENAPI_CLIENT_ID/SECRET`이 있으면 토스 보유 종목·매수 가능 금액(`fetch_my`)도 함께 조회해 종목마다 `KB`/`토스` 태그로 보여 줍니다. 토스 조회가 실패해도 KB 값은 보여 줍니다.
 - 정기 구매 내역 (`/api/recurring`): 거래내역 TR(`SWQA2301`) 최근 반년의 소수단위매수(`A23`)를 종목별로 모아 주기(추정)·최근 30일·기간 합계를 보여 줍니다. KB에 정기 구매 설정 조회 TR이 없어 체결 내역 기준이고, 토스 OpenAPI에는 정기 구매·거래내역 API가 없어 토스는 빠집니다. 점검: `python test_recurring.py`
+- 최근 1달 거래내역 (`/api/transactions`): 거래내역 TR(`SWQA2301`) 최근 30일 전체를 최신순으로 보여 주고 구분(적요)으로 거를 수 있습니다. 토스는 거래내역 API가 없어 빠집니다.
   현금은 `SSQM2952`의 D+2 추정예수금 + 외화예수금 원화환산이고, 종목도 같은 D+2 기준인 결제 후 잔량(`ec_q`)으로 셉니다
   (매도 후 결제 대기 중인 종목은 빼고 그 대금은 현금에 포함). 원화 평가금액은 KB 앱과 같은 `SSQM2952`의 `val_amt`를 씁니다.
   히트맵 칸 크기 = 총자산(현금 포함) 대비 비중, 색 = 오늘 등락률(±3%) 또는 수익률(±10%). 보유 내역과 배당 내역은 하루(한국 날짜) 한 번만 KB를 조회해 `kb.db`(SQLite, `.env`와 같은 폴더)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.

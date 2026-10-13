@@ -106,6 +106,59 @@ final class Dividends {
         });
     }
 
+    // ------------------------------------------------------------------ 최근 거래내역
+
+    static final int TRANSACTION_DAYS = 30;
+
+    /** GET /api/transactions : KB 계좌 최근 1달 거래내역 (dividends_web.query_transactions). 하루 한 번만 조회해 kb.db에 저장합니다. */
+    Map<String, Object> queryTransactions(boolean refresh) throws IOException {
+        return store.daily("transactions", refresh, () -> {
+            LocalDate end = LocalDate.now();
+            LocalDate start = end.minusDays(TRANSACTION_DAYS);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("strt_dt", start.format(YMD));
+            body.put("end_dt", end.format(YMD));
+            body.put("is_no", "");
+            body.put("srt_clsf", "");
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Map<String, Object> t : client.callPages("SWQA2301", body, "Record1", 1000)) {
+                rows.add(toTransaction(t));
+            }
+            // 최근 거래가 위로 (같은 날은 거래 순번 역순)
+            rows.sort(Comparator.comparing((Map<String, Object> x) -> (String) x.get("date"))
+                    .thenComparing(x -> (String) x.get("seq")).reversed());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("start", start.toString());
+            payload.put("end", end.toString());
+            payload.put("fetchedAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            payload.put("rows", rows);
+            return payload;
+        });
+    }
+
+    /** 거래내역 1행을 화면용으로 줄입니다 (dividends.to_transaction과 같은 필드). */
+    static Map<String, Object> toTransaction(Map<String, Object> t) {
+        String currency = Values.str(t.get("crncy_clsf_nm"));
+        if (currency.isEmpty()) {
+            currency = "KRW";
+        }
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("date", Values.str(t.get("dl_dt")));
+        r.put("seq", Values.str(t.get("dl_sq")));
+        r.put("kind", Values.str(t.get("smry_nm")));
+        r.put("name", Values.str(t.get("is_nm")));
+        r.put("code", Values.str(t.get("stnd_is_cd")));
+        r.put("qty", Values.num(t.get("q")));
+        r.put("price", Values.num(t.get("dl_uprc")));
+        r.put("amount", won(t.get("dl_amt")));
+        r.put("currency", currency);
+        r.put("fxAmount", "KRW".equals(currency) ? 0.0 : Values.num(t.get("fcrncy_amt")));
+        r.put("fee", won(t.get("fee")));
+        r.put("tax", won(t.get("tx")));
+        r.put("balance", won(t.get("tfnd_blnc")));  // 거래 후 예수금
+        return r;
+    }
+
     /**
      * 소수단위매수만 골라 종목별 정기 구매 요약 (dividends.summarize_recurring과 같은 계산). 최근 구매일 순.
      * 주기 = 구매일 간격의 중앙값 (3일 이하 매일, 10일 이하 매주, 그 밖은 매월).

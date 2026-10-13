@@ -21,7 +21,8 @@ API:
     GET /api/holdings              -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
-    내정보 API(holdings, dividends, recurring)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
+    GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
+    내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
 """
 
@@ -38,7 +39,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from daily_store import daily
-from dividends import fetch_entries, fetch_recurring
+from dividends import fetch_entries, fetch_recurring, fetch_transactions
 from heatmap import query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
 
@@ -81,6 +82,20 @@ def query_recurring(client: KBClient, refresh: bool = False) -> dict:
     return daily("recurring", fetch, refresh)
 
 
+TRANSACTION_DAYS = 30  # 최근 거래내역 조회 기간
+
+
+def query_transactions(client: KBClient, refresh: bool = False) -> dict:
+    """KB 계좌 최근 1달 거래내역. 하루 한 번만 조회해 kb.db에 저장합니다. 토스 OpenAPI에는 거래내역 API가 없어 KB만."""
+    def fetch() -> dict:
+        end = date.today()
+        start = end - timedelta(days=TRANSACTION_DAYS)
+        return {"start": start.isoformat(), "end": end.isoformat(),
+                "fetchedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "rows": fetch_transactions(client, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))}
+    return daily("transactions", fetch, refresh)
+
+
 def _refresh(q: dict) -> bool:
     """?refresh=1 : 저장된 오늘 값을 건너뛰고 KB에서 다시 조회 (화면의 'KB에서 다시 조회' 버튼)."""
     return q.get("refresh", [""])[0] in ("1", "true")
@@ -102,6 +117,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/recurring":
                 self._api(lambda q: query_recurring(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/transactions":
+                self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
                 self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:

@@ -164,7 +164,7 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
       <h1>내정보</h1>
     </div>
     <div class="controls">
-      <button id="kb-refresh" title="오늘 저장된 값을 건너뛰고 KB증권에서 보유 종목·정기 구매·배당 내역을 지금 다시 조회해 저장합니다">KB에서 다시 조회</button>
+      <button id="kb-refresh" title="오늘 저장된 값을 건너뛰고 KB증권에서 보유 종목·정기 구매·거래내역·배당 내역을 지금 다시 조회해 저장합니다">KB에서 다시 조회</button>
       <button id="theme" aria-label="테마 전환">◐</button>
     </div>
   </header>
@@ -185,6 +185,14 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   <section class="card" id="recurring" style="margin-top:12px">
     <div class="card-head"><div><h2>정기 구매 내역</h2><p class="sub" id="r-status"></p></div></div>
     <div id="r-body"></div>
+  </section>
+
+  <section class="card" id="transactions" style="margin-top:12px">
+    <div class="card-head">
+      <div><h2>최근 1달 거래내역</h2><p class="sub" id="t-status"></p></div>
+      <div class="controls"><select id="t-kind" aria-label="거래 구분"><option value="">전체 구분</option></select></div>
+    </div>
+    <div id="t-body"></div>
   </section>
 
   <div class="section-head">
@@ -593,6 +601,41 @@ function renderRecurring(d) {
     </table></div>` + note;
 }
 
+// ---------------------------------------------------------------- 최근 1달 거래내역 (/api/transactions)
+let txData = null;
+async function loadTransactions(refresh = false) {
+  $("#t-body").innerHTML = `<div class="loading"><div class="spinner"></div>최근 1달 거래내역을 불러오고 있습니다.</div>`;
+  try {
+    const res = await fetch(`api/transactions${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    txData = d;
+    const sel = $("#t-kind"), cur = sel.value;
+    sel.innerHTML = `<option value="">전체 구분</option>` + [...new Set(d.rows.map(r => r.kind))].sort().map(k => `<option>${esc(k)}</option>`).join("");
+    sel.value = d.rows.some(r => r.kind === cur) ? cur : "";
+    renderTransactions();
+  } catch (err) {
+    $("#t-body").innerHTML = `<div class="error"><b>거래내역을 조회하지 못했습니다</b><br>${esc(err.message)}</div>`;
+  }
+}
+
+function renderTransactions() {
+  const d = txData, kind = $("#t-kind").value;
+  const rs = kind ? d.rows.filter(r => r.kind === kind) : d.rows;
+  $("#t-status").textContent = `KB · ${d.start} ~ ${d.end} · ${rs.length}건 · 조회 ${d.fetchedAt} · 거래내역 TR(SWQA2301) · 토스는 OpenAPI에 거래내역이 없어 빠집니다`;
+  if (!rs.length) { $("#t-body").innerHTML = `<div class="empty">조회 기간에 거래내역이 없습니다.</div>`; return; }
+  const day = s => `${s.slice(4, 6)}/${s.slice(6)}`;
+  $("#t-body").innerHTML = `<div class="scroll" style="max-height:480px"><table class="list">
+    <thead><tr><th class="l">일자</th><th class="l">구분</th><th class="l">종목</th><th class="hide-sm">수량</th><th class="hide-sm">단가</th>
+      <th>금액(원)</th><th class="hide-sm">외화</th><th class="hide-sm">수수료·세금</th><th class="hide-sm">예수금</th></tr></thead>
+    <tbody>${rs.map(r => `<tr>
+      <td class="l">${day(r.date)}</td><td class="l">${esc(r.kind)}</td><td class="l nm" title="${esc(r.code)}">${esc(r.name) || "—"}</td>
+      <td class="hide-sm">${r.qty ? fmt(r.qty, r.qty % 1 ? 6 : 0) : ""}</td><td class="hide-sm">${r.price ? fmt(r.price, r.price % 1 ? 2 : 0) : ""}</td>
+      <td>${r.amount ? fmt(r.amount) : ""}</td><td class="hide-sm">${r.fxAmount ? `${fmt(r.fxAmount, 2)} ${esc(r.currency)}` : ""}</td>
+      <td class="hide-sm">${r.fee + r.tax ? fmt(r.fee + r.tax) : ""}</td><td class="hide-sm">${fmt(r.balance)}</td></tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
 // 소수점 구매 현황: 해외 잔고(SPQM2226)에서 소수점 거래 행(dcml_dl_f = "1")만 모은 값
 function fractionalSection(ss) {
   const fs = ss.filter(s => s.frac_qty > 0).sort((a, b) => b.frac_krw - a.frac_krw);
@@ -789,10 +832,11 @@ function drawHoldings(items, total, max) {
   };
 
   $("#h-fetch").onclick = () => loadHoldings();
+  $("#t-kind").onchange = () => txData && renderTransactions();
   $("#kb-refresh").onclick = async () => {
     const b = $("#kb-refresh");
     b.disabled = true;
-    try { await Promise.all([loadHoldings(true), load(true), loadRecurring(true)]); } finally { b.disabled = false; }
+    try { await Promise.all([loadHoldings(true), load(true), loadRecurring(true), loadTransactions(true)]); } finally { b.disabled = false; }
   };
   try { const c = localStorage.getItem("hold-color"); if (c === "change" || c === "pl") hold.color = c; } catch {}
   const syncColor = () => document.querySelectorAll("#h-color button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === hold.color));
@@ -815,6 +859,7 @@ function drawHoldings(items, total, max) {
   }
   loadHoldings();
   loadRecurring();
+  loadTransactions();
   load();
 })();
 </script>

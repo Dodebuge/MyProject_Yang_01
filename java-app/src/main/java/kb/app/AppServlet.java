@@ -30,6 +30,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/holdings                   -> 보유 종목과 현금 (KB + 토스)
  *   GET /api/dividends?year=2026        -> 배당 내역
  *   GET /api/recurring                  -> 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
+ *   GET /api/transactions               -> 최근 1달 거래내역
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
@@ -85,6 +86,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
+        apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {
             String year = param(req, "year", String.valueOf(LocalDate.now().getYear()));
             try {
