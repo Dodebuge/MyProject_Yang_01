@@ -74,6 +74,16 @@ cp kb.war /opt/tomcat/webapps/              # 몇 초 뒤 자동 배포 → http
 MySQL/MariaDB의 `holdings_snapshot` 테이블에 합계를 저장합니다. 내정보 '보유 금액 변화' 그래프가 이 값을 씁니다.
 비워 두면 기록하지 않고 그래프는 kb.db의 하루 기록(내정보를 연 날)만 씁니다. 테이블은 서버가 처음 접속할 때 만듭니다.
 
+MariaDB가 없으면 스크립트 하나로 설치·DB·계정 생성·`.env` 기록까지 끝낼 수 있습니다 (apt, dnf, yum, zypper).
+`.env`에 이미 `MYSQL_HOST` 값이 있으면 아무것도 바꾸지 않습니다. 비밀번호는 무작위로 만들어 `.env`에만 적습니다.
+
+```bash
+sudo deploy/install-mariadb.sh                # 또는: sudo MYSQL_PASSWORD=비밀번호 deploy/install-mariadb.sh
+sudo systemctl restart kb-openapi-spring
+```
+
+직접 설치하려면:
+
 ```bash
 sudo apt install mariadb-server          # 또는 mysql-server
 sudo mariadb <<'SQL'
