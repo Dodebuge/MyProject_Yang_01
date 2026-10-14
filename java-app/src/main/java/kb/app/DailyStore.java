@@ -18,6 +18,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -75,6 +79,26 @@ final class DailyStore {
                 ps.executeUpdate();
             }
             return GSON.fromJson(select(kind, today), MAP);
+        } catch (SQLException e) {
+            throw new IOException("kb.db 저장소 오류: " + e.getMessage(), e);
+        }
+    }
+
+    /** kinds로 저장된 날짜별 값 [(날짜, 값)]. 날짜순이고, 같은 날짜 안에서는 kind 이름순 (daily_store.history와 같음). */
+    List<Map.Entry<String, Map<String, Object>>> history(String... kinds) throws IOException {
+        String marks = String.join(",", Collections.nCopies(kinds.length, "?"));
+        try (Connection c = open();
+             PreparedStatement ps = c.prepareStatement("SELECT date, payload FROM daily WHERE kind IN (" + marks + ") ORDER BY date, kind")) {
+            for (int i = 0; i < kinds.length; i++) {
+                ps.setString(i + 1, kinds[i]);
+            }
+            List<Map.Entry<String, Map<String, Object>>> out = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new AbstractMap.SimpleEntry<>(rs.getString(1), GSON.fromJson(rs.getString(2), MAP)));
+                }
+            }
+            return out;
         } catch (SQLException e) {
             throw new IOException("kb.db 저장소 오류: " + e.getMessage(), e);
         }

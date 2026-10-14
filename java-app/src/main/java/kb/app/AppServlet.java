@@ -28,6 +28,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
  *   GET /api/holdings                   -> 보유 종목과 현금 (KB + 토스)
+ *   GET /api/holdings-history           -> 날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)
  *   GET /api/dividends?year=2026        -> 배당 내역
  *   GET /api/recurring                  -> 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
  *   GET /api/transactions               -> 최근 1달 거래내역
@@ -96,6 +97,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
+        apis.put("/api/holdings-history", req -> heatmap.holdingsHistory());
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
         apis.put("/api/recent", req -> chart.recent());

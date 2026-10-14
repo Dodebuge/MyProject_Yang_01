@@ -184,6 +184,15 @@ td.nm { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
     <div id="h-body"></div>
   </section>
 
+  <section class="card" id="history" style="margin-top:12px">
+    <div class="card-head"><div><h2>보유 금액 변화</h2><p class="sub" id="hh-status"></p></div>
+      <div class="controls" role="group" aria-label="계좌">
+        <label><input type="checkbox" class="hh-acct" value="kb" checked> KB</label>
+        <label><input type="checkbox" class="hh-acct" value="toss" checked> 토스</label>
+      </div></div>
+    <div id="hh-body"></div>
+  </section>
+
   <section class="card" id="recurring" style="margin-top:12px">
     <div class="card-head"><div><h2>정기 구매 내역</h2><p class="sub" id="r-status"></p></div></div>
     <div id="r-body"></div>
@@ -532,6 +541,7 @@ async function loadHoldings(refresh = false) {
     hold.data = await fetchFresh(`api/holdings${refresh ? "?refresh=1" : ""}`,
       !refresh && (d => { shown = true; hold.data = d; renderHoldings(); stale("#h-status"); }));
     renderHoldings();
+    loadHistory();  // 방금 조회한 오늘 보유 현황이 kb.db에 저장됐으니 그래프에도 반영
   } catch (err) {
     if (shown) return stale("#h-status", err);
     hold.data = null;
@@ -539,6 +549,101 @@ async function loadHoldings(refresh = false) {
   } finally {
     $("#h-fetch").disabled = false;
   }
+}
+
+// ---------------------------------------------------------------- 보유 금액 변화 (/api/holdings-history)
+// 서버가 kb.db에 날짜별로 저장한 보유 현황의 총자산(주식 평가금액 + 현금). 내정보를 연 날만 점이 생깁니다.
+let historyDays = null;
+// 체크한 계좌(KB·토스)만 더한 날짜별 값. 토스만 볼 때는 토스가 연결되지 않은 날을 뺍니다.
+const historyAccts = () => [...document.querySelectorAll(".hh-acct:checked")].map(c => c.value);
+function historyView(days) {
+  const acc = historyAccts(), kb = acc.includes("kb"), toss = acc.includes("toss");
+  return days.filter(d => kb || d.toss != null).map(d => {
+    const total = (kb ? d.kb : 0) + (toss ? d.toss ?? 0 : 0), stock = (kb ? d.kbStock : 0) + (toss ? d.tossStock ?? 0 : 0);
+    return { ...d, total, stock, cash: total - stock };
+  });
+}
+async function loadHistory() {
+  try {
+    historyDays = (await fetchFresh("api/holdings-history")).days;
+    renderHistory(historyDays);
+  } catch (err) {
+    $("#hh-body").innerHTML = `<div class="error"><b>보유 금액 기록을 읽지 못했습니다</b><br>${esc(err.message)}</div>`;
+  }
+}
+
+function renderHistory(raw) {
+  const tossDays = raw.filter(d => d.toss != null).length, acc = historyAccts();
+  $("#hh-status").textContent = `kb.db에 하루 한 번 저장된 보유 현황 ${raw.length}일 · 총자산 = KB + 토스 계좌의 주식 평가금액 + 현금`
+    + ` · 토스는 연결된 ${tossDays}일만 포함 · 내정보를 연 날만 기록됩니다`;
+  if (!acc.length) { $("#hh-body").innerHTML = `<div class="empty">볼 계좌(KB·토스)를 하나 이상 체크하세요.</div>`; return; }
+  const days = historyView(raw), name = acc.length === 2 ? "총자산" : acc[0] === "kb" ? "KB 총자산" : "토스 총자산";
+  if (!days.length) { $("#hh-body").innerHTML = `<div class="empty">${raw.length ? "토스가 연결된 날의 기록이 없습니다." : "아직 기록이 없습니다. 보유 종목을 조회하면 오늘부터 쌓입니다."}</div>`; return; }
+  const first = days[0], last = days.at(-1), diff = last.total - first.total;
+  const peak = days.reduce((a, d) => d.total > a.total ? d : a);
+  const r = raw.at(-1);  // KB·토스 칸은 체크와 상관없이 두 계좌를 함께 보여 줌
+  $("#hh-body").innerHTML = `
+    <div class="tiles five">
+      <div class="tile"><div class="label">최근 ${name}</div><div class="value">${compact(last.total)}<span class="unit">원</span></div><div class="meta">${last.date}</div></div>
+      <div class="tile"><div class="label">첫 기록 대비</div><div class="value"><span class="${updown(diff)}">${diff > 0 ? "+" : ""}${compact(diff)}</span><span class="unit">원</span></div>
+        <div class="meta">${pct(first.total ? diff / first.total * 100 : null)} · ${first.date}부터</div></div>
+      <div class="tile"><div class="label">최고 ${name}</div><div class="value">${compact(peak.total)}<span class="unit">원</span></div><div class="meta">${peak.date}</div></div>
+      <div class="tile"><div class="label">KB · 토스</div><div class="value">${compact(r.kb)} · ${r.toss == null ? "—" : compact(r.toss)}</div>
+        <div class="meta">${r.toss == null ? "이날 토스 미연결" : `토스 ${share(r.toss, r.kb + r.toss)} · ${r.date}`}</div></div>
+      <div class="tile"><div class="label">기록</div><div class="value">${days.length}<span class="unit">일</span></div><div class="meta">${first.date} ~ ${last.date}</div></div>
+    </div>
+    <div class="chart" id="hh-chart" style="margin-top:12px"></div>`;
+  drawHistory(days);
+}
+
+function drawHistory(days) {
+  const host = $("#hh-chart");
+  if (!host) return;
+  const W = host.clientWidth, H = 220, m = { t: 16, r: 12, b: 24, l: 52 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  // 변화가 보이도록 0이 아닌 최소~최대 범위로 그립니다 (위아래 10% 여유)
+  const vs = days.flatMap(d => [d.total, d.stock]);
+  let lo = Math.min(...vs), hi = Math.max(...vs);
+  const pad = (hi - lo) * 0.1 || hi * 0.05 || 1;
+  lo = Math.max(0, lo - pad); hi += pad;
+  const t0 = Date.parse(days[0].date), span = Date.parse(days.at(-1).date) - t0;
+  const x = d => m.l + (span ? (Date.parse(d.date) - t0) / span * iw : iw / 2);  // 날짜 간격대로 (안 연 날은 비어 있음)
+  const y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
+  const line = f => days.map((d, i) => `${i ? "L" : "M"}${x(d).toFixed(1)},${y(f(d)).toFixed(1)}`).join("");
+  const ticks = [0, 1 / 3, 2 / 3, 1].map(f => lo + (hi - lo) * f);
+  const labels = days.length <= 8 ? days : days.filter((_, i) => i % Math.ceil(days.length / 8) === 0);
+
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="날짜별 총자산 선 그래프">
+    ${ticks.map(t => `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)"/>
+      <text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${compact(t)}</text>`).join("")}
+    ${labels.map(d => `<text x="${x(d)}" y="${H - 6}" text-anchor="middle">${d.date.slice(5).replace("-", "/")}</text>`).join("")}
+    <path d="${line(d => d.stock)}" fill="none" stroke="var(--series-2)" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <path d="${line(d => d.total)}" fill="none" stroke="var(--series-1)" stroke-width="2.5"/>
+    ${days.map(d => `<circle cx="${x(d)}" cy="${y(d.total)}" r="3.5" fill="var(--series-1)"/>`).join("")}
+    <line class="hh-cross" y1="${m.t}" y2="${m.t + ih}" stroke="var(--axis)" opacity="0"/>
+  </svg><div class="tip"></div>
+  <div class="note"><i style="display:inline-block;width:14px;height:3px;background:var(--series-1);vertical-align:middle"></i> 총자산
+    &nbsp; <i style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--series-2);vertical-align:middle"></i> 주식 평가금액</div>`;
+
+  const svg = $("svg", host), tip = $(".tip", host), cross = $(".hh-cross", host);
+  svg.addEventListener("pointermove", e => {
+    const rect = svg.getBoundingClientRect(), px = (e.clientX - rect.left) * W / rect.width;
+    const i = days.reduce((b, d, j) => Math.abs(x(d) - px) < Math.abs(x(days[b]) - px) ? j : b, 0);
+    const d = days[i], prev = days[i - 1], ch = prev && d.total - prev.total;
+    tip.innerHTML = `<b>${d.date}</b>
+      <div class="row"><span><i style="background:var(--series-1)"></i>총자산</span><span>${fmt(d.total)}원</span></div>
+      <div class="row"><span><i style="background:var(--series-2)"></i>주식</span><span>${fmt(d.stock)}원</span></div>
+      <div class="row"><span>현금</span><span>${fmt(d.cash)}원</span></div>
+      <div class="row"><span>KB 계좌</span><span>${fmt(d.kb)}원</span></div>
+      <div class="row"><span>토스 계좌</span><span>${d.toss == null ? "미연결" : fmt(d.toss) + "원"}</span></div>
+      ${prev ? `<div class="row"><span>${prev.date.slice(5)} 대비</span><span class="${updown(ch)}">${ch > 0 ? "+" : ""}${fmt(ch)}원</span></div>` : ""}`;
+    cross.setAttribute("x1", x(d)); cross.setAttribute("x2", x(d)); cross.setAttribute("opacity", 1);
+    tip.style.opacity = 1;
+    const hx = x(d) * rect.width / W, w = tip.offsetWidth;
+    tip.style.left = Math.min(Math.max(hx + 12, 0), host.clientWidth - w) + "px";
+    tip.style.top = "0px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.style.opacity = 0; cross.setAttribute("opacity", 0); });
 }
 
 function renderHoldings() {
@@ -865,6 +970,15 @@ function drawHoldings(items, total, max) {
   };
 
   $("#h-fetch").onclick = () => loadHoldings();
+  // 보유 금액 변화의 계좌 체크(KB·토스)는 이 브라우저에 기억
+  try {
+    const v = localStorage.getItem("hh-accts");
+    if (v != null) document.querySelectorAll(".hh-acct").forEach(c => c.checked = v.split(",").includes(c.value));
+  } catch {}
+  document.querySelectorAll(".hh-acct").forEach(c => c.onchange = () => {
+    try { localStorage.setItem("hh-accts", historyAccts().join(",")); } catch {}
+    historyDays && renderHistory(historyDays);
+  });
   $("#t-kind").onchange = () => txData && renderTransactions();
   $("#kb-refresh").onclick = async () => {
     const b = $("#kb-refresh");
@@ -884,12 +998,14 @@ function drawHoldings(items, total, max) {
   addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => {
     state.data && drawMonthChart(aggregate(state.data.entries).months.slice(0, document.querySelectorAll("tr[data-month]").length));
     renderHoldings();
+    historyDays && $("#hh-chart") && drawHistory(historyView(historyDays));
   }, 150); });
 
   if (location.protocol === "file:") {
     $("#app").innerHTML = `<div class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000/me 를 여세요.</div>`;
     return;
   }
+  loadHistory();  // kb.db만 읽어 바로 옴. 보유 종목 조회가 끝나면 오늘 값으로 다시 그림
   loadHoldings();
   loadRecurring();
   loadTransactions();

@@ -49,6 +49,15 @@ def daily(kind: str, fetch: Callable[[], dict], refresh: bool = False) -> dict:
     return json.loads(row[0])
 
 
+def history(kinds: tuple[str, ...]) -> list[tuple[str, dict]]:
+    """kinds로 저장된 날짜별 값 [(날짜, 값)]. 날짜순이고, 같은 날짜 안에서는 kind 이름순."""
+    marks = ",".join("?" * len(kinds))
+    with closing(sqlite3.connect(DB, timeout=30)) as con, con:
+        con.execute(SCHEMA)
+        rows = con.execute(f"SELECT date, payload FROM daily WHERE kind IN ({marks}) ORDER BY date, kind", kinds).fetchall()
+    return [(d, json.loads(p)) for d, p in rows]
+
+
 # ---------------------------------------------------------------------- 마지막 응답 (화면 첫 로딩용)
 # API가 성공할 때마다 응답 JSON을 last_api/<경로>[_<파라미터>].txt에 덮어써 둡니다.
 # 화면은 먼저 ?cached=1로 이 값을 받아 바로 그리고, 실제 API 응답이 오면 교체합니다.
@@ -96,6 +105,7 @@ if __name__ == "__main__":
     assert daily("t", lambda: calls.append(4) or {"n": 4}, refresh=True) == {"n": 4}
     assert daily("t", lambda: calls.append(5) or {"n": 5}) == {"n": 4}
     assert calls == [1, 4], calls
+    assert history(("t", "other")) == [(first_day := datetime.now(KST).date().isoformat(), {"n": 3}), (first_day, {"n": 4})]
     # 마지막 응답: refresh·cached는 파일 이름에서 빠지고, 저장 대상이 아닌 API는 None
     LAST_DIR = DB.parent / "last_api"
     f = last_file("heatmap", {"market": "kr", "refresh": "1", "cached": "1"})

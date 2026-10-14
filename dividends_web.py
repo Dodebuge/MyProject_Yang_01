@@ -25,6 +25,7 @@ API:
     GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb"}  차트 설정 (chart_settings.json)
     POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
     GET /api/holdings             -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
+    GET /api/holdings-history      -> {"days": [{"date", "stock", "cash", "total", "kb", "toss", "kbStock", "tossStock"}]}  날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
@@ -49,7 +50,7 @@ from urllib.parse import parse_qs, urlparse
 import chart
 from daily_store import daily, last_file, read_last, save_last
 from dividends import fetch_entries, fetch_recurring, fetch_transactions
-from heatmap import query_heatmap, query_holdings, query_quarters
+from heatmap import holdings_history, query_heatmap, query_holdings, query_quarters
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
@@ -129,6 +130,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: query_quarters(client, q.get("market", ["kr"])[0]), parse_qs(url.query))
             elif url.path == "/api/holdings":
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/holdings-history":
+                self._api(lambda q: holdings_history(), {})
             elif url.path == "/api/recurring":
                 self._api(lambda q: query_recurring(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/search":

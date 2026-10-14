@@ -499,6 +499,43 @@ final class Heatmap {
     // ------------------------------------------------------------------ 보유 종목
 
     /**
+     * GET /api/holdings-history : 날짜별 총자산 (내정보 '보유 금액 변화' 그래프). heatmap.holdings_history와 같음.
+     * KB를 부르지 않고 kb.db에 하루 한 번 저장된 보유 현황을 모아 합계만 계산하므로, 내정보를 연 날만 점이 생깁니다.
+     * 같은 날 토스 합산 값이 있으면 그 값을 씁니다 ('holdings+toss'가 이름순 뒤).
+     * kb·toss는 계좌별 총자산(주식 + 현금), kbStock·tossStock은 그중 주식 평가금액이고,
+     * 그날 토스가 연결되지 않았으면(키 없음·조회 실패) toss·tossStock은 null입니다.
+     */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> holdingsHistory() throws IOException {
+        Map<String, Map<String, Object>> days = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Object>> e : store.history("holdings", "holdings+toss")) {
+            double stock = 0, tossStock = 0;
+            for (Map<String, Object> s : (List<Map<String, Object>>) e.getValue().get("stocks")) {
+                double cap = ((Number) s.get("cap")).doubleValue();
+                stock += cap;
+                tossStock += "토스".equals(s.get("broker")) ? cap : 0;
+            }
+            Map<String, Object> c = (Map<String, Object>) e.getValue().get("cash");
+            Number tossCash = (Number) c.get("toss");  // 토스 조회가 성공한 날만 있음
+            double kbCash = ((Number) c.get("krw")).doubleValue() + ((Number) c.get("fx_krw")).doubleValue();
+            double cash = kbCash + (tossCash == null ? 0 : tossCash.doubleValue());
+            Map<String, Object> day = new LinkedHashMap<>();
+            day.put("date", e.getKey());
+            day.put("stock", Math.round(stock));
+            day.put("cash", Math.round(cash));
+            day.put("total", Math.round(stock + cash));
+            day.put("kb", Math.round(stock - tossStock + kbCash));
+            day.put("toss", tossCash == null ? null : Math.round(tossStock + tossCash.doubleValue()));
+            day.put("kbStock", Math.round(stock - tossStock));
+            day.put("tossStock", tossCash == null ? null : Math.round(tossStock));
+            days.put(e.getKey(), day);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("days", new ArrayList<>(days.values()));
+        return out;
+    }
+
+    /**
      * GET /api/holdings : 내 보유 종목과 현금. 하루 한 번만 KB·토스를 조회해 kb.db에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
      * refresh(?refresh=1)면 지금 다시 조회해 오늘 값을 덮어씁니다.
      * 종목마다 broker("KB"/"토스")가 붙고 cash.toss는 토스 현금(원). 토스 조회가 실패해도 KB 값은 돌려주고 tossError에 이유를 남깁니다.

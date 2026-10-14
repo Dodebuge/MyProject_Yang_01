@@ -24,7 +24,7 @@ from pathlib import Path
 
 import requests
 
-from daily_store import daily
+from daily_store import daily, history
 from kb_client import KBApiError, KBClient
 
 # (티커, 거래소, 섹터). 거래소: NAS=나스닥, NYS=뉴욕
@@ -348,6 +348,25 @@ def query_holdings(client: KBClient, refresh: bool = False) -> dict:
         return result
     # 토스 설정 여부로 저장 이름을 나눕니다: 키를 넣기 전에 저장된(토스 없는) 오늘 값을 그대로 돌려주지 않도록. (Java와 같은 이름)
     return daily("holdings+toss" if toss_settings() else "holdings", fetch, refresh)
+
+
+def holdings_history() -> dict:
+    """GET /api/holdings-history : 날짜별 총자산 (내정보 '보유 금액 변화' 그래프).
+    KB를 부르지 않고 kb.db에 하루 한 번 저장된 보유 현황(query_holdings)을 모아 합계만 계산합니다.
+    그래서 내정보를 연 날만 점이 생깁니다. 같은 날 토스 합산 값이 있으면 그 값을 씁니다 ('holdings+toss'가 이름순 뒤).
+    kb·toss는 계좌별 총자산(주식 + 현금), kbStock·tossStock은 그중 주식 평가금액이고,
+    그날 토스가 연결되지 않았으면(키 없음·조회 실패) toss·tossStock은 None입니다."""
+    days: dict[str, dict] = {}
+    for day, d in history(("holdings", "holdings+toss")):
+        toss_cash = d["cash"].get("toss")  # 토스 조회가 성공한 날만 있음
+        stock = sum(s["cap"] for s in d["stocks"])
+        toss_stock = sum(s["cap"] for s in d["stocks"] if s.get("broker") == "토스")
+        cash = d["cash"]["krw"] + d["cash"]["fx_krw"] + (toss_cash or 0)
+        days[day] = {"date": day, "stock": round(stock), "cash": round(cash), "total": round(stock + cash),
+                     "kb": round(stock - toss_stock + d["cash"]["krw"] + d["cash"]["fx_krw"]),
+                     "toss": None if toss_cash is None else round(toss_stock + toss_cash),
+                     "kbStock": round(stock - toss_stock), "tossStock": None if toss_cash is None else round(toss_stock)}
+    return {"days": list(days.values())}
 
 
 # ---------------------------------------------------------------------- 분기별 거래대금
