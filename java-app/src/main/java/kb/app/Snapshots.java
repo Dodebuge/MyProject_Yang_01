@@ -173,12 +173,13 @@ final class Snapshots {
 
     /**
      * DB 접속 점검 (spring-app/run.sh dbcheck). .env의 MYSQL_* 로 접속해 테이블 생성, 쓰기·읽기(되돌림), 기록 현황을 확인합니다.
-     * 시험 쓰기는 트랜잭션 안에서 하고 되돌리므로 기록이 남지 않습니다. 실패하면 이유를 출력하고 false.
+     * 시험 쓰기는 트랜잭션 안에서 하고 되돌리므로 기록이 남지 않습니다. 성공하면 null, 실패하면 이유 (출력도 함).
      */
-    boolean check() {
+    String check() {
         if (url == null) {
-            System.out.println("[실패] MYSQL_HOST가 없습니다. .env에 MYSQL_HOST·MYSQL_USER·MYSQL_PASSWORD를 넣으세요 (deploy/install-mariadb.sh).");
-            return false;
+            String why = "MYSQL_HOST가 없습니다. .env에 MYSQL_HOST·MYSQL_USER·MYSQL_PASSWORD를 넣으세요 (deploy/install-mariadb.sh).";
+            System.out.println("[실패] " + why);
+            return why;
         }
         System.out.println("설정    " + user + " @ " + url.replaceAll("\\?.*", "") + " (비밀번호 " + (password.isEmpty() ? "없음" : "있음") + ")");
         try (Connection c = open()) {  // 접속 + CREATE TABLE IF NOT EXISTS
@@ -202,10 +203,11 @@ final class Snapshots {
                 System.out.println("기록    " + rs.getLong(1) + "건" + (rs.getTimestamp(2) == null ? "" : ", 마지막 " + rs.getTimestamp(2).toLocalDateTime().format(AT))
                         + " · 다음 기록 " + nextRun(LocalDateTime.now(SEOUL)).format(AT));
             }
-            return true;
+            return null;
         } catch (SQLException e) {
-            System.out.println("[실패] " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            return false;
+            String why = user + " @ " + url.replaceAll("\\?.*", "") + " -> " + e.getClass().getSimpleName() + ": " + e.getMessage();
+            System.out.println("[실패] " + why);
+            return why;
         }
     }
 
@@ -214,7 +216,7 @@ final class Snapshots {
         String dir = System.getenv("KB_DATA_DIR");
         Path env = Path.of(dir == null || dir.isEmpty() ? "." : dir).resolve(".env");
         System.out.println(".env    " + env.toAbsolutePath().normalize());
-        System.exit(new Snapshots(null, env).check() ? 0 : 1);
+        System.exit(new Snapshots(null, env).check() == null ? 0 : 1);
     }
 
     /** GET /api/holdings-history : 하루 기록에 MySQL 4시간 기록을 합침. MySQL이 안 되면 하루 기록만 돌려주고 이유를 snapshotError에. */

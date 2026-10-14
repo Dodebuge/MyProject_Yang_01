@@ -1,7 +1,7 @@
 package kb.app;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -23,7 +23,9 @@ class SnapshotsTest {
     @Test
     @EnabledIfSystemProperty(named = "mysql.live", matches = "true")
     void liveDatabaseAcceptsConnectionAndWrites() throws Exception {
-        assertTrue(new Snapshots(null, Path.of(System.getProperty("kb.data.dir", ".."), ".env")).check(), "DB 점검 실패 (위 출력 참고)");
+        Path env = Path.of(System.getProperty("kb.data.dir", ".."), ".env").toAbsolutePath().normalize();
+        String why = new Snapshots(null, env).check();
+        assertNull(why, () -> "DB 점검 실패 (.env: " + env + "): " + why);
     }
 
     @Test
