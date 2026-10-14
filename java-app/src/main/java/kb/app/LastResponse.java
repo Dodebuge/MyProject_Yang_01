@@ -20,7 +20,7 @@ import java.util.TreeMap;
 final class LastResponse {
 
     private static final Set<String> APIS = new HashSet<>(Arrays.asList(
-            "heatmap", "quarters", "holdings", "dividends", "recurring", "transactions"));  // 첫 로딩이 느린 API만
+            "heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart"));  // 첫 로딩이 느린 API만
     private static final Set<String> IGNORED = new HashSet<>(Arrays.asList("refresh", "cached"));
 
     private final Path dir;

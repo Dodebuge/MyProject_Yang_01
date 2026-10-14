@@ -30,7 +30,7 @@ API:
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
-    heatmap, quarters, holdings, dividends, recurring, transactions는 성공한 마지막 응답을 last_api/*.txt에 저장하고,
+    heatmap, quarters, holdings, dividends, recurring, transactions, chart(종목별)는 성공한 마지막 응답을 last_api/*.txt에 저장하고,
     ?cached=1 을 붙이면 KB를 부르지 않고 그 값을 바로 돌려줍니다(없으면 404). 화면은 이 값을 먼저 그리고 실제 응답으로 교체합니다.
 """
 

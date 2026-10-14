@@ -7,7 +7,8 @@
 <!--
   종목 검색 + 일봉 차트. dividends_web.py가 /chart 로 이 파일을 제공합니다.
   검색은 /api/search?q= (국내 이름·종목번호, 미국 티커), 차트는 /api/chart?market=kr|us&code= (최근 약 1년 일봉).
-  /chart?market=kr&code=005930 처럼 주소로 바로 열 수 있습니다.
+  /chart?market=kr&code=005930 처럼 주소로 바로 열 수 있고, 주소에 종목이 없으면 마지막으로 본 종목을 엽니다.
+  서버에 저장된 그 종목의 마지막 차트(?cached=1)를 먼저 그리고 KB 응답이 오면 교체합니다.
 -->
 <style>
 :root {
@@ -64,6 +65,8 @@ input { cursor: text; }
 .card + .card { margin-top: 12px; }
 .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
 .sub { color: var(--muted); font-size: 12px; margin: 0; }
+.stale { color: var(--series-1); }
+.stale.bad { color: var(--bad); }
 
 .search { position: relative; }
 .search input { width: 100%; padding: 10px 14px; font-size: 16px; }
@@ -137,7 +140,7 @@ const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleStri
 const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1e8, 0) + "억" : n >= 1e4 ? fmt(n / 1e4, 0) + "만" : fmt(n);
 const day = d => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
 const PERIODS = { "1M": 21, "3M": 63, "6M": 126, "1Y": 9999 };
-const S = { data: null, period: "6M", hover: null };
+const S = { data: null, period: "6M", hover: null, stale: "" };  // stale: "" | "loading" | 새로 조회 실패 메시지
 
 // ---------------------------------------------------------------- 보조지표: 이동평균선, 볼린저밴드(20일, ±2σ)
 const MAS = [5, 20, 60, 120];
@@ -212,7 +215,7 @@ function pick(s, push = true) {
   $("#results").innerHTML = "";
   const params = new URLSearchParams({ market: s.market, code: s.code });
   if (s.exchange) params.set("exchange", s.exchange);
-  if (push) history.pushState(null, "", `?${params}`);
+  history[push ? "pushState" : "replaceState"](null, "", `?${params}`);
   load(params);
 }
 
@@ -221,15 +224,27 @@ async function load(params) {
   const seq = ++loadSeq;
   $("#chart-card").hidden = false;
   $("#chart-body").innerHTML = `<div class="loading"><div class="spinner"></div>${esc(params.get("code"))} 일봉을 불러오고 있습니다.</div>`;
-  try {
-    const d = await getJson(`api/chart?${params}`);
-    if (seq !== loadSeq) return;
-    S.data = d; S.hover = null;
+  const show = (d, stale) => {
+    S.data = d; S.hover = null; S.stale = stale;
     document.title = `${d.name} 차트`;
     render();
+  };
+  // 서버(last_api/chart_*.txt)에 저장된 이 종목의 마지막 차트를 먼저 그리고, KB 응답이 오면 교체
+  let done = false, shown = false;
+  getJson(`api/chart?${params}&cached=1`)
+    .then(d => { if (!done && seq === loadSeq) { shown = true; show(d, "loading"); } })
+    .catch(() => {});  // 저장된 차트가 없으면 로딩 표시 그대로
+  try {
+    const d = await getJson(`api/chart?${params}`);
+    done = true;
+    if (seq !== loadSeq) return;
+    show(d, "");
     loadRecent();  // 서버가 방금 연 종목을 최근 검색 맨 앞에 저장함
   } catch (err) {
-    if (seq === loadSeq) $("#chart-body").innerHTML = `<div class="error"><b>차트를 불러오지 못했습니다</b><br>${esc(err.message)}</div>`;
+    done = true;
+    if (seq !== loadSeq) return;
+    if (shown) { S.stale = err.message; render(); }
+    else $("#chart-body").innerHTML = `<div class="error"><b>차트를 불러오지 못했습니다</b><br>${esc(err.message)}</div>`;
   }
 }
 
@@ -242,7 +257,8 @@ async function loadRecent() {
     box.innerHTML = `<span class="label">최근 검색</span>` + items.map((s, i) => `<button data-i="${i}"
       aria-current="${S.data?.market === s.market && S.data?.code === s.code}" title="${s.market === "kr" ? "국내" : "미국"} ${esc(s.exchange)}">${esc(s.name)}<span class="code">${esc(s.code)}</span></button>`).join("");
     box.querySelectorAll("button").forEach(b => b.onclick = () => pick(items[b.dataset.i]));
-  } catch { /* 최근 검색이 없어도 검색·차트는 그대로 */ }
+    return items;
+  } catch { return []; /* 최근 검색이 없어도 검색·차트는 그대로 */ }
 }
 
 function render() {
@@ -258,7 +274,8 @@ function render() {
   $("#chart-body").innerHTML = `
     <div class="head">
       <div>
-        <h2>${esc(d.name)} <span class="sub">${esc(d.code)} · ${esc(d.exchange)} · ${day(last.d)} 기준</span></h2>
+        <h2>${esc(d.name)} <span class="sub">${esc(d.code)} · ${esc(d.exchange)} · ${day(last.d)} 기준${S.stale === "loading" ? ` <span class="stale">· 이전 조회 값 · 새로 불러오는 중…</span>`
+          : S.stale ? ` <span class="stale bad">· 새로 조회하지 못해 이전 값을 보여 줍니다: ${esc(S.stale)}</span>` : ""}</span></h2>
         <div><span class="price">${unit}${fmt(last.c, dp)}</span>
           <span class="chg ${cls(chg)}">${sign(chg)}${fmt(chg, dp)} (${sign(pct)}${fmt(pct, 2)}%)</span></div>
       </div>
@@ -369,8 +386,12 @@ function draw(cs, dp, unit, lines = [], band = null) {
     $("#results").innerHTML = `<li class="error">이 파일을 직접 열면 조회할 수 없습니다. <code>python dividends_web.py</code>로 실행한 뒤 http://localhost:8000/chart 를 여세요.</li>`;
     return;
   }
-  loadSettings().then(fromUrl);  // 저장된 기간·지표 설정을 먼저 읽고 차트를 엶 (설정 파일은 작아 바로 옴)
-  loadRecent();
+  // 저장된 기간·지표 설정을 먼저 읽고 차트를 엶 (설정 파일은 작아 바로 옴).
+  // 주소에 종목이 없으면 마지막으로 본 종목(최근 검색 맨 앞)을 엶
+  Promise.all([loadSettings(), loadRecent()]).then(([, items]) => {
+    if (!new URLSearchParams(location.search).get("code") && items[0]) pick(items[0], false);
+    else fromUrl();
+  });
 })();
 </script>
 </body>

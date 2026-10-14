@@ -52,10 +52,10 @@ def daily(kind: str, fetch: Callable[[], dict], refresh: bool = False) -> dict:
 # ---------------------------------------------------------------------- 마지막 응답 (화면 첫 로딩용)
 # API가 성공할 때마다 응답 JSON을 last_api/<경로>[_<파라미터>].txt에 덮어써 둡니다.
 # 화면은 먼저 ?cached=1로 이 값을 받아 바로 그리고, 실제 API 응답이 오면 교체합니다.
-# 파일 이름에 들어가는 파라미터는 market·year처럼 값이 몇 개 안 되는 것뿐이라 파일 수가 늘지 않습니다.
+# 파일 이름에 들어가는 파라미터는 market·year처럼 값이 몇 개 안 되는 것뿐이고, chart만 연 종목마다 파일이 하나씩 생깁니다.
 
 LAST_DIR = Path(__file__).resolve().parent / "last_api"
-LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions"}  # 첫 로딩이 느린 API만
+LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart"}  # 첫 로딩이 느린 API만
 _IGNORED = {"refresh", "cached"}
 
 
