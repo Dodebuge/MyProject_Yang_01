@@ -22,7 +22,7 @@ API:
     GET /api/search?q=삼성         -> {"query", "results": [{"market", "code", "name", "exchange"}]}  국내 이름·종목번호, 미국 티커
     GET /api/chart?market=kr|us&code=005930[&exchange=NAS] -> {"market", "code", "name", "exchange", "currency", "candles": [{"d","o","h","l","c","v","amt"}]}
     GET /api/recent                -> {"items": [{"market", "code", "exchange", "name"}]}  최근 검색 종목 (recent_searches.txt, 최대 10개)
-    GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb"}  차트 설정 (chart_settings.json)
+    GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd"}  차트 설정 (chart_settings.json)
     POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
     GET /api/holdings             -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/holdings-history      -> {"days": [{"date", "stock", "cash", "total", "kb", "toss", "kbStock", "tossStock"}]}  날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)

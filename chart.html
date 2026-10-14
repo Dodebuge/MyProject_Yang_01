@@ -18,6 +18,7 @@
   --series-1: #2a78d6; --select: rgba(42,120,214,0.08); --bad: #d03b3b;
   --up: #e34948; --down: #2a78d6;
   --ma5: #e0912b; --ma20: #1f8a4c; --ma60: #8a5cd6; --ma120: #9a6b3f; --bb: #0e9aa7;
+  --rsi: #c2477a; --macd: #2f6fd0; --signal: #d9603b;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -27,6 +28,7 @@
     --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767;
     --up: #e66767; --down: #3987e5;
     --ma5: #f0a646; --ma20: #3fb36d; --ma60: #a685e8; --ma120: #c08c5c; --bb: #2cc0cc;
+  --rsi: #e2709d; --macd: #5b93ea; --signal: #ef8358;
   }
 }
 :root[data-theme="dark"] {
@@ -36,6 +38,7 @@
   --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767;
   --up: #e66767; --down: #3987e5;
   --ma5: #f0a646; --ma20: #3fb36d; --ma60: #a685e8; --ma120: #c08c5c; --bb: #2cc0cc;
+  --rsi: #e2709d; --macd: #5b93ea; --signal: #ef8358;
 }
 
 * { box-sizing: border-box; }
@@ -145,7 +148,9 @@ const S = { data: null, period: "6M", hover: null, stale: "" };  // stale: "" | 
 // ---------------------------------------------------------------- 보조지표: 이동평균선, 볼린저밴드(20일, ±2σ)
 const MAS = [5, 20, 60, 120];
 const BB = { n: 20, k: 2 };
-const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false };  // 시작할 때 서버의 chart_settings.json 값으로 바뀜
+const RSI_N = 14;
+const MACD = { fast: 12, slow: 26, signal: 9 };
+const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false, rsi: false, macd: false };  // 시작할 때 서버의 chart_settings.json 값으로 바뀜
 
 // 차트 설정(기간, 지표 체크)은 서버의 chart_settings.json에 저장해 다음에 열 때도 그대로 씁니다
 async function loadSettings() {
@@ -166,6 +171,31 @@ const sma = (xs, n) => {
   return xs.map((v, i) => { s += v - (i >= n ? xs[i - n] : 0); return i >= n - 1 ? s / n : null; });
 };
 // 볼린저밴드: 중심 = n일 이동평균, 상·하단 = 중심 ± k × n일 표준편차(모집단)
+// n일 지수이동평균. 앞쪽 null은 건너뛰고, 첫 값은 처음 n개의 단순평균으로 시작
+const ema = (xs, n) => {
+  const k = 2 / (n + 1), start = xs.findIndex(v => v != null), out = xs.map(() => null);
+  if (start < 0 || start + n > xs.length) return out;
+  let e = xs.slice(start, start + n).reduce((a, v) => a + v, 0) / n;
+  out[start + n - 1] = e;
+  for (let i = start + n; i < xs.length; i++) out[i] = e = xs[i] * k + e * (1 - k);
+  return out;
+};
+// RSI(n): 상승폭 평균 / (상승폭 평균 + 하락폭 평균) × 100. 평균은 와일더 방식 (이전 평균 × (n-1) + 오늘) / n
+const rsi = (xs, n) => {
+  const out = xs.map(() => null);
+  let up = 0, down = 0;
+  for (let i = 1; i < xs.length; i++) {
+    const d = xs[i] - xs[i - 1], u = Math.max(d, 0), w = Math.max(-d, 0);
+    if (i <= n) { up += u / n; down += w / n; } else { up = (up * (n - 1) + u) / n; down = (down * (n - 1) + w) / n; }
+    if (i >= n) out[i] = up + down ? up / (up + down) * 100 : 50;
+  }
+  return out;
+};
+// MACD = 빠른 EMA - 느린 EMA, 시그널 = MACD의 EMA, 히스토그램 = MACD - 시그널
+const macd = (xs, f, sl, sg) => {
+  const a = ema(xs, f), b = ema(xs, sl), m = a.map((v, i) => v == null || b[i] == null ? null : v - b[i]), s = ema(m, sg);
+  return m.map((v, i) => v == null ? null : { m: v, s: s[i], h: s[i] == null ? null : v - s[i] });
+};
 const bollinger = (xs, n, k) => sma(xs, n).map((m, i) => {
   if (m == null) return null;
   const sd = Math.sqrt(xs.slice(i - n + 1, i + 1).reduce((a, v) => a + (v - m) ** 2, 0) / n);
@@ -285,6 +315,9 @@ function render() {
       ${MAS.map(n => `<label><input type="checkbox" data-ind="ma${n}" ${IND["ma" + n] ? "checked" : ""}><i style="background:var(--ma${n})"></i>${n}</label>`).join("")}
       <span class="label" style="margin-left:6px">밴드</span>
       <label><input type="checkbox" data-ind="bb" ${IND.bb ? "checked" : ""}><i style="background:var(--bb)"></i>볼린저 ${BB.n},${BB.k}</label>
+      <span class="label" style="margin-left:6px">보조</span>
+      <label><input type="checkbox" data-ind="rsi" ${IND.rsi ? "checked" : ""}><i style="background:var(--rsi)"></i>RSI ${RSI_N}</label>
+      <label><input type="checkbox" data-ind="macd" ${IND.macd ? "checked" : ""}><i style="background:var(--macd)"></i>MACD ${MACD.fast},${MACD.slow},${MACD.signal}</label>
     </div>
     <div id="plot"><div class="tip" id="tip"></div></div>
     <div class="stats">
@@ -304,13 +337,16 @@ function render() {
   const closes = all.map(c => c.c), from = all.length - cs.length;
   const lines = MAS.filter(n => IND["ma" + n]).map(n => ({ key: "ma" + n, label: `MA${n}`, vs: sma(closes, n).slice(from) }));
   const band = IND.bb ? bollinger(closes, BB.n, BB.k).slice(from) : null;
-  draw(cs, dp, unit, lines, band);
+  const osc = { rsi: IND.rsi && rsi(closes, RSI_N).slice(from), macd: IND.macd && macd(closes, MACD.fast, MACD.slow, MACD.signal).slice(from) };
+  draw(cs, dp, unit, lines, band, osc);
 }
 
 // ---------------------------------------------------------------- 그리기 (SVG 캔들 + 거래량)
-function draw(cs, dp, unit, lines = [], band = null) {
+function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
   const box = $("#plot"), W = box.clientWidth, H = Math.max(260, Math.min(420, W * 0.5));
-  const hasInd = lines.length || band;
+  // 보조지표(RSI, MACD)는 거래량 아래에 칸을 하나씩 붙여 같은 가로축으로 그림
+  const panels = ["rsi", "macd"].filter(k => osc[k]), PH = 84, PG = 16, total = H + panels.length * (PH + PG);
+  const hasInd = lines.length || band || panels.length;
   const padL = 8, padR = 64, padT = hasInd ? 46 : 28, volH = H * 0.18, gap = 8, priceH = H - padT - volH - gap - 20;
   const n = cs.length, step = (W - padL - padR) / n, bw = Math.max(1, Math.min(10, step * 0.7));
   // 세로 범위에 지표 값도 포함 (밴드·이평선이 잘리지 않게)
@@ -325,13 +361,13 @@ function draw(cs, dp, unit, lines = [], band = null) {
   const ticks = Array.from({ length: 5 }, (_, i) => lo + span * i / 4);
   const months = cs.map((c, i) => [c, i]).filter(([c], i) => i && c.d.slice(4, 6) !== cs[i - 1].d.slice(4, 6));
   const every = Math.ceil(months.length / Math.max(1, Math.floor(W / 70)));
-  let svg = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="일봉 차트">`;
+  let svg = `<svg viewBox="0 0 ${W} ${total}" height="${total}" role="img" aria-label="일봉 차트">`;
   svg += ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)"/>
     <text x="${W - padR + 6}" y="${y(t) + 4}">${fmt(t, dp)}</text>`).join("");
   svg += months.filter((_, k) => k % every === 0).map(([c, i]) => `<line x1="${x(i)}" x2="${x(i)}" y1="${padT}" y2="${H - 20}" stroke="var(--grid)" stroke-dasharray="2 3"/>
     <text x="${x(i)}" y="${H - 4}" text-anchor="middle">${c.d.slice(4, 6) === "01" ? c.d.slice(0, 4) : +c.d.slice(4, 6) + "월"}</text>`).join("");
   // 값이 없는(null) 날은 건너뛰어 끊긴 선으로
-  const path = vs => vs.map((v, i) => v == null ? "" : `${i && vs[i - 1] != null ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("");
+  const path = (vs, fy = y) => vs.map((v, i) => v == null ? "" : `${i && vs[i - 1] != null ? "L" : "M"}${x(i).toFixed(1)} ${fy(v).toFixed(1)}`).join("");
   if (band) {
     const ok = band.map((b, i) => [b, i]).filter(([b]) => b);
     if (ok.length) svg += `<path d="M${ok.map(([b, i]) => `${x(i).toFixed(1)} ${y(b.up).toFixed(1)}`).join("L")}L${ok.reverse().map(([b, i]) => `${x(i).toFixed(1)} ${y(b.lo).toFixed(1)}`).join("L")}Z" fill="var(--bb)" opacity=".08"/>`;
@@ -346,7 +382,29 @@ function draw(cs, dp, unit, lines = [], band = null) {
   svg += `<line x1="${padL}" x2="${W - padR}" y1="${y(last.c)}" y2="${y(last.c)}" stroke="${col(last)}" stroke-dasharray="3 3"/>
     <rect x="${W - padR + 2}" y="${y(last.c) - 9}" width="${padR - 4}" height="18" rx="4" fill="${col(last)}"/>
     <text x="${W - padR + 6}" y="${y(last.c) + 4}" style="fill:#fff">${fmt(last.c, dp)}</text>`;
-  svg += `<line id="cross" y1="${padT}" y2="${H - 20}" stroke="var(--axis)" visibility="hidden"/></svg>`;
+  panels.forEach((k, p) => {
+    const top = H + PG + p * (PH + PG), right = W - padR;
+    const [lo, hi] = k === "rsi" ? [0, 100] : (m => [-m, m])(Math.max(...osc.macd.flatMap(v => v ? [v.m, v.s, v.h] : []).filter(v => v != null).map(Math.abs)) || 1);
+    const py = v => top + (hi - v) / (hi - lo) * PH;
+    const tick = (v, label, dash) => `<line x1="${padL}" x2="${right}" y1="${py(v)}" y2="${py(v)}" stroke="var(--grid)" ${dash ? 'stroke-dasharray="3 3"' : ""}/>
+      <text x="${right + 6}" y="${py(v) + 4}">${label}</text>`;
+    svg += `<rect x="${padL}" y="${top}" width="${right - padL}" height="${PH}" fill="none" stroke="var(--grid)"/>`;
+    if (k === "rsi") {
+      svg += `<rect x="${padL}" y="${py(70)}" width="${right - padL}" height="${py(30) - py(70)}" fill="var(--rsi)" opacity=".06"/>`
+        + tick(70, "70", true) + tick(30, "30", true)
+        + `<path d="${path(osc.rsi, py)}" fill="none" stroke="var(--rsi)" stroke-width="1.5"/>`
+        + `<text x="${padL + 6}" y="${top + 13}" style="fill:var(--rsi)">RSI ${RSI_N}</text>`;
+    } else {
+      const m = osc.macd;
+      svg += tick(0, "0")
+        + m.map((v, i) => v?.h == null ? "" : `<rect x="${x(i) - bw / 2}" y="${Math.min(py(0), py(v.h))}" width="${bw}" height="${Math.max(0.5, Math.abs(py(v.h) - py(0)))}" fill="${v.h >= 0 ? "var(--up)" : "var(--down)"}" opacity=".45"/>`).join("")
+        + `<path d="${path(m.map(v => v && v.m), py)}" fill="none" stroke="var(--macd)" stroke-width="1.5"/>`
+        + `<path d="${path(m.map(v => v && v.s), py)}" fill="none" stroke="var(--signal)" stroke-width="1.2"/>`
+        + `<text x="${right + 6}" y="${top + 10}">${fmt(hi, dp)}</text><text x="${right + 6}" y="${top + PH}">${fmt(lo, dp)}</text>`
+        + `<text x="${padL + 6}" y="${top + 13}"><tspan style="fill:var(--macd)">MACD ${MACD.fast},${MACD.slow}</tspan> <tspan style="fill:var(--signal)">시그널 ${MACD.signal}</tspan></text>`;
+    }
+  });
+  svg += `<line id="cross" y1="${padT}" y2="${total}" stroke="var(--axis)" visibility="hidden"/></svg>`;
   box.querySelector("svg")?.remove();
   box.insertAdjacentHTML("beforeend", svg);
 
@@ -355,7 +413,9 @@ function draw(cs, dp, unit, lines = [], band = null) {
     const c = cs[i], p = i ? cs[i - 1].c : c.o, r = (c.c / p - 1) * 100;
     tip.innerHTML = `${day(c.d)} · 시 ${fmt(c.o, dp)} 고 ${fmt(c.h, dp)} 저 ${fmt(c.l, dp)} 종 <b class="${r > 0 ? "up" : r < 0 ? "down" : ""}">${unit}${fmt(c.c, dp)} (${r > 0 ? "+" : ""}${fmt(r, 2)}%)</b> · 거래량 ${compact(c.v)}`
       + (hasInd ? "<br>" + lines.map(l => `<span class="ind" style="color:var(--${l.key})">${l.label} ${fmt(l.vs[i], dp)}</span>`).join("")
-        + (band ? `<span class="ind" style="color:var(--bb)">BB 상 ${fmt(band[i]?.up, dp)} 중 ${fmt(band[i]?.mid, dp)} 하 ${fmt(band[i]?.lo, dp)}</span>` : "") : "");
+        + (band ? `<span class="ind" style="color:var(--bb)">BB 상 ${fmt(band[i]?.up, dp)} 중 ${fmt(band[i]?.mid, dp)} 하 ${fmt(band[i]?.lo, dp)}</span>` : "")
+        + (osc.rsi ? `<span class="ind" style="color:var(--rsi)">RSI ${fmt(osc.rsi[i], 1)}</span>` : "")
+        + (osc.macd ? `<span class="ind" style="color:var(--macd)">MACD ${fmt(osc.macd[i]?.m, dp + 1)} 시그널 ${fmt(osc.macd[i]?.s, dp + 1)} 히스토그램 ${fmt(osc.macd[i]?.h, dp + 1)}</span>` : "") : "");
     cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
   };
   el.onpointermove = e => {

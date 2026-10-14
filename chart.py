@@ -33,7 +33,7 @@ _recent_lock = threading.Lock()
 
 # 차트 설정 (기간, 이평선·볼린저밴드 표시): 화면에서 바꿀 때마다 chart_settings.json에 저장해 다음에도 그대로 엽니다.
 SETTINGS_FILE = Path(__file__).resolve().parent / "chart_settings.json"
-DEFAULT_SETTINGS = {"period": "6M", "ma5": True, "ma20": True, "ma60": True, "ma120": False, "bb": False}
+DEFAULT_SETTINGS = {"period": "6M", "ma5": True, "ma20": True, "ma60": True, "ma120": False, "bb": False, "rsi": False, "macd": False}
 PERIODS = ("1M", "3M", "6M", "1Y")
 
 
@@ -51,7 +51,7 @@ def _valid_settings(base: dict, d: dict) -> dict:
     out = dict(base)
     if d.get("period") in PERIODS:
         out["period"] = d["period"]
-    for k in ("ma5", "ma20", "ma60", "ma120", "bb"):
+    for k in ("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd"):
         if isinstance(d.get(k), bool):
             out[k] = d[k]
     return out
@@ -208,6 +208,7 @@ if __name__ == "__main__":
     SETTINGS_FILE = RECENT_FILE.parent / "settings.json"
     assert settings() == DEFAULT_SETTINGS
     assert save_settings({"bb": True, "period": "1Y"})["bb"] is True
+    assert save_settings({"rsi": True})["rsi"] is True and save_settings({"rsi": False})["rsi"] is False
     s = save_settings({"ma5": False, "period": "10Y", "evil": 1, "ma20": "yes"})
     assert s == {**DEFAULT_SETTINGS, "bb": True, "period": "1Y", "ma5": False} == settings(), s
     SETTINGS_FILE.write_text("{broken", encoding="utf-8")

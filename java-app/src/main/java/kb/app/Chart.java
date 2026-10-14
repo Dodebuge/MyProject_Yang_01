@@ -57,7 +57,7 @@ final class Chart {
     // ------------------------------------------------------------------ 차트 설정 (chart.py settings/save_settings와 같은 파일·같은 규칙)
 
     private static final List<String> PERIODS = Arrays.asList("1M", "3M", "6M", "1Y");
-    private static final List<String> FLAGS = Arrays.asList("ma5", "ma20", "ma60", "ma120", "bb");
+    private static final List<String> FLAGS = Arrays.asList("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     static Map<String, Object> defaultSettings() {
@@ -68,6 +68,8 @@ final class Chart {
         d.put("ma60", true);
         d.put("ma120", false);
         d.put("bb", false);
+        d.put("rsi", false);
+        d.put("macd", false);
         return d;
     }
 
