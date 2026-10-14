@@ -1,2 +1,3 @@
 requests>=2.31.0
 python-dotenv>=1.0.0
+PyMySQL>=1.1.0  # 4시간 보유 금액 기록(MYSQL_HOST)을 쓸 때만

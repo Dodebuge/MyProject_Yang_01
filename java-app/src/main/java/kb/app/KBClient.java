@@ -68,7 +68,7 @@ public final class KBClient {
                 env.getOrDefault("KB_OPENAPI_MAC_ADDR", "00:00:00:00:00:00"));
     }
 
-    private static Map<String, String> readEnvFile(Path file) throws IOException {
+    static Map<String, String> readEnvFile(Path file) throws IOException {
         Map<String, String> env = new LinkedHashMap<>();
         if (file == null || !Files.exists(file)) {
             return env;

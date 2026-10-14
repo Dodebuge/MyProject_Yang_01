@@ -505,34 +505,39 @@ final class Heatmap {
      * kb·toss는 계좌별 총자산(주식 + 현금), kbStock·tossStock은 그중 주식 평가금액이고,
      * 그날 토스가 연결되지 않았으면(키 없음·조회 실패) toss·tossStock은 null입니다.
      */
-    @SuppressWarnings("unchecked")
     Map<String, Object> holdingsHistory() throws IOException {
         Map<String, Map<String, Object>> days = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> e : store.history("holdings", "holdings+toss")) {
-            double stock = 0, tossStock = 0;
-            for (Map<String, Object> s : (List<Map<String, Object>>) e.getValue().get("stocks")) {
-                double cap = ((Number) s.get("cap")).doubleValue();
-                stock += cap;
-                tossStock += "토스".equals(s.get("broker")) ? cap : 0;
-            }
-            Map<String, Object> c = (Map<String, Object>) e.getValue().get("cash");
-            Number tossCash = (Number) c.get("toss");  // 토스 조회가 성공한 날만 있음
-            double kbCash = ((Number) c.get("krw")).doubleValue() + ((Number) c.get("fx_krw")).doubleValue();
-            double cash = kbCash + (tossCash == null ? 0 : tossCash.doubleValue());
-            Map<String, Object> day = new LinkedHashMap<>();
-            day.put("date", e.getKey());
-            day.put("stock", Math.round(stock));
-            day.put("cash", Math.round(cash));
-            day.put("total", Math.round(stock + cash));
-            day.put("kb", Math.round(stock - tossStock + kbCash));
-            day.put("toss", tossCash == null ? null : Math.round(tossStock + tossCash.doubleValue()));
-            day.put("kbStock", Math.round(stock - tossStock));
-            day.put("tossStock", tossCash == null ? null : Math.round(tossStock));
-            days.put(e.getKey(), day);
+            days.put(e.getKey(), summarize(e.getKey(), e.getValue()));
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("days", new ArrayList<>(days.values()));
         return out;
+    }
+
+    /** 보유 현황(queryHoldings 응답) 하나의 합계. at은 "2026-10-15" 또는 "2026-10-15T04:00" (heatmap.summarize와 같음). */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> summarize(String at, Map<String, Object> holdings) {
+        double stock = 0, tossStock = 0;
+        for (Map<String, Object> s : (List<Map<String, Object>>) holdings.get("stocks")) {
+            double cap = ((Number) s.get("cap")).doubleValue();
+            stock += cap;
+            tossStock += "토스".equals(s.get("broker")) ? cap : 0;
+        }
+        Map<String, Object> c = (Map<String, Object>) holdings.get("cash");
+        Number tossCash = (Number) c.get("toss");  // 토스 조회가 성공한 날만 있음
+        double kbCash = ((Number) c.get("krw")).doubleValue() + ((Number) c.get("fx_krw")).doubleValue();
+        double cash = kbCash + (tossCash == null ? 0 : tossCash.doubleValue());
+        Map<String, Object> day = new LinkedHashMap<>();
+        day.put("date", at);
+        day.put("stock", Math.round(stock));
+        day.put("cash", Math.round(cash));
+        day.put("total", Math.round(stock + cash));
+        day.put("kb", Math.round(stock - tossStock + kbCash));
+        day.put("toss", tossCash == null ? null : Math.round(tossStock + tossCash.doubleValue()));
+        day.put("kbStock", Math.round(stock - tossStock));
+        day.put("tossStock", tossCash == null ? null : Math.round(tossStock));
+        return day;
     }
 
     /**

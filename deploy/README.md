@@ -68,6 +68,33 @@ cp kb.war /opt/tomcat/webapps/              # 몇 초 뒤 자동 배포 → http
 루트 주소(`http://서버IP:8080/`)로 쓰려면 기존 `webapps/ROOT`를 치우고 `ROOT.war` 이름으로 복사하세요.
 페이지 안의 링크와 API 호출은 상대경로라 어느 경로에 올려도 동작합니다.
 
+## 보유 금액 4시간 기록 (선택, A·B 공통)
+
+`.env`에 `MYSQL_HOST`를 넣으면 서버가 한국 시간 00·04·08·12·16·20시마다 KB·토스 보유 현황을 새로 조회해
+MySQL/MariaDB의 `holdings_snapshot` 테이블에 합계를 저장합니다. 내정보 '보유 금액 변화' 그래프가 이 값을 씁니다.
+비워 두면 기록하지 않고 그래프는 kb.db의 하루 기록(내정보를 연 날)만 씁니다. 테이블은 서버가 처음 접속할 때 만듭니다.
+
+```bash
+sudo apt install mariadb-server          # 또는 mysql-server
+sudo mariadb <<'SQL'
+CREATE DATABASE kb_openapi CHARACTER SET utf8mb4;
+CREATE USER 'kb'@'localhost' IDENTIFIED BY '비밀번호';
+GRANT ALL ON kb_openapi.* TO 'kb'@'localhost';
+SQL
+```
+
+`.env`에 추가한 뒤 서비스를 재시작합니다 (`MYSQL_PORT` 기본 3306, `MYSQL_DATABASE` 기본 kb_openapi).
+
+```
+MYSQL_HOST=127.0.0.1
+MYSQL_USER=kb
+MYSQL_PASSWORD=비밀번호
+```
+
+로그에 `[기록] jdbc:mysql://127.0.0.1:3306/kb_openapi 에 4시간마다 보유 금액 기록 (다음 HH:MM)`이 나오면 켜진 것입니다.
+Python 서버(방법 B)는 `pip install -r requirements.txt`로 PyMySQL을 설치하세요.
+Spring과 Python 서버를 함께 띄우면 둘 다 KB를 조회해 같은 시각 값을 덮어쓰므로, 기록은 한 서버에서만 켜는 것을 권합니다.
+
 ## 방화벽 (A·B 공통)
 
 ```bash

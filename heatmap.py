@@ -356,17 +356,20 @@ def holdings_history() -> dict:
     그래서 내정보를 연 날만 점이 생깁니다. 같은 날 토스 합산 값이 있으면 그 값을 씁니다 ('holdings+toss'가 이름순 뒤).
     kb·toss는 계좌별 총자산(주식 + 현금), kbStock·tossStock은 그중 주식 평가금액이고,
     그날 토스가 연결되지 않았으면(키 없음·조회 실패) toss·tossStock은 None입니다."""
-    days: dict[str, dict] = {}
-    for day, d in history(("holdings", "holdings+toss")):
-        toss_cash = d["cash"].get("toss")  # 토스 조회가 성공한 날만 있음
-        stock = sum(s["cap"] for s in d["stocks"])
-        toss_stock = sum(s["cap"] for s in d["stocks"] if s.get("broker") == "토스")
-        cash = d["cash"]["krw"] + d["cash"]["fx_krw"] + (toss_cash or 0)
-        days[day] = {"date": day, "stock": round(stock), "cash": round(cash), "total": round(stock + cash),
-                     "kb": round(stock - toss_stock + d["cash"]["krw"] + d["cash"]["fx_krw"]),
-                     "toss": None if toss_cash is None else round(toss_stock + toss_cash),
-                     "kbStock": round(stock - toss_stock), "tossStock": None if toss_cash is None else round(toss_stock)}
+    days = {day: summarize(day, d) for day, d in history(("holdings", "holdings+toss"))}
     return {"days": list(days.values())}
+
+
+def summarize(at: str, d: dict) -> dict:
+    """보유 현황(query_holdings 응답) 하나의 합계. at은 '2026-10-15' 또는 '2026-10-15T04:00'."""
+    toss_cash = d["cash"].get("toss")  # 토스 조회가 성공한 날만 있음
+    stock = sum(s["cap"] for s in d["stocks"])
+    toss_stock = sum(s["cap"] for s in d["stocks"] if s.get("broker") == "토스")
+    cash = d["cash"]["krw"] + d["cash"]["fx_krw"] + (toss_cash or 0)
+    return {"date": at, "stock": round(stock), "cash": round(cash), "total": round(stock + cash),
+            "kb": round(stock - toss_stock + d["cash"]["krw"] + d["cash"]["fx_krw"]),
+            "toss": None if toss_cash is None else round(toss_stock + toss_cash),
+            "kbStock": round(stock - toss_stock), "tossStock": None if toss_cash is None else round(toss_stock)}
 
 
 # ---------------------------------------------------------------------- 분기별 거래대금

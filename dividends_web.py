@@ -26,6 +26,7 @@ API:
     POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
     GET /api/holdings             -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/holdings-history      -> {"days": [{"date", "stock", "cash", "total", "kb", "toss", "kbStock", "tossStock"}]}  날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)
+                                      MYSQL_HOST가 있으면 4시간마다(00·04·…·20시) 기록한 MySQL 값도 합침 (snapshots.py)
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
@@ -48,9 +49,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import chart
+import snapshots
 from daily_store import daily, last_file, read_last, save_last
 from dividends import fetch_entries, fetch_recurring, fetch_transactions
-from heatmap import holdings_history, query_heatmap, query_holdings, query_quarters
+from heatmap import holdings_history, query_heatmap, query_holdings, query_quarters, summarize
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
@@ -131,7 +133,7 @@ def make_handler(client: KBClient):
             elif url.path == "/api/holdings":
                 self._api(lambda q: query_holdings(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/holdings-history":
-                self._api(lambda q: holdings_history(), {})
+                self._api(lambda q: snapshots.history(holdings_history()), {})
             elif url.path == "/api/recurring":
                 self._api(lambda q: query_recurring(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/search":
@@ -198,7 +200,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 기본은 127.0.0.1에만 바인딩: 같은 네트워크의 다른 기기에서 계좌 내역을 직접 볼 수 없게 합니다.
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(KBClient.from_env()))
+    client = KBClient.from_env()
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
+    snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
     url = f"http://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)
     if not args.no_open:

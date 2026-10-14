@@ -37,6 +37,12 @@
       <artifactId>sqlite-jdbc</artifactId>
       <version>3.49.1.0</version>
     </dependency>
+    <!-- 보유 금액 4시간 기록 (Snapshots, MYSQL_HOST가 있을 때만 접속). spring-app과 같은 버전. MariaDB 서버에도 붙습니다. -->
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>9.7.0</version>
+    </dependency>
     <!-- 테스트: 토스 연결 검사 (TossClientTest, -Dtoss.live=true 일 때만 실제 호출) -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

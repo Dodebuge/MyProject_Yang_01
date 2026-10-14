@@ -46,6 +46,14 @@ public class KbApplication {
         return new Dividends(client, store);
     }
 
+    /** MYSQL_HOST가 있으면 4시간마다(00·04·…·20시) 보유 금액을 MySQL에 기록. 없으면 아무것도 안 함. */
+    @Bean(destroyMethod = "stop")
+    Snapshots snapshots(Heatmap heatmap, @Value("${kb.data-dir}") Path dataDir) throws IOException {
+        Snapshots s = new Snapshots(heatmap, dataDir.resolve(".env"));
+        s.start();
+        return s;
+    }
+
     @Bean
     Chart chart(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
         return new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개

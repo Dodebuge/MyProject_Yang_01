@@ -28,7 +28,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
  *   GET /api/holdings                   -> 보유 종목과 현금 (KB + 토스)
- *   GET /api/holdings-history           -> 날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)
+ *   GET /api/holdings-history           -> 날짜별 총자산 (kb.db 하루 기록 + MYSQL_HOST가 있으면 4시간 기록)
  *   GET /api/dividends?year=2026        -> 배당 내역
  *   GET /api/recurring                  -> 소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
  *   GET /api/transactions               -> 최근 1달 거래내역
@@ -61,6 +61,7 @@ public class AppServlet extends HttpServlet {
     private Dividends dividends;
     private LastResponse last;  // 마지막 응답 (?cached=1)
     private Chart chart;
+    private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
 
     private interface Api {
@@ -68,6 +69,13 @@ public class AppServlet extends HttpServlet {
     }
 
     private final Map<String, Api> apis = new HashMap<>();
+
+    @Override
+    public void destroy() {
+        if (snapshots != null) {
+            snapshots.stop();
+        }
+    }
 
     @Override
     public void init() throws ServletException {
@@ -93,11 +101,17 @@ public class AppServlet extends HttpServlet {
         dividends = new Dividends(client, store);
         last = new LastResponse(dataDir.resolve("last_api"));
         chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
+        try {
+            snapshots = new Snapshots(heatmap, dataDir.resolve(".env"));  // MYSQL_HOST가 있으면 4시간마다 보유 금액 기록
+        } catch (IOException e) {
+            throw new ServletException("MySQL 설정을 읽지 못했습니다 (" + dataDir + "): " + e.getMessage(), e);
+        }
+        snapshots.start();
 
         apis.put("/api/heatmap", req -> heatmap.queryHeatmap(param(req, "market", "kr")));
         apis.put("/api/quarters", req -> heatmap.queryQuarters(param(req, "market", "kr")));
         apis.put("/api/holdings", req -> heatmap.queryHoldings(refresh(req)));
-        apis.put("/api/holdings-history", req -> heatmap.holdingsHistory());
+        apis.put("/api/holdings-history", req -> snapshots.history());
         apis.put("/api/recurring", req -> dividends.queryRecurring(refresh(req)));
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
         apis.put("/api/recent", req -> chart.recent());
