@@ -3,6 +3,7 @@
 #   ./run.sh                  -> http://localhost:8080
 #   PORT=8000 ./run.sh        -> 다른 포트
 #   ./run.sh prepare          -> 빌드·CDS 준비만 하고 끝냄 (systemd 서비스 배포 전에 실행)
+#   ./run.sh dbcheck          -> MySQL/MariaDB 접속 점검 (보유 금액 4시간 기록용, .env의 MYSQL_*)
 #   JAVA_OPTS="" ./run.sh     -> 기본 JVM 옵션(-XX:TieredStopAtLevel=1)을 끄고 실행
 # .env(appKey/appSecret)는 저장소 루트에서 읽습니다 (KB_DATA_DIR로 바꿀 수 있음).
 #
@@ -31,6 +32,8 @@ if [ ! -f "$APP/app.jsa" ] || [ "$JAR" -nt "$APP/app.jsa" ]; then
 fi
 
 [ "$1" = "prepare" ] && exit 0
+# DB 접속 점검: .env의 MYSQL_* 로 접속·테이블·쓰기·읽기 확인 (실패하면 종료 코드 1)
+[ "$1" = "dbcheck" ] && exec java -cp "$APP/kb-openapi-spring.jar" kb.app.Snapshots
 CDS=""
 [ -f "$APP/app.jsa" ] && CDS="-XX:SharedArchiveFile=$APP/app.jsa"
 # shellcheck disable=SC2086  # JAVA_OPTS는 여러 옵션을 공백으로 나눠 넘깁니다

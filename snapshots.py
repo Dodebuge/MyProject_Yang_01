@@ -109,7 +109,43 @@ def start(take: Callable[[], dict], summarize: Callable[[str, dict], dict]) -> N
           f"(다음 {next_run(datetime.now(KST)):%H:%M})", flush=True)
 
 
+def check() -> bool:
+    """DB 접속 점검 (python snapshots.py --check). .env의 MYSQL_* 로 접속해 테이블 생성, 쓰기·읽기(되돌림), 기록 현황을 확인합니다.
+    시험 쓰기는 트랜잭션 안에서 하고 되돌리므로 기록이 남지 않습니다."""
+    s = settings()
+    if not s:
+        print("[실패] MYSQL_HOST가 없습니다. .env에 MYSQL_HOST·MYSQL_USER·MYSQL_PASSWORD를 넣으세요 (deploy/install-mariadb.sh).")
+        return False
+    print(f"설정    {s['user']} @ {s['host']}:{s['port']}/{s['database']} (비밀번호 {'있음' if s['password'] else '없음'})")
+    try:
+        with _connect(s) as con:  # 접속 + CREATE TABLE IF NOT EXISTS
+            print(f"[성공] 접속·테이블  {con.get_server_info()}")
+            con.begin()
+            try:
+                with con.cursor() as cur:
+                    cur.execute("INSERT INTO holdings_snapshot (at, total, stock, cash, kb, kb_stock) VALUES ('2000-01-01 00:00:00', 1, 1, 0, 1, 1)"
+                                " ON DUPLICATE KEY UPDATE total = 1")
+                    cur.execute("SELECT total FROM holdings_snapshot WHERE at = '2000-01-01 00:00:00'")
+                    if cur.fetchone() != (1,):
+                        raise RuntimeError("쓴 값을 다시 읽지 못했습니다")
+            finally:
+                con.rollback()  # 시험 쓰기는 남기지 않음
+            print("[성공] 쓰기·읽기 (되돌림)")
+            with con.cursor() as cur:
+                cur.execute("SELECT COUNT(*), MAX(at) FROM holdings_snapshot")
+                n, last = cur.fetchone()
+            print(f"기록    {n}건{f', 마지막 {last:%Y-%m-%dT%H:%M}' if last else ''} · 다음 기록 {next_run(datetime.now(KST)):%Y-%m-%dT%H:%M}")
+        return True
+    except Exception as e:  # 접속 거부, 인증 실패, 권한 없음 등
+        print(f"[실패] {type(e).__name__}: {e}")
+        return False
+
+
 if __name__ == "__main__":
+    import sys
+    if "--check" in sys.argv:  # DB 접속 점검: python snapshots.py --check
+        import kb_client  # noqa: F401  .env를 환경변수로 읽어 둠
+        sys.exit(0 if check() else 1)
     # 자체 점검: 다음 실행 시각과 하루/4시간 기록 합치기
     assert next_run(datetime(2026, 10, 15, 0, 0)) == datetime(2026, 10, 15, 4, 0)
     assert next_run(datetime(2026, 10, 15, 3, 59)) == datetime(2026, 10, 15, 4, 0)

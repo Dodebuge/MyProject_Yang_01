@@ -1,7 +1,9 @@
 package kb.app;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
@@ -9,8 +11,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
+/**
+ * -Dmysql.live=true 를 주면 .env의 MYSQL_* 로 실제 DB 접속·쓰기·읽기도 확인합니다 (시험 쓰기는 되돌림).
+ *   ../spring-app/mvnw test -Dtest=SnapshotsTest -Dmysql.live=true                                (java-app 폴더에서, 저장소 루트 .env)
+ *   ../spring-app/mvnw test -Dtest=SnapshotsTest -Dmysql.live=true -Dkb.data.dir=/opt/kb_openapi_sample
+ */
 class SnapshotsTest {
+
+    @Test
+    @EnabledIfSystemProperty(named = "mysql.live", matches = "true")
+    void liveDatabaseAcceptsConnectionAndWrites() throws Exception {
+        assertTrue(new Snapshots(null, Path.of(System.getProperty("kb.data.dir", ".."), ".env")).check(), "DB 점검 실패 (위 출력 참고)");
+    }
 
     @Test
     void nextRunIsNextFourHourMark() {

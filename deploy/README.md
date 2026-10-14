@@ -102,6 +102,13 @@ MYSQL_PASSWORD=비밀번호
 ```
 
 로그에 `[기록] jdbc:mysql://127.0.0.1:3306/kb_openapi 에 4시간마다 보유 금액 기록 (다음 HH:MM)`이 나오면 켜진 것입니다.
+
+서비스를 재시작하기 전에 DB 접속만 따로 확인할 수 있습니다. 접속, 테이블 생성, 쓰기·읽기(시험 쓰기는 되돌림), 기록 건수를 출력하고 실패하면 종료 코드 1입니다.
+
+```bash
+sudo -u kbapp spring-app/run.sh dbcheck       # Spring (방법 A)
+python snapshots.py --check                   # Python (방법 B)
+```
 Python 서버(방법 B)는 `pip install -r requirements.txt`로 PyMySQL을 설치하세요.
 Spring과 Python 서버를 함께 띄우면 둘 다 KB를 조회해 같은 시각 값을 덮어쓰므로, 기록은 한 서버에서만 켜는 것을 권합니다.
 
