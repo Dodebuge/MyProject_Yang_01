@@ -21,7 +21,7 @@ final class LastResponse {
 
     private static final Set<String> APIS = new HashSet<>(Arrays.asList(
             "heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart"));  // 첫 로딩이 느린 API만
-    private static final Set<String> IGNORED = new HashSet<>(Arrays.asList("refresh", "cached"));
+    private static final Set<String> IGNORED = new HashSet<>(Arrays.asList("refresh", "cached", "recent"));  // recent=0도 같은 차트
 
     private final Path dir;
 

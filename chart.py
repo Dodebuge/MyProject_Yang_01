@@ -134,7 +134,8 @@ def _candles(rows: list[dict], suffix: str, value_scale: float) -> list[dict]:
     return sorted({c["d"]: c for c in out}.values(), key=lambda c: c["d"])  # 같은 날 중복 제거, 오래된 날부터
 
 
-def chart(client: KBClient, market: str, code: str, exchange: str = "") -> dict:
+def chart(client: KBClient, market: str, code: str, exchange: str = "", save: bool = True) -> dict:
+    """일봉 차트. save=False(?recent=0)면 최근 검색에 남기지 않음 (시그널 목록이 보유 종목 차트를 읽을 때)."""
     code = code.strip()
     if market == "kr":
         if not re.fullmatch(r"[0-9A-Z]{6}", code):
@@ -147,7 +148,8 @@ def chart(client: KBClient, market: str, code: str, exchange: str = "") -> dict:
         name = next((s["name"] for s in kr_stocks(client) if s["code"] == code), code)
         out = {"market": "kr", "code": code, "name": name, "exchange": board, "currency": "KRW",
                "candles": _candles(rows, "p2", 10)}  # 국내 차트 거래대금은 10원 단위
-        remember(out)
+        if save:
+            remember(out)
         return out
     if market != "us":
         raise ValueError(f"market은 kr 또는 us입니다: {market}")
@@ -167,7 +169,8 @@ def chart(client: KBClient, market: str, code: str, exchange: str = "") -> dict:
         if candles:
             name = str(out.get("hngl_is_nm") or "").strip() or str(out.get("eng_is_nm") or "").strip() or code
             out = {"market": "us", "code": code, "name": name, "exchange": x, "currency": "USD", "candles": candles}
-            remember(out)
+            if save:
+                remember(out)
             return out
     raise ValueError(f"미국 거래소(나스닥·뉴욕·아멕스)에서 {code} 차트를 찾지 못했습니다.")
 

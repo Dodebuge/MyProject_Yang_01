@@ -89,6 +89,20 @@ input { cursor: text; }
 .price { font-size: 32px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .chg { font-size: 15px; font-weight: 600; margin-left: 8px; }
 .up { color: var(--up); } .down { color: var(--down); }
+/* 기술적 시그널: 매수 쪽 빨강, 매도 쪽 파랑 (국내 등락 색과 같음) */
+.sig { display: inline-block; font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 999px; margin: 2px 4px 2px 0; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.sig.buy { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); background: color-mix(in srgb, var(--up) 8%, transparent); }
+.sig.sell { color: var(--down); border-color: color-mix(in srgb, var(--down) 45%, transparent); background: color-mix(in srgb, var(--down) 8%, transparent); }
+.sigs { margin-top: 6px; }
+.sig-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.sig-table th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: left; padding: 6px; }
+.sig-table td { padding: 8px 6px; border-top: 1px solid var(--grid); vertical-align: top; }
+.sig-table tbody tr { cursor: pointer; }
+.sig-table tbody tr:hover { background: var(--hover); }
+.sig-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sig-table .code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.sig-table .tag { margin-left: 4px; }
+@media (max-width: 600px) { .sig-table .hide-sm { display: none; } }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 16px; margin-top: 12px; font-variant-numeric: tabular-nums; }
 .stats div span { display: block; color: var(--muted); font-size: 12px; }
 @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .price { font-size: 26px; } }
@@ -132,6 +146,12 @@ input { cursor: text; }
 
   <section class="card" id="chart-card" hidden>
     <div id="chart-body"></div>
+  </section>
+
+  <section class="card" id="sig-card">
+    <h2>기술적 시그널</h2>
+    <p class="sub" id="sig-status">보유 종목(ETF 제외)과 최근 검색 종목의 최근 일봉으로 계산합니다.</p>
+    <div id="sig-body"></div>
   </section>
   <p class="note">국내는 KB OpenAPI 상장 종목 목록(IVS10920)에서 이름·종목번호로, 미국은 티커로 찾습니다(나스닥·뉴욕·아멕스). 일봉은 국내 IVS11560, 미국 GSC10060(15분 지연)으로 최근 약 1년을 받습니다.</p>
 </div>
@@ -240,6 +260,109 @@ async function search(openFirst = false) {
   }
 }
 
+// ---------------------------------------------------------------- 기술적 시그널
+// 마지막 날 기준. 교차는 최근 SIG_DAYS 거래일 안에 일어난 것만. dir: 1 매수 쪽, -1 매도 쪽
+const SIG_DAYS = 5;
+function signalsOf(cs) {
+  const xs = cs.map(c => c.c), last = xs.length - 1, out = [];
+  if (xs.length < 30) return out;
+  // a가 b를 위로 뚫으면 1, 아래로 뚫으면 -1 (가장 최근 교차)
+  const cross = (a, b) => {
+    for (let i = last; i > Math.max(0, last - SIG_DAYS); i--) {
+      if ([a[i], b[i], a[i - 1], b[i - 1]].includes(null)) return null;
+      if (a[i - 1] <= b[i - 1] && a[i] > b[i]) return { dir: 1, d: cs[i].d };
+      if (a[i - 1] >= b[i - 1] && a[i] < b[i]) return { dir: -1, d: cs[i].d };
+    }
+    return null;
+  };
+  const ma = Object.fromEntries(MAS.map(n => [n, sma(xs, n)]));
+  for (const [f, sl] of [[5, 20], [20, 60]]) {
+    const c = cross(ma[f], ma[sl]);
+    if (c) out.push({ ...c, text: `${f}·${sl}일선 ${c.dir > 0 ? "골든" : "데드"}크로스` });
+  }
+  const m = macd(xs, MACD.fast, MACD.slow, MACD.signal), mc = cross(m.map(v => v?.m ?? null), m.map(v => v?.s ?? null));
+  if (mc) out.push({ ...mc, text: `MACD 시그널 ${mc.dir > 0 ? "상향" : "하향"} 돌파` });
+  const r = rsi(xs, RSI_N)[last];
+  if (r >= 70) out.push({ dir: -1, text: `RSI 과매수 ${fmt(r, 0)}` });
+  else if (r <= 30) out.push({ dir: 1, text: `RSI 과매도 ${fmt(r, 0)}` });
+  const b = bollinger(xs, BB.n, BB.k)[last];
+  if (b && xs[last] > b.up) out.push({ dir: -1, text: "볼린저 상단 돌파 (과열)" });
+  else if (b && xs[last] < b.lo) out.push({ dir: 1, text: "볼린저 하단 이탈 (침체)" });
+  const [a5, a20, a60, a120] = MAS.map(n => ma[n][last]);
+  if (a120 != null && a5 > a20 && a20 > a60 && a60 > a120) out.push({ dir: 1, text: "이평선 정배열" });
+  else if (a120 != null && a5 < a20 && a20 < a60 && a60 < a120) out.push({ dir: -1, text: "이평선 역배열" });
+  return out;
+}
+const sigBadges = list => list.length
+  ? list.map(g => `<span class="sig ${g.dir > 0 ? "buy" : "sell"}" title="${g.d ? day(g.d) + " 발생" : "마지막 거래일 기준"}">${g.dir > 0 ? "▲" : "▼"} ${esc(g.text)}${g.d ? ` ${+g.d.slice(4, 6)}/${+g.d.slice(6)}` : ""}</span>`).join("")
+  : `<span class="sig">특이 시그널 없음</span>`;
+const sigScore = list => {
+  const n = list.reduce((a, g) => a + g.dir, 0);
+  return n > 0 ? `<b class="up">매수 우위 +${n}</b>` : n < 0 ? `<b class="down">매도 우위 ${n}</b>` : `<span class="sub">중립</span>`;
+};
+
+// 보유 종목(ETF 제외) + 최근 검색. 저장된 차트(?cached=1)로 먼저 그리고 KB에서 하나씩 새로 받아 교체.
+// recent=0: 시그널 계산용 조회는 최근 검색에 남기지 않음
+const SIG = { rows: [], seq: 0 };
+async function loadSignals() {
+  const seq = ++SIG.seq;
+  const getHoldings = () => getJson("api/holdings?cached=1").catch(() => getJson("api/holdings"));
+  const [holds, recents] = await Promise.all([
+    getHoldings().then(d => d.stocks).catch(() => []),
+    getJson("api/recent").then(d => d.items).catch(() => [])]);
+  const etf = new Set(holds.filter(s => s.etf).map(s => s.code));
+  const rows = new Map();
+  for (const s of holds.filter(s => !s.etf)) {
+    const market = s.market === "국내" ? "kr" : "us";
+    rows.set(`${market}:${s.code}`, { market, code: s.code, exchange: "", name: s.name, held: true });
+  }
+  for (const s of recents.filter(s => !etf.has(s.code))) {
+    const k = `${s.market}:${s.code}`;
+    if (rows.has(k)) rows.get(k).recent = true; else rows.set(k, { ...s, recent: true });
+  }
+  if (seq !== SIG.seq) return;
+  SIG.rows = [...rows.values()];
+  if (!SIG.rows.length) { $("#sig-body").innerHTML = `<div class="empty">보유 종목(ETF 제외)과 최근 검색이 없습니다.</div>`; return; }
+  renderSignals();
+  const url = r => `api/chart?${new URLSearchParams({ market: r.market, code: r.code, ...(r.exchange && { exchange: r.exchange }), recent: "0" })}`;
+  await Promise.all(SIG.rows.map(r => getJson(url(r) + "&cached=1")
+    .then(d => { if (seq === SIG.seq && !r.fresh) { r.data = d; renderSignals(); } }).catch(() => {})));
+  // KB 새 조회는 2개씩 (한꺼번에 부르지 않게)
+  const queue = [...SIG.rows];
+  const worker = async () => {
+    for (let r; (r = queue.shift());) {
+      try { r.data = await getJson(url(r)); r.fresh = true; r.error = ""; }
+      catch (err) { r.error = err.message; }
+      if (seq !== SIG.seq) return;
+      renderSignals();
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  if (seq === SIG.seq) $("#sig-status").textContent = `보유 종목(ETF 제외)과 최근 검색 종목 ${SIG.rows.length}개 · 마지막 거래일 기준, 교차는 최근 ${SIG_DAYS}거래일 안 · 투자 판단의 참고용입니다`;
+}
+
+function renderSignals() {
+  const left = SIG.rows.filter(r => !r.fresh && !r.error).length;
+  if (left) $("#sig-status").textContent = `KB에서 일봉을 새로 받는 중… (${SIG.rows.length - left}/${SIG.rows.length})`;
+  $("#sig-body").innerHTML = `<table class="sig-table">
+    <thead><tr><th>종목</th><th class="num hide-sm">종가</th><th>시그널</th><th class="num">종합</th></tr></thead>
+    <tbody>${SIG.rows.map((r, i) => {
+      const cs = r.data?.candles || [], c = cs.at(-1), p = cs.at(-2), list = cs.length ? signalsOf(cs) : null;
+      const dp = r.market === "us" ? 2 : 0, pct = c && p ? (c.c / p.c - 1) * 100 : null;
+      return `<tr data-i="${i}" title="차트 열기">
+        <td><b>${esc(r.data?.name || r.name)}</b><span class="code">${esc(r.code)}</span>
+          ${r.held ? `<span class="tag">보유</span>` : ""}${r.recent ? `<span class="tag">최근</span>` : ""}</td>
+        <td class="num hide-sm">${c ? `${r.market === "us" ? "$" : ""}${fmt(c.c, dp)}<br><span class="${pct > 0 ? "up" : pct < 0 ? "down" : ""}">${pct > 0 ? "+" : ""}${fmt(pct, 2)}%</span>` : "—"}</td>
+        <td>${list ? sigBadges(list) : r.error ? `<span class="sub">${esc(r.error)}</span>` : `<span class="sub">불러오는 중…</span>`}</td>
+        <td class="num">${list ? sigScore(list) : ""}</td></tr>`;
+    }).join("")}</tbody></table>`;
+  document.querySelectorAll(".sig-table tbody tr").forEach(tr => tr.onclick = () => {
+    const r = SIG.rows[tr.dataset.i];
+    pick({ market: r.market, code: r.code, exchange: r.data?.exchange || r.exchange });
+    scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
 // ---------------------------------------------------------------- 차트 조회
 function pick(s, push = true) {
   $("#results").innerHTML = "";
@@ -308,6 +431,7 @@ function render() {
           : S.stale ? ` <span class="stale bad">· 새로 조회하지 못해 이전 값을 보여 줍니다: ${esc(S.stale)}</span>` : ""}</span></h2>
         <div><span class="price">${unit}${fmt(last.c, dp)}</span>
           <span class="chg ${cls(chg)}">${sign(chg)}${fmt(chg, dp)} (${sign(pct)}${fmt(pct, 2)}%)</span></div>
+        <div class="sigs">${sigBadges(signalsOf(all))}</div>
       </div>
       <div class="seg" role="group" aria-label="기간">${Object.keys(PERIODS).map(p => `<button data-p="${p}" aria-pressed="${p === S.period}">${p}</button>`).join("")}</div>
     </div>
@@ -448,6 +572,7 @@ function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
   }
   // 저장된 기간·지표 설정을 먼저 읽고 차트를 엶 (설정 파일은 작아 바로 옴).
   // 주소에 종목이 없으면 마지막으로 본 종목(최근 검색 맨 앞)을 엶
+  loadSignals();
   Promise.all([loadSettings(), loadRecent()]).then(([, items]) => {
     if (!new URLSearchParams(location.search).get("code") && items[0]) pick(items[0], false);
     else fromUrl();

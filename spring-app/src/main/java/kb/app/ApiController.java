@@ -97,8 +97,9 @@ class ApiController {
 
     @GetMapping("/chart")
     ResponseEntity<Map<String, Object>> chart(@RequestParam(defaultValue = "kr") String market, @RequestParam(defaultValue = "") String code,
-                                              @RequestParam(defaultValue = "") String exchange) throws IOException {
-        return ok(chart.chart(market, code, exchange));
+                                              @RequestParam(defaultValue = "") String exchange,
+                                              @RequestParam(defaultValue = "1") String recent) throws IOException {
+        return ok(chart.chart(market, code, exchange, !"0".equals(recent)));  // recent=0: 최근 검색에 안 남김
     }
 
     @GetMapping("/transactions")

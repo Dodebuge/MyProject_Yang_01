@@ -238,8 +238,8 @@ final class Chart {
         return out;
     }
 
-    /** GET /api/chart?market=kr|us&code=&exchange= */
-    Map<String, Object> chart(String market, String rawCode, String exchange) throws IOException {
+    /** GET /api/chart?market=kr|us&code=&exchange=[&recent=0]. save가 false(recent=0)면 최근 검색에 남기지 않음 (시그널 목록용). */
+    Map<String, Object> chart(String market, String rawCode, String exchange, boolean save) throws IOException {
         String code = rawCode == null ? "" : rawCode.trim();
         Map<String, Object> out = new LinkedHashMap<>();
         if ("kr".equals(market)) {
@@ -263,7 +263,9 @@ final class Chart {
             out.put("exchange", board);
             out.put("currency", "KRW");
             out.put("candles", candles(rows, "p2", 10));  // 국내 차트 거래대금은 10원 단위
-            remember(out);
+            if (save) {
+                remember(out);
+            }
             return out;
         }
         if (!"us".equals(market)) {
@@ -305,7 +307,9 @@ final class Chart {
                 out.put("exchange", x);
                 out.put("currency", "USD");
                 out.put("candles", cs);
-                remember(out);
+                if (save) {
+                    remember(out);
+                }
                 return out;
             }
         }

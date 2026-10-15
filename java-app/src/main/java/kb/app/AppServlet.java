@@ -116,7 +116,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
         apis.put("/api/recent", req -> chart.recent());
         apis.put("/api/settings", req -> chart.settings());
-        apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", "")));
+        apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
         apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {
             String year = param(req, "year", String.valueOf(LocalDate.now().getYear()));

@@ -65,7 +65,7 @@ def history(kinds: tuple[str, ...]) -> list[tuple[str, dict]]:
 
 LAST_DIR = Path(__file__).resolve().parent / "last_api"
 LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart"}  # 첫 로딩이 느린 API만
-_IGNORED = {"refresh", "cached"}
+_IGNORED = {"refresh", "cached", "recent"}  # recent=0(최근 검색에 안 남김)도 같은 차트라 같은 파일
 
 
 def last_file(api: str, params: dict[str, str]) -> Path | None:
