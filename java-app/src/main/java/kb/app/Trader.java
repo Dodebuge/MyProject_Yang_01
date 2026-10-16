@@ -63,6 +63,7 @@ final class Trader {
     static final List<String> MARKETS = Arrays.asList("KR", "US");
     static final int TICK_SECONDS = 5;
     static final int CUTOFF_MINUTES = 10;            // 정규장 마감 몇 분 전에 전량 매도·매수 중단
+    static final int ACCOUNT_SECONDS = 30;           // 화면의 토스 계좌 금액 갱신 간격
     private static final long LEASE_MS = 30_000;      // 주문하는 프로세스 임대 시간 (5초마다 연장)
     private static final long RESEND_LIMIT_MS = 9 * 60_000;  // clientOrderId 멱등성은 10분: 그 안에서만 같은 키로 다시 보냄
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
@@ -91,6 +92,8 @@ final class Trader {
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile boolean leader;
+    private volatile Map<String, Object> account;  // 토스 계좌 원화·달러 (accountSummary, ACCOUNT_SECONDS마다)
+    private volatile long accountAt;
     private ScheduledExecutorService timer;
 
     /** 그날 정규장 (현지 날짜, 시작, 마감). 휴장이면 open이 null. */
@@ -340,6 +343,9 @@ final class Trader {
     void tick() {
         if (api == null) {
             return;
+        }
+        if (System.currentTimeMillis() - accountAt >= ACCOUNT_SECONDS * 1000L) {
+            refreshAccount();  // 주문을 맡지 않은 서버도 화면에 보여 줄 수 있게 임대와 상관없이
         }
         try {
             leader = lease();
@@ -716,6 +722,48 @@ final class Trader {
 
     // ------------------------------------------------------------------ 화면 상태
 
+    /**
+     * 토스 계좌 금액을 원화·달러로 나눠 받아 둡니다 (화면 '토스 계좌'). 자동매매가 산 종목만이 아니라 계좌 전체입니다.
+     * cash: 주문 가능 현금(/buying-power, 미수 미발생 기준), stock: 주식 평가금액, purchase: 매입금액, profit: 손익 (/holdings)
+     */
+    @SuppressWarnings("unchecked")
+    void refreshAccount() {
+        accountAt = System.currentTimeMillis();
+        Map<String, Object> a = new LinkedHashMap<>();
+        try {
+            Map<String, Object> h = map(api.get("/api/v1/holdings", null, true));
+            Map<String, Object> mv = map(map(h.get("marketValue")).get("amount"));
+            Map<String, Object> pa = map(h.get("totalPurchaseAmount"));
+            Map<String, Object> pl = map(map(h.get("profitLoss")).get("amount"));
+            int krCount = 0;
+            int usCount = 0;
+            if (h.get("items") instanceof List) {
+                for (Object o : (List<Object>) h.get("items")) {
+                    if ("US".equals(map(o).get("marketCountry"))) {
+                        usCount++;
+                    } else {
+                        krCount++;
+                    }
+                }
+            }
+            for (String[] c : new String[][]{{"KRW", "krw", String.valueOf(krCount)}, {"USD", "usd", String.valueOf(usCount)}}) {
+                Map<String, Object> x = new LinkedHashMap<>();
+                x.put("cash", Values.numOrNull(map(api.get("/api/v1/buying-power", param("currency", c[0]), true)).get("cashBuyingPower")));
+                x.put("stock", Values.numOrNull(mv.get(c[1])));
+                x.put("purchase", Values.numOrNull(pa.get(c[1])));
+                x.put("profit", Values.numOrNull(pl.get(c[1])));
+                x.put("count", Integer.parseInt(c[2]));
+                a.put(c[0], x);
+            }
+            a.put("at", now().format(AT));
+        } catch (IOException | RuntimeException e) {
+            Map<String, Object> prev = account;
+            a = prev == null ? new LinkedHashMap<>() : new LinkedHashMap<>(prev);  // 이전 값은 그대로 두고 오류만 표시
+            a.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        account = a;
+    }
+
     /** GET /api/trader -> 설정, 매수 대상, 시장별 장 시간·단계·사용 금액, 오늘(과 아직 안 끝난) 매매, 최근 기록. 토스를 부르지 않습니다. */
     Map<String, Object> status() throws IOException {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -757,6 +805,7 @@ final class Trader {
         } catch (SQLException e) {
             throw new IOException("trader.db 오류: " + e.getMessage(), e);
         }
+        out.put("account", account);
         out.put("tickSeconds", TICK_SECONDS);
         out.put("cutoffMinutes", CUTOFF_MINUTES);
         return out;

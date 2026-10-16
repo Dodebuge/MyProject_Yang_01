@@ -64,6 +64,8 @@ input[type="number"] { width: 130px; }
 .danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
 .kv span:nth-child(odd) { color: var(--muted); }
+.acct .big { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.acct .kv span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
 .phase { font-weight: 650; }
 .table { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -107,6 +109,11 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); vertical-align: top; }
       </div>
       <button id="toggle">켜기</button>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>토스 계좌 <span class="sub" id="acct-at"></span></h2>
+    <div class="grid" id="acct"><p class="sub">불러오는 중…</p></div>
   </section>
 
   <section class="card">
@@ -202,6 +209,7 @@ function render() {
   $("#toggle").className = on ? "" : "on";
   $("#toggle").disabled = !S.configured;
   $("#cutoffMin").textContent = S.cutoffMinutes;
+  renderAccount(S.account);
   if (!dirty) fillConfig(c);
   $("#markets").innerHTML = ["KR", "US"].map(m => {
     const x = S.markets[m], mc = c[m];
@@ -232,6 +240,24 @@ function render() {
       }).join("")}</tbody></table>` : `<p class="sub">오늘 매매가 없습니다.</p>`;
   $("#log").innerHTML = S.log.map(l => `<li><span class="when">${esc(l.at.slice(5))}</span><span class="tag">${esc(MK[l.market] || "전체")}</span> ${esc(l.text)}</li>`).join("")
     || `<li class="sub">기록이 없습니다.</li>`;
+}
+
+// 토스 계좌 금액 (원화·달러 따로). 서버가 30초마다 받아 둔 값이고, 자동매매가 산 종목만이 아니라 계좌 전체입니다.
+function renderAccount(a) {
+  if (!S.configured) { $("#acct").innerHTML = `<p class="sub">토스 API 키가 없습니다.</p>`; $("#acct-at").textContent = ""; return; }
+  if (!a || (!a.KRW && a.error)) { $("#acct").innerHTML = `<p class="sub">${a ? `받지 못했습니다: ${esc(a.error)}` : "서버가 받아 오는 중입니다 (30초 안)"}</p>`; return; }
+  $("#acct-at").textContent = `${a.at ? a.at.slice(11, 16) : ""} 기준 · 30초마다 갱신${a.error ? ` · 갱신 실패: ${a.error}` : ""}`;
+  const box = (title, m, x) => {
+    const total = (x.cash || 0) + (x.stock || 0), pr = x.purchase > 0 ? x.profit / x.purchase * 100 : null;
+    return `<div class="acct"><b>${title}</b><div class="big">${money(m, total)}</div>
+      <div class="kv">
+        <span>주문 가능 현금</span><span>${money(m, x.cash)}</span>
+        <span>주식 평가금액 (${x.count}종목)</span><span>${money(m, x.stock)}</span>
+        <span>매입금액</span><span>${money(m, x.purchase)}</span>
+        <span>손익</span><span class="${x.profit > 0 ? "up" : x.profit < 0 ? "down" : ""}">${x.profit > 0 ? "+" : ""}${money(m, x.profit)}${pr == null ? "" : ` (${pr > 0 ? "+" : ""}${fmt(pr, 2)}%)`}</span>
+      </div></div>`;
+  };
+  $("#acct").innerHTML = box("원화 (국내)", "KR", a.KRW) + box("달러 (미국)", "US", a.USD);
 }
 
 async function refresh() {

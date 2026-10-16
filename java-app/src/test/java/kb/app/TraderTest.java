@@ -61,6 +61,15 @@ class TraderTest {
             if (path.equals("/api/v1/sellable-quantity")) {
                 return Map.of("sellableQuantity", String.valueOf(held.getOrDefault(params.get("symbol"), 0.0)));
             }
+            if (path.equals("/api/v1/holdings")) {
+                return Map.of("marketValue", Map.of("amount", Map.of("krw", "1500000", "usd", "820.50")),
+                        "totalPurchaseAmount", Map.of("krw", "1400000", "usd", "800.00"),
+                        "profitLoss", Map.of("amount", Map.of("krw", "100000", "usd", "20.50")),
+                        "items", List.of(Map.of("marketCountry", "KR"), Map.of("marketCountry", "KR"), Map.of("marketCountry", "US")));
+            }
+            if (path.equals("/api/v1/buying-power")) {
+                return Map.of("cashBuyingPower", "KRW".equals(params.get("currency")) ? "250000" : "123.45");
+            }
             if (path.startsWith("/api/v1/orders/")) {
                 return orders.get(path.substring("/api/v1/orders/".length()));
             }
@@ -295,6 +304,22 @@ class TraderTest {
         trader.tick();
         assertEquals(List.of("BUY 005930 2", "SELL 005930 2"), toss.sides());
         assertEquals("CLOSED", positions().get(0).get("status"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void showsTossAccountByCurrency() throws Exception {
+        trader.tick();
+        Map<String, Object> a = (Map<String, Object>) trader.status().get("account");
+        Map<String, Object> krw = (Map<String, Object>) a.get("KRW");
+        Map<String, Object> usd = (Map<String, Object>) a.get("USD");
+        assertEquals(250000.0, krw.get("cash"));
+        assertEquals(1500000.0, krw.get("stock"));
+        assertEquals(2, krw.get("count"));
+        assertEquals(123.45, usd.get("cash"));
+        assertEquals(820.5, usd.get("stock"));
+        assertEquals(20.5, usd.get("profit"));
+        assertEquals(1, usd.get("count"));
     }
 
     @Test
