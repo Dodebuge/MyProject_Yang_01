@@ -38,6 +38,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/kosdaq-volume              -> 코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday[?date=&at=] -> 장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다
+ *   GET /api/trader, POST /api/trader  -> 토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader, trader.db)
  *   GET /api/alerts[?since=id]         -> 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (Alerts, alerts.db)
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET /api/settings, POST /api/settings -> 차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
@@ -51,6 +52,7 @@ import jakarta.servlet.http.HttpServletResponse;
 public class AppServlet extends HttpServlet {
 
     private static final Gson GSON = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
+    private static final java.lang.reflect.Type MAP_TYPE = new com.google.gson.reflect.TypeToken<Map<String, Object>>() { }.getType();
     private static final Map<String, String> PAGES = new HashMap<>();
     // 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
     private static final Pattern DOC = Pattern.compile("/docs/[\\w.-]+\\.html");
@@ -61,6 +63,7 @@ public class AppServlet extends HttpServlet {
         PAGES.put("/me", "/me.html");
         PAGES.put("/chart", "/chart.html");
         PAGES.put("/volume", "/volume.html");
+        PAGES.put("/trader", "/trader.html");
         PAGES.put("/signals.js", "/signals.js");  // 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
         PAGES.put("/sw.js", "/sw.js");  // 브라우저 알림 서비스 워커 (안드로이드 크롬 등)
     }
@@ -72,6 +75,7 @@ public class AppServlet extends HttpServlet {
     private Volume volume;
     private Russell russell;
     private Alerts alerts;
+    private Trader trader;
     private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
 
@@ -94,6 +98,9 @@ public class AppServlet extends HttpServlet {
         }
         if (alerts != null) {
             alerts.stop();
+        }
+        if (trader != null) {
+            trader.stop();
         }
     }
 
@@ -133,6 +140,9 @@ public class AppServlet extends HttpServlet {
             throw new ServletException("알림 설정을 읽지 못했습니다 (" + dataDir + "): " + e.getMessage(), e);
         }
         alerts.start();  // 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
+        trader = new Trader(toss, dataDir.resolve("trader.db"));  // 토스 자동매매 (토스 키가 없으면 꺼짐)
+        alerts.listener = (market, a) -> trader.onSignal("kosdaq".equals(market) ? "KR" : "US", Values.str(a.get("code")), Values.str(a.get("name")));
+        trader.start();
         try {
             snapshots = new Snapshots(heatmap, dataDir.resolve(".env"));  // MYSQL_HOST가 있으면 4시간마다 보유 금액 기록
         } catch (IOException e) {
@@ -151,6 +161,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
         apis.put("/api/kosdaq-volume", req -> volume.query(refresh(req)));
         apis.put("/api/kosdaq-intraday", req -> volume.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
+        apis.put("/api/trader", req -> trader.status());
         apis.put("/api/alerts", req -> alerts.recent(Long.parseLong(param(req, "since", "0"))));
         apis.put("/api/russell-volume", req -> russell.query(refresh(req)));
         apis.put("/api/russell-intraday", req -> russell.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
@@ -179,7 +190,8 @@ public class AppServlet extends HttpServlet {
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         resp.setHeader("Cache-Control", "no-store");
-        if (!"/api/settings".equals(req.getPathInfo())) {
+        String path = req.getPathInfo();
+        if (!"/api/settings".equals(path) && !"/api/trader".equals(path)) {
             resp.sendError(404);
             return;
         }
@@ -195,11 +207,15 @@ public class AppServlet extends HttpServlet {
                 for (int r; n < buf.length && (r = in.read(buf, n, buf.length - n)) > 0; n += r) {
                 }
             }
+            String text = new String(buf, 0, n, StandardCharsets.UTF_8);
             try {
-                payload = chart.saveSettings(new String(buf, 0, n, StandardCharsets.UTF_8));
-            } catch (IllegalArgumentException e) {
+                payload = "/api/trader".equals(path) ? trader.command(GSON.fromJson(text, MAP_TYPE)) : chart.saveSettings(text);
+            } catch (IllegalArgumentException | com.google.gson.JsonParseException e) {
                 status = 400;
                 payload = error(e.getMessage());
+            } catch (IOException e) {  // trader.db·토스 오류
+                status = 502;
+                payload = error(e.getClass().getSimpleName() + ": " + e.getMessage());
             }
         }
         byte[] body = GSON.toJson(payload).getBytes(StandardCharsets.UTF_8);

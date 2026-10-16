@@ -114,6 +114,18 @@ public class KbApplication {
         return a;
     }
 
+    /**
+     * 토스 자동매매 (실제 주문, trader.html). 토스 키가 없으면 꺼짐. 시그널 알림의 새 상승 시그널을 자동 매수 대상으로 넘겨받습니다.
+     * 토스 토큰이 클라이언트당 1개라 내정보(Heatmap)와 같은 TossClient를 씁니다.
+     */
+    @Bean(destroyMethod = "stop")
+    Trader trader(Heatmap heatmap, Alerts alerts, @Value("${kb.data-dir}") Path dataDir) {
+        Trader t = new Trader(heatmap.toss(), dataDir.resolve("trader.db"));
+        alerts.listener = (market, a) -> t.onSignal("kosdaq".equals(market) ? "KR" : "US", Values.str(a.get("code")), Values.str(a.get("name")));
+        t.start();
+        return t;
+    }
+
     /** 뉴욕 장중 30분마다 러셀 2000(russell2000.csv) 거래량을 russell.db에 기록. */
     @Bean(destroyMethod = "stop")
     Ticks russellTicks(Russell russell) {

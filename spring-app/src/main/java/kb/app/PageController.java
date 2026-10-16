@@ -31,4 +31,9 @@ class PageController {
     String volume() {
         return "forward:/volume.html";
     }
+
+    @GetMapping("/trader")
+    String trader() {
+        return "forward:/trader.html";
+    }
 }

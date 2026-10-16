@@ -13,6 +13,8 @@ russell.db-*
 russell2000.csv
 alerts.db
 alerts.db-*
+trader.db
+trader.db-*
 recent_searches.txt
 last_api/
 chart_settings.json

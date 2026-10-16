@@ -30,6 +30,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday        장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
+ *   GET·POST /api/trader             토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader)
  *   GET /api/alerts[?since=id]       코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
@@ -46,8 +47,9 @@ class ApiController {
     private final Volume volume;
     private final Russell russell;
     private final Alerts alerts;
+    private final Trader trader;
 
-    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell, Alerts alerts) {
+    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell, Alerts alerts, Trader trader) {
         this.heatmap = heatmap;
         this.dividends = dividends;
         this.chart = chart;
@@ -55,6 +57,7 @@ class ApiController {
         this.volume = volume;
         this.russell = russell;
         this.alerts = alerts;
+        this.trader = trader;
     }
 
     @GetMapping("/heatmap")
@@ -121,6 +124,17 @@ class ApiController {
     ResponseEntity<Map<String, Object>> kosdaqIntraday(@RequestParam(defaultValue = "") String date,
                                                        @RequestParam(defaultValue = "") String at) throws IOException {
         return ok(volume.ticks.intraday(date, at));
+    }
+
+    @GetMapping("/trader")
+    ResponseEntity<Map<String, Object>> trader() throws IOException {
+        return ok(trader.status());
+    }
+
+    /** {"action": "config"|"pick"|"unpick"|"sellAll", ...} (Trader.command) */
+    @PostMapping("/trader")
+    ResponseEntity<Map<String, Object>> traderCommand(@RequestBody Map<String, Object> body) throws IOException {
+        return ok(trader.command(body));
     }
 
     @GetMapping("/alerts")

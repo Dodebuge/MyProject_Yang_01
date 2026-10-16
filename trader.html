@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>토스 자동매매</title>
+<!--
+  토스 자동매매 (실제 주문). Spring·Java 서버가 /trader 로 제공합니다 (엔진은 Trader.java, 기록은 trader.db).
+  GET /api/trader 로 상태를 5초마다 읽고, POST /api/trader {"action": "config"|"pick"|"unpick"|"sellAll"} 로 바꿉니다.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
+  --series-1: #2a78d6; --select: rgba(42,120,214,0.08); --bad: #d03b3b; --up: #e34948; --down: #2a78d6; --warn-bg: rgba(227,73,72,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+    --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5; --warn-bg: rgba(230,103,103,0.12);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+  --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5; --warn-bg: rgba(230,103,103,0.12);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.nav a:hover { background: var(--hover); color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
+.nav a.home { color: var(--muted); }
+button, input, select { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+input[type="number"] { width: 130px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.card + .card, .grid + .card, .card + .grid { margin-top: 12px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grid > .card { margin-top: 0; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+.sub { color: var(--muted); font-size: 12px; margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 6px 0; }
+.row label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.switch { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.switch .state { font-size: 18px; font-weight: 650; }
+.state.on { color: var(--up); }
+.warn { background: var(--warn-bg); border-color: color-mix(in srgb, var(--up) 40%, transparent); }
+#toggle.on { background: var(--up); color: #fff; border-color: transparent; font-weight: 650; }
+.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+.kv span:nth-child(odd) { color: var(--muted); }
+.phase { font-weight: 650; }
+.table { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: left; padding: 6px; white-space: nowrap; }
+td { padding: 7px 6px; border-top: 1px solid var(--grid); vertical-align: top; }
+.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.up { color: var(--up); } .down { color: var(--down); }
+.tag { font-size: 11px; color: var(--ink-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
+.chip button { border: 0; padding: 0 6px; background: none; color: var(--muted); }
+.results { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow: auto; }
+.results button { width: 100%; text-align: left; border: 0; background: none; padding: 6px 8px; border-radius: 8px; }
+.results button:hover { background: var(--hover); }
+.log { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+.log li { padding: 3px 0; border-top: 1px solid var(--grid); }
+.log .when { color: var(--muted); margin-right: 8px; }
+.error { border: 1px solid var(--bad); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart">차트</a><a href="volume">거래량</a><a href="trader" aria-current="page">자동매매</a></nav>
+      <h1>토스 자동매매</h1>
+      <p class="sub" id="updated">불러오는 중…</p>
+    </div>
+    <button id="theme" aria-label="테마 전환">◐</button>
+  </header>
+
+  <div id="err" class="error" hidden></div>
+
+  <section class="card warn">
+    <div class="switch">
+      <div>
+        <div class="state" id="state">—</div>
+        <p class="sub">켜면 <b>토스 계좌로 실제 주문</b>합니다. 끄면 새 매수만 멈추고, 이미 산 종목의 익절·손절·장마감 매도는 계속합니다.</p>
+      </div>
+      <button id="toggle">켜기</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>설정</h2>
+    <div class="row">
+      <label>익절 <input id="tp" type="number" step="0.1" min="0.1" max="100"> %</label>
+      <label>손절 <input id="sl" type="number" step="0.1" min="0.1" max="100"> %</label>
+      <span class="sub">평균 체결가 대비. 정규장 마감 <span id="cutoffMin">10</span>분 전에는 남은 종목을 전량 매도하고 그날 매수를 멈춥니다.</span>
+    </div>
+    <div class="grid" style="margin-top:8px">
+      <div><b>국내 (원)</b>
+        <div class="row"><label>하루 최대 매수금액 <input id="KR-budget" type="number" step="10000" min="0"></label></div>
+        <div class="row"><label>최대 종목 수 <input id="KR-max" type="number" step="1" min="1" max="50" style="width:80px"></label>
+          <span class="sub" id="KR-per"></span></div>
+        <div class="row"><label><input id="KR-auto" type="checkbox"> 시그널 알림 종목(코스닥) 자동 매수</label></div>
+      </div>
+      <div><b>미국 (달러)</b>
+        <div class="row"><label>하루 최대 매수금액 <input id="US-budget" type="number" step="10" min="0"></label></div>
+        <div class="row"><label>최대 종목 수 <input id="US-max" type="number" step="1" min="1" max="50" style="width:80px"></label>
+          <span class="sub" id="US-per"></span></div>
+        <div class="row"><label><input id="US-auto" type="checkbox"> 시그널 알림 종목(러셀 2000) 자동 매수</label></div>
+      </div>
+    </div>
+    <div class="row"><button id="save">설정 저장</button><span class="sub" id="saved"></span></div>
+  </section>
+
+  <div class="grid" id="markets"></div>
+
+  <section class="card">
+    <h2>직접 고른 종목 <span class="sub">켜져 있으면 장중 매일 한 번 시장가 매수</span></h2>
+    <div class="row">
+      <input id="q" type="search" placeholder="종목이름 · 종목번호 · 미국 티커" autocomplete="off" style="flex:1;min-width:220px">
+    </div>
+    <ul class="results" id="results"></ul>
+    <div class="chips" id="picks"></div>
+  </section>
+
+  <section class="card">
+    <h2>오늘 매매</h2>
+    <div class="table" id="positions"></div>
+  </section>
+
+  <section class="card">
+    <h2>기록</h2>
+    <ul class="log" id="log"></ul>
+  </section>
+  <p class="note">투자 판단과 손실 책임은 본인에게 있습니다. 시장가 주문이라 체결가는 주문 시점 시세와 다를 수 있고, 미국 시세는 토스 기준입니다.
+    서버가 꺼져 있으면 익절·손절·장마감 매도도 하지 않습니다(다음 장 시작 후 바로 매도).</p>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const money = (m, n) => m === "US" ? `$${fmt(n, 2)}` : `${fmt(n)}원`;
+const MK = { KR: "국내", US: "미국" };
+const ST = { BUYING: "매수 중", OPEN: "보유", SELLING: "매도 중", CLOSED: "청산", FAILED: "실패" };
+let S = null, dirty = false;
+
+async function api(body) {
+  const res = await fetch("api/trader", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
+  const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+  if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+  return d;
+}
+function showError(msg) { $("#err").hidden = !msg; $("#err").textContent = msg || ""; }
+
+function fillConfig(c) {
+  $("#tp").value = c.takeProfit; $("#sl").value = c.stopLoss;
+  for (const m of ["KR", "US"]) {
+    $(`#${m}-budget`).value = c[m].budget; $(`#${m}-max`).value = c[m].maxStocks; $(`#${m}-auto`).checked = c[m].auto;
+  }
+  perStock();
+}
+function perStock() {
+  for (const m of ["KR", "US"]) {
+    const b = Number($(`#${m}-budget`).value), n = Number($(`#${m}-max`).value);
+    $(`#${m}-per`).textContent = b > 0 && n > 0 ? `종목당 ${money(m, b / n)}` : "";
+  }
+}
+function readConfig() {
+  const c = { takeProfit: Number($("#tp").value), stopLoss: Number($("#sl").value) };
+  for (const m of ["KR", "US"]) c[m] = { budget: Number($(`#${m}-budget`).value), maxStocks: Number($(`#${m}-max`).value), auto: $(`#${m}-auto`).checked };
+  return c;
+}
+
+function render() {
+  const c = S.config, on = c.enabled;
+  $("#updated").textContent = S.configured ? `${new Date().toLocaleTimeString("ko-KR")} 기준 · ${S.tickSeconds}초마다 확인` : "";
+  if (!S.configured) showError("토스 API 키가 없어 꺼져 있습니다. 서버 .env에 TOSS_OPENAPI_CLIENT_ID·TOSS_OPENAPI_CLIENT_SECRET을 넣고 다시 시작하세요.");
+  $("#state").textContent = on ? "자동매매 켜짐 (실제 주문)" : "자동매매 꺼짐";
+  $("#state").className = `state ${on ? "on" : ""}`;
+  $("#toggle").textContent = on ? "끄기" : "켜기";
+  $("#toggle").className = on ? "" : "on";
+  $("#toggle").disabled = !S.configured;
+  $("#cutoffMin").textContent = S.cutoffMinutes;
+  if (!dirty) fillConfig(c);
+  $("#markets").innerHTML = ["KR", "US"].map(m => {
+    const x = S.markets[m], mc = c[m];
+    const sig = x.signals.length ? x.signals.map(s => `<span class="tag">${esc(s.name)} ${esc(s.symbol)}</span>`).join(" ") : `<span class="sub">없음</span>`;
+    return `<section class="card"><h2>${MK[m]} <span class="phase">${esc(x.phase)}</span></h2>
+      <div class="kv">
+        <span>날짜</span><span>${esc(x.day)}</span>
+        <span>정규장</span><span>${x.open ? `${esc(x.open.slice(5, 16))} ~ ${esc(x.close.slice(5, 16))} (한국 시간)` : "휴장 또는 확인 전"}</span>
+        <span>매수 중단·전량 매도</span><span>${x.cutoff ? esc(x.cutoff.slice(5, 16)) : "—"}</span>
+        <span>오늘 매수</span><span>${money(m, x.spent)} / ${money(m, mc.budget)} · ${x.count} / ${mc.maxStocks}종목${x.halted ? " · 수동 매도로 매수 중단" : ""}</span>
+        <span>시그널 대기</span><span>${mc.auto ? sig : `<span class="sub">자동 매수 꺼짐</span>`}</span>
+      </div>
+      <div class="row"><button class="danger" data-sellall="${m}" ${S.configured ? "" : "disabled"}>${MK[m]} 지금 전량 매도</button></div></section>`;
+  }).join("");
+  $("#picks").innerHTML = S.picks.length ? S.picks.map(p => `<span class="chip"><span class="tag">${MK[p.market]}</span>${esc(p.name)}<span class="code">${esc(p.symbol)}</span>
+      <button data-unpick="${esc(p.market)}:${esc(p.symbol)}" title="삭제">×</button></span>`).join("") : `<span class="sub">없음 · 위에서 검색해 추가하세요</span>`;
+  $("#positions").innerHTML = S.positions.length ? `<table><thead><tr><th>시장</th><th>종목</th><th>출처</th><th>상태</th>
+      <th class="num">수량</th><th class="num">평균 체결가</th><th class="num">현재가·매도가</th><th class="num">손익</th><th>사유·메모</th><th>시각</th></tr></thead><tbody>
+      ${S.positions.map(p => {
+        const dp = p.market === "US" ? 2 : 0, now = p.status === "CLOSED" ? p.sell_avg : p.last;
+        return `<tr><td>${MK[p.market]}${p.day !== S.markets[p.market].day ? `<div class="sub">${esc(p.day)}</div>` : ""}</td>
+          <td><b>${esc(p.name)}</b><span class="code">${esc(p.symbol)}</span></td><td>${esc(p.source)}</td><td>${ST[p.status] || esc(p.status)}</td>
+          <td class="num">${fmt(p.qty || p.order_qty, p.market === "US" ? 4 : 0)}</td><td class="num">${p.avg ? fmt(p.avg, dp) : "—"}</td>
+          <td class="num">${now ? fmt(now, dp) : "—"}</td>
+          <td class="num ${p.pnl > 0 ? "up" : p.pnl < 0 ? "down" : ""}">${p.pnl == null ? "—" : `${p.pnl > 0 ? "+" : ""}${fmt(p.pnl, 2)}%`}</td>
+          <td>${esc(p.reason || "")}${p.note ? `<div class="sub">${esc(p.note)}</div>` : ""}</td>
+          <td class="sub">${esc((p.closed || p.opened || "").slice(11, 19))}</td></tr>`;
+      }).join("")}</tbody></table>` : `<p class="sub">오늘 매매가 없습니다.</p>`;
+  $("#log").innerHTML = S.log.map(l => `<li><span class="when">${esc(l.at.slice(5))}</span><span class="tag">${esc(MK[l.market] || "전체")}</span> ${esc(l.text)}</li>`).join("")
+    || `<li class="sub">기록이 없습니다.</li>`;
+}
+
+async function refresh() {
+  try { S = await api(); showError(""); render(); }
+  catch (e) { showError(`불러오지 못했습니다: ${e.message}`); }
+}
+async function send(body, okText) {
+  try { S = await api(body); showError(""); render(); if (okText) $("#saved").textContent = okText; return true; }
+  catch (e) { showError(e.message); return false; }
+}
+
+$("#toggle").onclick = async () => {
+  const on = !S.config.enabled;
+  if (on && !confirm("자동매매를 켭니다. 토스 계좌로 실제 주문이 나갑니다.\n\n설정을 확인했나요? (익절·손절 %, 하루 최대 매수금액, 최대 종목 수, 직접 고른 종목, 시그널 자동 매수)")) return;
+  if (await send({ action: "config", config: { ...readConfig(), enabled: on } }, on ? "켰습니다" : "껐습니다")) dirty = false;
+};
+$("#save").onclick = async () => { if (await send({ action: "config", config: readConfig() }, `저장했습니다 ${new Date().toLocaleTimeString("ko-KR")}`)) dirty = false; };
+document.querySelectorAll("#tp,#sl,#KR-budget,#KR-max,#KR-auto,#US-budget,#US-max,#US-auto").forEach(el => el.oninput = () => { dirty = true; $("#saved").textContent = "저장하지 않은 변경이 있습니다"; perStock(); });
+document.addEventListener("click", async e => {
+  const sa = e.target.closest("[data-sellall]");
+  if (sa && confirm(`${MK[sa.dataset.sellall]} 자동매매로 산 종목을 지금 시장가로 전량 매도하고, 오늘 새 매수를 멈춥니다.`)) send({ action: "sellAll", market: sa.dataset.sellall });
+  const up = e.target.closest("[data-unpick]");
+  if (up) { const [market, symbol] = up.dataset.unpick.split(":"); send({ action: "unpick", market, symbol }); }
+  const add = e.target.closest("[data-add]");
+  if (add) { const r = JSON.parse(add.dataset.add); $("#results").innerHTML = ""; $("#q").value = ""; send({ action: "pick", market: r.market === "us" ? "US" : "KR", symbol: r.code, name: r.name }); }
+});
+// 종목 검색 (차트 페이지와 같은 /api/search)
+let qt;
+$("#q").oninput = () => {
+  clearTimeout(qt);
+  const q = $("#q").value.trim();
+  if (!q) { $("#results").innerHTML = ""; return; }
+  qt = setTimeout(async () => {
+    try {
+      const res = await fetch(`api/search?q=${encodeURIComponent(q)}`, { cache: "no-store" }), d = await res.json();
+      $("#results").innerHTML = (d.results || []).slice(0, 12).map(r => `<li><button data-add='${esc(JSON.stringify(r))}'>
+        <span class="tag">${r.market === "us" ? "미국" : "국내"}</span> ${esc(r.name)} <span class="code">${esc(r.code)}</span> · 추가</button></li>`).join("")
+        || `<li class="sub" style="padding:6px">검색 결과가 없습니다.</li>`;
+    } catch { $("#results").innerHTML = ""; }
+  }, 250);
+};
+try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+$("#theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("div-theme", next); } catch {}
+};
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

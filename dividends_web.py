@@ -14,6 +14,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
     GET /volume   -> 코스닥·러셀 2000 거래량 증가 종목 (volume.html, ?market=russell)
+    GET /trader   -> 토스 자동매매 (trader.html). 엔진은 Spring·Java 서버에만 있어 이 서버의 /api/trader는 안내 오류
     GET /signals.js  -> 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
     GET /sw.js       -> 브라우저 알림 서비스 워커 (안드로이드 크롬 등)
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
@@ -70,7 +71,7 @@ from heatmap import holdings_history, query_heatmap, query_holdings, query_quart
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
-PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html"}
+PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html", "/trader": "trader.html"}
 SETTINGS_MAX_BYTES = 4096  # POST /api/settings 본문 크기 제한 (설정은 수십 바이트)
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
@@ -132,6 +133,11 @@ def _refresh(q: dict) -> bool:
     return _flag(q, "refresh")
 
 
+def _trader_only_java() -> dict:
+    """토스 자동매매는 실제 주문 로직을 한 곳에만 두려고 Spring·Java 서버(Trader.java)에서만 동작합니다."""
+    raise ValueError("토스 자동매매는 Spring·Java 서버에서만 동작합니다 (spring-app/run.sh). 실제 주문 로직을 한 곳(Trader.java)에만 둡니다.")
+
+
 def make_handler(client: KBClient):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -166,6 +172,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: russell.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/russell-intraday":
                 self._api(lambda q: russell.RUSSELL.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/trader":
+                self._api(lambda q: _trader_only_java(), {})
             elif url.path == "/api/alerts":
                 self._api(lambda q: alerts.recent(int(q.get("since", ["0"])[0] or 0)), parse_qs(url.query))
             elif url.path == "/api/transactions":
@@ -178,7 +186,10 @@ def make_handler(client: KBClient):
                 self.send_error(404)
 
         def do_POST(self):
-            if urlparse(self.path).path != "/api/settings":
+            path = urlparse(self.path).path
+            if path == "/api/trader":
+                return self._api(lambda q: _trader_only_java(), {})
+            if path != "/api/settings":
                 return self.send_error(404)
             size = int(self.headers.get("Content-Length") or 0)
             if not 0 < size <= SETTINGS_MAX_BYTES:

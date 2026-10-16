@@ -150,6 +150,11 @@ final class Heatmap {
     private final Path snapshotFile;
     private final DailyStore store;
     private final TossClient toss;  // null이면 내정보에 토스 계좌를 합산하지 않음
+
+    /** 토스 클라이언트 (자동매매가 같이 씀: 토큰이 클라이언트당 1개라 인스턴스를 나누면 서로 무효화). 없으면 null */
+    TossClient toss() {
+        return toss;
+    }
     private final Map<String, Object[]> cache = new ConcurrentHashMap<>();  // key -> {저장 시각(ms), payload}
 
     Heatmap(KBClient client, Path snapshotFile, DailyStore store, TossClient toss) {

@@ -28,12 +28,12 @@ import java.util.zip.GZIPInputStream;
 
 /**
  * 토스증권 OpenAPI 클라이언트 + 내 보유 종목 (toss_openapi_sample의 toss_client.py, heatmap.fetch_my).
- * 내정보에서 KB 계좌와 합산할 때만 씁니다.
+ * 내정보에서 KB 계좌와 합산하고, 자동매매(Trader)가 시세 조회·주문에 씁니다. 토큰이 클라이언트당 1개라 한 인스턴스를 같이 씁니다.
  * - 토큰: POST /oauth2/token (form, client_id/client_secret). 클라이언트당 1개만 유효해 token-revoked면 한 번 재발급 후 재시도
  * - 계좌 API는 X-Tossinvest-Account: {accountSeq} 헤더 (TOSS_OPENAPI_ACCOUNT_SEQ, 없으면 첫 계좌)
  * - 429는 Retry-After만큼, 5xx는 0.5초, 1초, 2초 쉬고 세 번까지 재시도
  */
-final class TossClient {
+final class TossClient implements Trader.Api {
 
     static final String DEFAULT_BASE_URL = "https://openapi.tossinvest.com";
     private static final Set<String> TOKEN_ERRORS = new HashSet<>(Arrays.asList("invalid-token", "expired-token", "token-revoked"));
@@ -103,19 +103,36 @@ final class TossClient {
     }
 
     /** GET 후 result를 돌려줍니다. account면 X-Tossinvest-Account 헤더를 붙입니다. */
-    Object get(String path, Map<String, String> params, boolean account) throws IOException {
+    @Override
+    public Object get(String path, Map<String, String> params, boolean account) throws IOException {
         StringJoiner q = new StringJoiner("&", "?", "").setEmptyValue("");
         if (params != null) {
             params.forEach((k, v) -> q.add(enc(k) + "=" + enc(v)));
         }
+        return call("GET", path + q, null, account);
+    }
+
+    /**
+     * JSON 본문으로 POST 후 result를 돌려줍니다 (주문 생성·취소). 5xx·429면 request가 다시 보내므로,
+     * 주문은 반드시 clientOrderId(10분 동안 같은 키는 같은 주문으로 처리)를 넣어 두 번 체결되지 않게 합니다.
+     */
+    @Override
+    public Object post(String path, Map<String, Object> body, boolean account) throws IOException {
+        return call("POST", path, GSON.toJson(body), account);
+    }
+
+    private Object call(String method, String pathAndQuery, String json, boolean account) throws IOException {
         for (boolean retry : new boolean[]{true, false}) {
             Map<String, String> headers = new LinkedHashMap<>();
             headers.put("Authorization", "Bearer " + accessToken());
             if (account) {
                 headers.put("X-Tossinvest-Account", accountSeq());
             }
+            if (json != null) {
+                headers.put("Content-Type", "application/json");
+            }
             try {
-                return request("GET", path + q, headers, null).get("result");
+                return request(method, pathAndQuery, headers, json).get("result");
             } catch (TossApiException e) {
                 if (!(retry && TOKEN_ERRORS.contains(e.code))) {
                     throw e;
@@ -140,7 +157,8 @@ final class TossClient {
         return accountSeq;
     }
 
-    private Map<String, Object> request(String method, String path, Map<String, String> headers, String form) throws IOException {
+    /** payload: 토큰 발급은 form, 주문은 JSON (Content-Type은 headers에서). */
+    private Map<String, Object> request(String method, String path, Map<String, String> headers, String payload) throws IOException {
         for (int attempt = 0; ; attempt++) {
             HttpURLConnection conn = (HttpURLConnection) new URL(baseUrl + path).openConnection();
             conn.setConnectTimeout(10_000);
@@ -149,11 +167,13 @@ final class TossClient {
             if (headers != null) {
                 headers.forEach(conn::setRequestProperty);
             }
-            if (form != null) {
+            if (payload != null) {
                 conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                if (conn.getRequestProperty("Content-Type") == null) {
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                }
                 try (OutputStream out = conn.getOutputStream()) {
-                    out.write(form.getBytes(StandardCharsets.UTF_8));
+                    out.write(payload.getBytes(StandardCharsets.UTF_8));
                 }
             }
             int status = conn.getResponseCode();
@@ -207,10 +227,12 @@ final class TossClient {
 
     /** 업무 오류 (HTTP 4xx + {"error": {code, message, requestId}}). */
     static final class TossApiException extends IOException {
+        final int status;
         final String code;
 
         TossApiException(int status, String code, String message, String requestId) {
             super("[" + status + "] " + code + " " + message + " (requestId=" + requestId + ")");
+            this.status = status;
             this.code = code;
         }
     }

@@ -104,6 +104,8 @@ final class Alerts {
     private final Map<String, String> env;
     final Map<String, Market> markets = new LinkedHashMap<>();
     private ScheduledExecutorService timer;
+    /** 새 알림마다 부름 (자동매매가 시그널 종목을 사려고): (시장 kosdaq|russell, 알림) */
+    volatile java.util.function.BiConsumer<String, Map<String, Object>> listener;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     /** volume·russell이 null이면 시장 없이 (단위 테스트: 기록·중복 막기만). */
@@ -222,6 +224,9 @@ final class Alerts {
                 if (a != null) {
                     out.add(a);
                     notify(m, a);
+                    if (listener != null) {
+                        listener.accept(m.key, a);
+                    }
                 }
             }
             m.prev.put(code, buys.stream().map(Alerts::sigKey).collect(Collectors.toCollection(HashSet::new)));
