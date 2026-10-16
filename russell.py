@@ -133,6 +133,16 @@ def _candles(client: KBClient, item: dict) -> list[dict] | None:
     return _resolve(client, item, probe)
 
 
+def daily(client: KBClient, code: str, exchange: str) -> list[dict] | None:
+    """KB 티커·거래소(주간 평균 응답의 code, exchange)로 일봉 행 (GSC10060, 약 1년, 최신순). 시그널 알림(alerts.py)이 씀."""
+    rows = _candles(client, {"code": code, "exchange": exchange, "name": code})
+    for _ in range(2):  # 오래된 행이 깨졌으면 한 번 더
+        if not rows or whole(rows, "p4"):
+            break
+        rows = _candles(client, {"code": code, "exchange": exchange, "name": code}) or rows
+    return rows
+
+
 def fetch(client: KBClient) -> list[dict]:
     items = load_list()
 
@@ -146,7 +156,7 @@ def fetch(client: KBClient) -> list[dict]:
         if not w:
             return None
         last = rows[0]
-        return {"code": _found[item["code"]][1], "name": item["name"], "price": last.get("cls_prc_p4"),
+        return {"code": _found[item["code"]][1], "exchange": _found[item["code"]][0], "name": item["name"], "price": last.get("cls_prc_p4"),
                 "change": float(last.get("up_dwn_r_p2") or 0), "value": int(last.get("dl_tw_amt") or 0), **w,
                 **closes(chart._candles(rows, "p4", 1))}
 

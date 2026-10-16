@@ -86,6 +86,17 @@ tbody tr:hover { background: var(--hover); }
 .spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--series-1); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .note { color: var(--muted); font-size: 12px; margin-top: 12px; }
+.card + .card { margin-top: 12px; }
+/* 시그널 알림 목록 */
+.alerts-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.alerts-head h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.alerts { list-style: none; margin: 8px 0 0; padding: 0; max-height: 232px; overflow: auto; }
+.alerts li a { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; padding: 5px 6px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.alerts li a:hover { background: var(--hover); }
+.alerts .when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 78px; }
+.alerts .mk { font-size: 11px; color: var(--ink-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
+.alerts .new { background: var(--select); }
+#bell[aria-pressed="true"] { background: var(--select); color: var(--series-1); border-color: transparent; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -103,9 +114,14 @@ tbody tr:hover { background: var(--hover); }
       <div class="seg" role="group" aria-label="보기" id="views">
         <button data-view="intraday" title="장중 기록">같은 시각</button><button data-view="weekly">주간 평균</button>
       </div>
-      <button id="reload">다시 조회</button><button id="theme" aria-label="테마 전환">◐</button>
+      <button id="reload">다시 조회</button><button id="bell" aria-pressed="false" title="새 상승 시그널을 브라우저 알림으로 받기">🔔 알림</button><button id="theme" aria-label="테마 전환">◐</button>
     </div>
   </header>
+
+  <section class="card" id="alerts-card">
+    <div class="alerts-head"><h2>시그널 알림</h2><span class="sub" id="alerts-status">불러오는 중…</span></div>
+    <ul class="alerts" id="alerts"></ul>
+  </section>
 
   <section class="card">
     <div class="controls">
@@ -327,6 +343,55 @@ $("#body").ondblclick = e => {
   if (tr) location.href = `chart?market=${M().chart}&code=${encodeURIComponent(tr.dataset.code)}`;
 };
 $("#reload").onclick = () => load(true);
+
+// ---------------------------------------------------------------- 시그널 알림
+// 서버(alerts.py / Alerts.java)가 코스닥·러셀 2000 주간 평균 증가율 top 30을 장중 5분마다 확인해 새 상승 시그널을 기록합니다.
+// 이 페이지는 1분마다 /api/alerts를 읽어 목록을 갱신하고, 🔔 알림을 켜 두면 새 알림을 브라우저 알림으로 띄웁니다.
+// 브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다 (휴대폰은 ntfy 앱, 서버 .env의 NTFY_TOPIC).
+const AL = { last: -1, items: [], fresh: new Set(), on: false };
+const MK = { kosdaq: "코스닥", russell: "러셀 2000" };
+const canNotify = () => "Notification" in window && window.isSecureContext;
+const alertTitle = a => `[${MK[a.market] || a.market}] ${a.name} ▲ ${a.text}`;
+const alertDay = a => a.d ? ` ${+a.d.slice(4, 6)}/${+a.d.slice(6)}` : "";
+
+async function pollAlerts() {
+  let d;
+  try { d = await getJson(`api/alerts${AL.last >= 0 ? `?since=${AL.last}` : ""}`); }
+  catch (err) { $("#alerts-status").textContent = `알림을 읽지 못했습니다: ${err.message}`; return; }
+  if (AL.last >= 0) {  // 첫 조회(지난 알림)는 띄우지 않고 목록에만
+    d.alerts.forEach(a => AL.fresh.add(a.id));
+    if (AL.on && canNotify() && Notification.permission === "granted") {
+      for (const a of [...d.alerts].reverse()) {
+        const n = new Notification(alertTitle(a), { body: `${a.name} (${a.code}) ${a.text}${alertDay(a)} · 주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%`, tag: `alert-${a.id}` });
+        n.onclick = () => { window.focus(); location.href = `chart?${a.chart}`; };
+      }
+    }
+  }
+  AL.items = [...d.alerts, ...AL.items.filter(x => !d.alerts.some(a => a.id === x.id))].slice(0, 100);
+  AL.last = Math.max(AL.last, 0, ...d.alerts.map(a => a.id));
+  const mk = Object.values(d.markets).map(m => `${m.name} ${m.status}${m.checkedAt ? ` ${m.checkedAt.slice(11)}` : ""}`).join(" · ");
+  $("#alerts-status").textContent = `증가율 top ${d.top}의 새 상승 시그널 · 장중 ${d.every}분마다 · ${mk} · 휴대폰(ntfy) ${d.ntfy ? "켜짐" : "꺼짐"}`;
+  $("#alerts").innerHTML = AL.items.length ? AL.items.map(a => `<li><a href="chart?${esc(a.chart)}" class="${AL.fresh.has(a.id) ? "new" : ""}" title="차트 열기">
+      <span class="when">${esc(a.at.slice(5).replace("-", "/"))}</span><span class="mk">${esc(MK[a.market] || a.market)}</span>
+      <b>${esc(a.name)}</b><span class="code">${esc(a.code)}</span><span class="sig buy">▲ ${esc(a.text)}${alertDay(a)}</span>
+      <span class="days">주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%</span></a></li>`).join("")
+    : `<li class="sub" style="padding:6px">아직 알림이 없습니다.</li>`;
+}
+
+function setBell(on) {
+  AL.on = on;
+  $("#bell").setAttribute("aria-pressed", on);
+  try { localStorage.setItem("vol-alerts", on ? "on" : "off"); } catch {}
+}
+$("#bell").onclick = async () => {
+  if (AL.on) return setBell(false);
+  if (!canNotify()) return alert("브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다.\n알림 목록은 이 화면에서 계속 갱신되고, 휴대폰은 ntfy 앱으로 받을 수 있습니다 (README '시그널 알림').");
+  if (await Notification.requestPermission() !== "granted") return alert("브라우저에서 알림 권한을 허용해야 합니다.");
+  setBell(true);
+};
+try { setBell(localStorage.getItem("vol-alerts") === "on" && canNotify() && Notification.permission === "granted"); } catch {}
+pollAlerts();
+setInterval(pollAlerts, 60000);
 try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
 $("#theme").onclick = () => {
   const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");

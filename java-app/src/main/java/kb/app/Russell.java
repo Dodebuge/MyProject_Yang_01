@@ -232,6 +232,20 @@ final class Russell {
         });
     }
 
+    /** KB 티커·거래소(주간 평균 응답의 code, exchange)로 일봉 행 (GSC10060, 약 1년, 최신순). 시그널 알림(Alerts)이 씀 */
+    List<Map<String, Object>> daily(String code, String exchange) {
+        Map<String, String> item = new LinkedHashMap<>();
+        item.put("code", code);
+        item.put("name", code);
+        item.put("exchange", exchange);
+        List<Map<String, Object>> rows = candles(item);
+        for (int attempt = 0; attempt < 2 && rows != null && !Volume.whole(rows, "p4"); attempt++) {  // 오래된 행이 깨졌으면 한 번 더
+            List<Map<String, Object>> again = candles(item);
+            rows = again == null ? rows : again;
+        }
+        return rows;
+    }
+
     private List<Map<String, Object>> candles(Map<String, String> item) {
         return resolve(item, (x, n) -> {
             List<Map<String, Object>> rows = KBClient.records(client.call("GSC10060", Heatmap.body("chrt_clsf", "3",  // 3 = 일봉
@@ -267,6 +281,7 @@ final class Russell {
             Map<String, Object> last = rows.get(0);
             Map<String, Object> s = new LinkedHashMap<>();
             s.put("code", found.get(item.get("code"))[1]);  // KB 티커 (차트 링크용, MOGA -> MOG.A)
+            s.put("exchange", found.get(item.get("code"))[0]);
             s.put("name", item.get("name"));
             s.put("price", last.get("cls_prc_p4"));
             s.put("change", Values.num(last.get("up_dwn_r_p2")));

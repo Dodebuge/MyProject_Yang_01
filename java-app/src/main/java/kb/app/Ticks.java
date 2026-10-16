@@ -76,6 +76,11 @@ final class Ticks {
 
     /** now(현지 시간) 다음의 장중 기록 시각 (평일 open~close). */
     LocalDateTime nextTick(LocalDateTime now) {
+        return nextSlot(now, minutes, open, close);
+    }
+
+    /** now(현지 시간) 다음의 장중 minutes분 단위 시각 (평일 open~close). 장중 기록·시그널 알림(Alerts)이 씀 */
+    static LocalDateTime nextSlot(LocalDateTime now, int minutes, LocalTime open, LocalTime close) {
         LocalDateTime t = now.truncatedTo(ChronoUnit.MINUTES).withMinute(now.getMinute() - now.getMinute() % minutes).plusMinutes(minutes);
         if (t.toLocalTime().isBefore(open)) {
             t = t.with(open);

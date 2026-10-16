@@ -75,22 +75,28 @@ def closes(candles: list[dict]) -> dict:
     return {"closes": [num(c["c"]) for c in candles], "lastDays": [c["d"] for c in candles[-LAST_DAYS:]]}
 
 
+def daily(client: KBClient, code: str) -> list[dict] | None:
+    """코스닥 종목 일봉 행 (IVS11560, 차트와 같은 약 1년, 최신순). 밀린 응답·500 오류면 다시 부르고, 끝내 안 되면 None."""
+    rows = None
+    for _ in range(3):
+        try:
+            got = client.call("IVS11560", {"info_ccd": "1", "mkt_clsf": "1", "chrt_clsf": "D", "minute_tck_indx": "",
+                                           "is_cd": code, "inq_clsf": "2", "strt_dy": "", "inq_cnt": chart.CHART_DAYS}).get("out2", [])
+        except (KBApiError, requests.RequestException):
+            continue
+        if sane(got[:DAYS]):  # 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
+            rows = got
+            if whole(got, "p2"):  # 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
+                break
+    return rows
+
+
 def fetch(client: KBClient) -> list[dict]:
     listed = client.call("IVU10210", {"srt_clsf": "", "inq_cnt": "3000", "excg_clsf": "0", "mkt_clsf": "3",
                                       "thdy_bdy_clsf": ""}).get("out2", [])
 
     def one(row: dict) -> dict | None:
-        rows = None
-        for _ in range(3):  # 밀린 응답·500 오류면 다시
-            try:
-                got = client.call("IVS11560", {"info_ccd": "1", "mkt_clsf": "1", "chrt_clsf": "D", "minute_tck_indx": "",
-                                               "is_cd": row["is_cd"], "inq_clsf": "2", "strt_dy": "", "inq_cnt": chart.CHART_DAYS}).get("out2", [])
-            except (KBApiError, requests.RequestException):
-                continue
-            if sane(got[:DAYS]):  # 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
-                rows = got
-                if whole(got, "p2"):  # 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
-                    break
+        rows = daily(client, row["is_cd"])
         if rows is None:
             return None  # 거래정지 등
         w = week_change(rows[:DAYS])
@@ -126,6 +132,19 @@ TICK_KEEP_DAYS = 14      # 전주 비교에 7일 + 긴 연휴 여유
 TICK_DELAY_SECONDS = 30  # 정각 바로는 KB 시세·일봉이 아직 안 바뀌었을 수 있어 조금 뒤에 조회
 
 
+def next_slot(now: datetime, minutes: int, open_: dtime, close: dtime) -> datetime:
+    """now(현지 시간) 다음의 장중 minutes분 단위 시각 (평일 open~close). 장중 기록·시그널 알림(alerts.py)이 씀."""
+    t = now.replace(second=0, microsecond=0, minute=now.minute - now.minute % minutes) + timedelta(minutes=minutes)
+    start = lambda d: d.replace(hour=open_.hour, minute=open_.minute)
+    if t.time() < open_:
+        t = start(t)
+    elif t.time() > close:
+        t = start(t + timedelta(days=1))
+    while t.weekday() >= 5:  # 토·일이면 다음 날 장 시작
+        t = start(t + timedelta(days=1))
+    return t
+
+
 class Ticks:
     """take(client, at) -> [[종목번호, 이름, 현재가, 등락률, 누적 거래량, 거래대금], ...] (휴장이면 빈 목록)."""
 
@@ -136,15 +155,7 @@ class Ticks:
 
     def next_tick(self, now: datetime) -> datetime:
         """now(현지 시간) 다음의 장중 기록 시각 (평일 open~close)."""
-        t = now.replace(second=0, microsecond=0, minute=now.minute - now.minute % self.minutes) + timedelta(minutes=self.minutes)
-        start = lambda d: d.replace(hour=self.open.hour, minute=self.open.minute)
-        if t.time() < self.open:
-            t = start(t)
-        elif t.time() > self.close:
-            t = start(t + timedelta(days=1))
-        while t.weekday() >= 5:  # 토·일이면 다음 날 장 시작
-            t = start(t + timedelta(days=1))
-        return t
+        return next_slot(now, self.minutes, self.open, self.close)
 
     def _connect(self):
         con = sqlite3.connect(self.db, timeout=30)

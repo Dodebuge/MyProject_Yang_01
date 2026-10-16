@@ -34,6 +34,8 @@ API:
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
                                    장중 10분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
+    GET /api/alerts[?since=id]     -> {"alerts": [{"id", "market", "day", "at", "code", "name", "text", "d", "ratio", "price", "change", "chart"}], "ntfy", "markets"}
+                                   코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (alerts.py, alerts.db)
     GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다 (russell.db)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
@@ -54,6 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import alerts
 import chart
 import russell
 import snapshots
@@ -160,6 +163,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: russell.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/russell-intraday":
                 self._api(lambda q: russell.RUSSELL.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/alerts":
+                self._api(lambda q: alerts.recent(int(q.get("since", ["0"])[0] or 0)), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/signals.js":  # 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
@@ -222,6 +227,7 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
     snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
     volume.KOSDAQ.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
+    alerts.start(client)  # 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
     russell.RUSSELL.start(client)  # 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell.db, russell2000.csv가 있을 때)
     url = f"http://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)

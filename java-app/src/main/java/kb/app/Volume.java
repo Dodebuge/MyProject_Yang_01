@@ -59,28 +59,33 @@ final class Volume {
         return payload;
     }
 
+    /** 코스닥 종목 일봉 행 (IVS11560, 차트와 같은 약 1년, 최신순). 밀린 응답·500 오류면 다시 부르고, 끝내 안 되면 null. 시그널 알림(Alerts)도 씀 */
+    List<Map<String, Object>> daily(String code) {
+        List<Map<String, Object>> candles = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            List<Map<String, Object>> got;
+            try {
+                got = KBClient.records(client.call("IVS11560", Heatmap.body("info_ccd", "1", "mkt_clsf", "1", "chrt_clsf", "D",
+                        "minute_tck_indx", "", "is_cd", code, "inq_clsf", "2", "strt_dy", "", "inq_cnt", Chart.CHART_DAYS)), "out2");
+            } catch (KBApiException | IOException e) {
+                continue;
+            }
+            if (sane(recent(got))) {  // 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
+                candles = got;
+                if (whole(got, "p2")) {  // 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
+                    break;
+                }
+            }
+        }
+        return candles;
+    }
+
     private List<Map<String, Object>> fetch() throws IOException {
         List<Map<String, Object>> listed = KBClient.records(client.call("IVU10210", Heatmap.body("srt_clsf", "", "inq_cnt", "3000",
                 "excg_clsf", "0", "mkt_clsf", "3", "thdy_bdy_clsf", "")), "out2");
         client.accessToken();  // 병렬 호출 전에 토큰을 한 번만 발급
         List<Map<String, Object>> rows = Values.parallel(listed, 8, row -> {
-            List<Map<String, Object>> candles = null;
-            for (int attempt = 0; attempt < 3; attempt++) {  // 밀린 응답·500 오류면 다시
-                List<Map<String, Object>> got;
-                try {
-                    got = KBClient.records(client.call("IVS11560", Heatmap.body("info_ccd", "1", "mkt_clsf", "1", "chrt_clsf", "D",
-                            "minute_tck_indx", "", "is_cd", Values.str(row.get("is_cd")), "inq_clsf", "2", "strt_dy", "",
-                            "inq_cnt", Chart.CHART_DAYS)), "out2");
-                } catch (KBApiException | IOException e) {
-                    continue;
-                }
-                if (sane(recent(got))) {  // 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
-                    candles = got;
-                    if (whole(got, "p2")) {  // 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
-                        break;
-                    }
-                }
-            }
+            List<Map<String, Object>> candles = daily(Values.str(row.get("is_cd")));
             if (candles == null) {
                 return null;  // 거래정지 등
             }

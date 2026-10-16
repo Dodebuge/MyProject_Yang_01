@@ -12,6 +12,7 @@
 | `dividends_web.py` | 로컬 웹서버: `/` 첫 화면, `/heatmap`, `/me` 페이지와 `/api/*` |
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
 | `chart.py` / `chart.html` | 종목 검색(이름·종목번호·미국 티커) + 일봉 차트 (같은 서버의 `/chart`) |
+| `alerts.py` / `signals.py` | 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (ntfy 휴대폰 알림, 브라우저 알림). `signals.py`는 `signals.js`와 같은 규칙의 서버용 |
 | `signals.js` | 보조지표(이평선·볼린저·RSI·MACD)와 기술적 시그널 계산. 차트·거래량 화면이 함께 씀 (`/signals.js`) |
 | `volume.py` / `russell.py` / `volume.html` | 코스닥·러셀 2000 거래량 증가 종목 (같은 서버의 `/volume`) |
 | `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
@@ -128,6 +129,35 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 - CSV를 넣은 뒤 종목이 KB에서 다 찾아지는지 확인: `python russell.py --check` 또는 Java 단위 테스트
   `../spring-app/mvnw test -Dtest=RussellTest -Drussell.live=true`(java-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
   몇 종목 중 몇 종목을 찾았는지, 표기를 바꿔 찾은 종목(`MOGA -> NYS:MOG.A`), 못 찾은 종목을 출력하고, 95% 미만이면 실패합니다.
+
+## 시그널 알림 (ntfy 휴대폰 알림, 브라우저 알림)
+
+서버가 코스닥·러셀 2000의 **주간 평균 거래량 증가율 top 30**(코스닥은 스팩 제외)을 장중 **5분마다** 확인해, 새로 생긴 **상승(▲ 매수 쪽) 시그널**을 알립니다.
+
+- 장중: 코스닥 평일 09:05~15:35(한국), 러셀 2000 평일 09:50~16:20(뉴욕, KB 미국 시세 15분 지연). 휴장일은 top 1위 일봉 하나로 알아보고 건너뜁니다.
+- 순위는 전 종목 조회라 30분마다만 다시 뽑고, top 30은 5분마다 약 1년 일봉을 새로 받아 차트와 같은 규칙으로 계산합니다
+  (`signals.py`·`Signals.java`, 화면의 `signals.js`와 코스닥 1,732종목·시그널 2,750개 결과가 같음). KB 호출은 5분마다 약 30번 + 30분마다 전 종목.
+- **새 시그널**: 직전 확인 때 없던 매수 쪽 시그널(골든크로스, MACD 상향 돌파, RSI 과매도, 볼린저 하단 이탈, 이평선 정배열).
+  처음 보는 종목(서버를 켠 직후, top 30에 새로 들어온 종목)은 **오늘 일어난 교차**만 알립니다. 같은 날 같은 종목·같은 시그널은 한 번만
+  (`alerts.db`, git에 올리지 않음. Python·Java 서버가 함께 돌거나 서버를 다시 켜도 한 번만).
+
+**휴대폰 (ntfy)**
+1. 휴대폰에 ntfy 앱(무료, iOS·Android, 설치 안내: https://docs.ntfy.sh/subscribe/phone/)을 깝니다.
+2. 앱에서 **Subscribe to topic**으로 주제 이름을 하나 정해 구독합니다. 주제 이름을 아는 사람은 누구나 알림을 볼 수 있어 `kb-alerts-8f3k2q9x7d`처럼 길고 무작위로 정하세요.
+3. `.env`에 같은 주제를 넣고 서버를 다시 시작합니다.
+   ```
+   NTFY_TOPIC=kb-alerts-8f3k2q9x7d
+   APP_URL=http://192.168.0.10:8000     # 선택: 알림을 누르면 이 주소의 차트가 열림 (휴대폰에서 열리는 서버 주소)
+   NTFY_SERVER=https://ntfy.sh          # 선택: 직접 띄운 ntfy 서버를 쓸 때
+   ```
+4. `python alerts.py --ntfy`로 시험 알림을 보내 휴대폰에 오는지 확인합니다.
+
+**브라우저**
+- 거래량 페이지 위쪽 **시그널 알림** 목록이 1분마다 갱신됩니다(누르면 차트). **🔔 알림**을 켜면 새 알림을 브라우저 알림으로 띄웁니다.
+- 브라우저 알림은 **https 주소나 localhost**에서만 됩니다(브라우저 보안 규칙). `http://서버IP:8000`으로 열면 목록만 갱신되니 휴대폰은 ntfy를 쓰세요.
+- `GET /api/alerts[?since=id]`: 최근 알림 200개(최신 먼저)와 시장별 감시 상태(확인 시각, top 30 목록, 다음 확인 시각).
+
+점검: `python signals.py`(시그널 계산), `python alerts.py --offline`(새 시그널 고르기·중복 막기), Java `SignalsTest`·`AlertsTest`.
 
 ## 첫 로딩 (마지막 응답 먼저 보여 주기)
 

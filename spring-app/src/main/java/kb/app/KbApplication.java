@@ -2,6 +2,7 @@ package kb.app;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
@@ -74,6 +75,16 @@ public class KbApplication {
     Ticks kosdaqTicks(Volume volume) {
         volume.ticks.start();
         return volume.ticks;
+    }
+
+    /** 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인해 ntfy(.env의 NTFY_TOPIC)·브라우저로 알림. */
+    @Bean(destroyMethod = "stop")
+    Alerts alerts(Volume volume, Russell russell, @Value("${kb.data-dir}") Path dataDir) throws IOException {
+        Map<String, String> env = KBClient.readEnvFile(dataDir.resolve(".env"));
+        env.putAll(System.getenv());  // 환경변수가 .env보다 우선
+        Alerts a = new Alerts(volume, russell, dataDir.resolve("alerts.db"), env);
+        a.start();
+        return a;
     }
 
     /** 뉴욕 장중 30분마다 러셀 2000(russell2000.csv) 거래량을 russell.db에 기록. */

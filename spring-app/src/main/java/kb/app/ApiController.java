@@ -30,6 +30,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday        장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
+ *   GET /api/alerts[?since=id]       코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
@@ -44,14 +45,16 @@ class ApiController {
     private final Snapshots snapshots;
     private final Volume volume;
     private final Russell russell;
+    private final Alerts alerts;
 
-    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell) {
+    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell, Alerts alerts) {
         this.heatmap = heatmap;
         this.dividends = dividends;
         this.chart = chart;
         this.snapshots = snapshots;
         this.volume = volume;
         this.russell = russell;
+        this.alerts = alerts;
     }
 
     @GetMapping("/heatmap")
@@ -118,6 +121,11 @@ class ApiController {
     ResponseEntity<Map<String, Object>> kosdaqIntraday(@RequestParam(defaultValue = "") String date,
                                                        @RequestParam(defaultValue = "") String at) throws IOException {
         return ok(volume.ticks.intraday(date, at));
+    }
+
+    @GetMapping("/alerts")
+    ResponseEntity<Map<String, Object>> alerts(@RequestParam(defaultValue = "0") long since) throws IOException {
+        return ok(alerts.recent(since));
     }
 
     @GetMapping("/russell-volume")

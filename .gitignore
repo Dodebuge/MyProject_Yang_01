@@ -11,6 +11,8 @@ kosdaq.db-*
 russell.db
 russell.db-*
 russell2000.csv
+alerts.db
+alerts.db-*
 recent_searches.txt
 last_api/
 chart_settings.json
