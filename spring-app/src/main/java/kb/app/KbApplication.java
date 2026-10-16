@@ -7,6 +7,9 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.server.Ssl;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.boot.web.servlet.server.ConfigurableServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -14,6 +17,7 @@ import org.springframework.context.annotation.Bean;
  *
  *   java -jar kb-openapi-spring.jar                       # http://localhost:8080
  *   KB_DATA_DIR=/opt/kb_openapi_sample java -jar ...      # .env와 etf_snapshot.json 위치
+ *   .env에 SSL_CERT·SSL_KEY가 있으면 같은 포트를 https로 엽니다 (deploy/make-cert.sh)
  *
  * 핵심 로직(KBClient, Heatmap, Dividends)은 java-app과 같은 소스를 씁니다. 여기서는 Bean으로만 묶습니다.
  */
@@ -22,6 +26,29 @@ public class KbApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(KbApplication.class, args);
+    }
+
+    /**
+     * HTTPS: .env(또는 환경변수)에 SSL_CERT·SSL_KEY(PEM 인증서·개인 키 경로, 상대 경로는 데이터 폴더 기준)가 있으면 PORT를 https로 엽니다.
+     * 브라우저 알림(거래량 페이지 🔔)은 https 주소나 localhost에서만 됩니다. 인증서는 deploy/make-cert.sh 또는 deploy/README.md 'HTTPS'.
+     * 파일이 없거나 깨졌으면 시작할 때 오류로 멈춥니다 (http로 몰래 열리지 않게).
+     */
+    @Bean
+    WebServerFactoryCustomizer<ConfigurableServletWebServerFactory> https(@Value("${kb.data-dir}") Path dataDir) throws IOException {
+        Map<String, String> env = KBClient.readEnvFile(dataDir.resolve(".env"));
+        env.putAll(System.getenv());  // 환경변수가 .env보다 우선
+        String cert = env.getOrDefault("SSL_CERT", "").trim();
+        String key = env.getOrDefault("SSL_KEY", "").trim();
+        return factory -> {
+            if (cert.isEmpty() || key.isEmpty()) {
+                return;
+            }
+            Ssl ssl = new Ssl();
+            ssl.setCertificate("file:" + dataDir.resolve(cert).toAbsolutePath());
+            ssl.setCertificatePrivateKey("file:" + dataDir.resolve(key).toAbsolutePath());
+            factory.setSsl(ssl);
+            System.out.println("[HTTPS] 켜짐: " + dataDir.resolve(cert).toAbsolutePath());
+        };
     }
 
     /** .env(appKey/appSecret) 위치. KB_OPENAPI_* 환경변수가 .env보다 우선합니다. */

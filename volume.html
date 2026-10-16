@@ -347,10 +347,22 @@ $("#reload").onclick = () => load(true);
 // ---------------------------------------------------------------- 시그널 알림
 // 서버(alerts.py / Alerts.java)가 코스닥·러셀 2000 주간 평균 증가율 top 30을 장중 5분마다 확인해 새 상승 시그널을 기록합니다.
 // 이 페이지는 1분마다 /api/alerts를 읽어 목록을 갱신하고, 🔔 알림을 켜 두면 새 알림을 브라우저 알림으로 띄웁니다.
-// 브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다 (휴대폰은 ntfy 앱, 서버 .env의 NTFY_TOPIC).
+// 브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다 (서버 .env의 SSL_CERT·SSL_KEY, deploy/README.md 'HTTPS').
+// 휴대폰은 ntfy 앱(서버 .env의 NTFY_TOPIC)이 가장 확실하고, 안드로이드 크롬은 https 주소면 브라우저 알림도 됩니다.
 const AL = { last: -1, items: [], fresh: new Set(), on: false };
 const MK = { kosdaq: "코스닥", russell: "러셀 2000" };
 const canNotify = () => "Notification" in window && window.isSecureContext;
+// 안드로이드 크롬 등은 페이지의 new Notification()을 막아, 서비스 워커(sw.js)의 showNotification으로 띄움
+const swReady = "serviceWorker" in navigator && window.isSecureContext
+  ? navigator.serviceWorker.register("sw.js").then(() => navigator.serviceWorker.ready).catch(() => null) : Promise.resolve(null);
+function showNotice(title, body, tag, url) {
+  try {
+    const n = new Notification(title, { body, tag });
+    n.onclick = () => { window.focus(); location.href = url; };
+  } catch {
+    swReady.then(r => r && r.showNotification(title, { body, tag, data: { url: new URL(url, location.href).href } }));
+  }
+}
 const alertTitle = a => `[${MK[a.market] || a.market}] ${a.name} ▲ ${a.text}`;
 const alertDay = a => a.d ? ` ${+a.d.slice(4, 6)}/${+a.d.slice(6)}` : "";
 
@@ -362,8 +374,8 @@ async function pollAlerts() {
     d.alerts.forEach(a => AL.fresh.add(a.id));
     if (AL.on && canNotify() && Notification.permission === "granted") {
       for (const a of [...d.alerts].reverse()) {
-        const n = new Notification(alertTitle(a), { body: `${a.name} (${a.code}) ${a.text}${alertDay(a)} · 주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%`, tag: `alert-${a.id}` });
-        n.onclick = () => { window.focus(); location.href = `chart?${a.chart}`; };
+        showNotice(alertTitle(a), `${a.name} (${a.code}) ${a.text}${alertDay(a)} · 주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%`,
+          `alert-${a.id}`, `chart?${a.chart}`);
       }
     }
   }
@@ -385,7 +397,7 @@ function setBell(on) {
 }
 $("#bell").onclick = async () => {
   if (AL.on) return setBell(false);
-  if (!canNotify()) return alert("브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다.\n알림 목록은 이 화면에서 계속 갱신되고, 휴대폰은 ntfy 앱으로 받을 수 있습니다 (README '시그널 알림').");
+  if (!canNotify()) return alert("브라우저 알림은 https 주소나 localhost에서만 쓸 수 있습니다 (서버 .env의 SSL_CERT·SSL_KEY, deploy/README.md 'HTTPS').\n알림 목록은 이 화면에서 계속 갱신되고, 휴대폰은 ntfy 앱으로 받을 수 있습니다 (README '시그널 알림').");
   if (await Notification.requestPermission() !== "granted") return alert("브라우저에서 알림 권한을 허용해야 합니다.");
   setBell(true);
 };

@@ -16,3 +16,4 @@ alerts.db-*
 recent_searches.txt
 last_api/
 chart_settings.json
+certs/

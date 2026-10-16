@@ -62,6 +62,7 @@ public class AppServlet extends HttpServlet {
         PAGES.put("/chart", "/chart.html");
         PAGES.put("/volume", "/volume.html");
         PAGES.put("/signals.js", "/signals.js");  // 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
+        PAGES.put("/sw.js", "/sw.js");  // 브라우저 알림 서비스 워커 (안드로이드 크롬 등)
     }
 
     private Heatmap heatmap;

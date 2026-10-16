@@ -15,6 +15,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
     GET /volume   -> 코스닥·러셀 2000 거래량 증가 종목 (volume.html, ?market=russell)
     GET /signals.js  -> 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
+    GET /sw.js       -> 브라우저 알림 서비스 워커 (안드로이드 크롬 등)
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
@@ -48,7 +49,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import ssl
 import webbrowser
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
@@ -167,8 +170,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: alerts.recent(int(q.get("since", ["0"])[0] or 0)), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
-            elif url.path == "/signals.js":  # 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
-                self._send(200, (HERE / "signals.js").read_bytes(), "text/javascript; charset=utf-8")
+            elif url.path in ("/signals.js", "/sw.js"):  # 보조지표·시그널 계산, 알림 서비스 워커
+                self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/javascript; charset=utf-8")
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
                 self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:
@@ -232,7 +235,14 @@ if __name__ == "__main__":
     volume.KOSDAQ.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
     alerts.start(client)  # 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
     russell.RUSSELL.start(client)  # 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell.db, russell2000.csv가 있을 때)
-    url = f"http://localhost:{args.port}"
+    # HTTPS: .env(또는 환경변수)에 SSL_CERT·SSL_KEY(PEM, 상대 경로는 이 폴더 기준)가 있으면 https로 엽니다 (deploy/make-cert.sh).
+    # 브라우저 알림은 https 주소나 localhost에서만 됩니다. 핸드셰이크는 요청 스레드에서 (느린 연결이 서버 전체를 막지 않게)
+    cert, key = os.environ.get("SSL_CERT", "").strip(), os.environ.get("SSL_KEY", "").strip()
+    if cert and key:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(HERE / cert, HERE / key)
+        server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+    url = f"{'https' if cert and key else 'http'}://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)
     if not args.no_open:
         webbrowser.open(url)

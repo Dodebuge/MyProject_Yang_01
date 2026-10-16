@@ -112,6 +112,55 @@ python snapshots.py --check                   # Python (방법 B)
 Python 서버(방법 B)는 `pip install -r requirements.txt`로 PyMySQL을 설치하세요.
 Spring과 Python 서버를 함께 띄우면 둘 다 KB를 조회해 같은 시각 값을 덮어쓰므로, 기록은 한 서버에서만 켜는 것을 권합니다.
 
+## HTTPS (선택, 방법 A·Python 서버)
+
+거래량 페이지의 **브라우저 알림(🔔)은 https 주소나 localhost에서만** 됩니다(브라우저 보안 규칙). `.env`에 인증서·개인 키(PEM) 경로를 넣으면
+같은 포트가 https로 열립니다. 상대 경로는 데이터 폴더(`.env`가 있는 곳) 기준이고, 파일이 없거나 깨졌으면 서버가 시작할 때 오류로 멈춥니다.
+
+```
+SSL_CERT=certs/cert.pem
+SSL_KEY=certs/key.pem
+```
+
+`certs/`는 git에 올리지 않습니다(`.gitignore`). 개인 키는 `chmod 600`.
+
+**인증서 고르기**
+
+| 방법 | 브라우저 경고 | 휴대폰 브라우저 알림 | 하는 일 |
+|---|---|---|---|
+| Tailscale (권장, 밖에서도 접속) | 없음 | 됨 (안드로이드 크롬) | 서버·휴대폰에 Tailscale, `tailscale cert`로 진짜 인증서 |
+| mkcert (집 안 네트워크) | 루트 인증서를 설치한 기기는 없음 | 루트 인증서를 설치하면 됨 | `deploy/make-cert.sh` + 기기마다 루트 인증서 설치 |
+| 자체 서명 (openssl) | 있음 (계속 진행 눌러야 함) | 안 됨 (브라우저가 서비스 워커를 막음) | `deploy/make-cert.sh` |
+| Let's Encrypt | 없음 | 됨 | 도메인과 80번 포트 공개가 필요 |
+
+휴대폰은 ntfy 앱(README '시그널 알림')이 인증서와 상관없이 가장 확실합니다. 브라우저 알림은 PC 브라우저에 쓰기 좋습니다.
+
+**make-cert.sh (mkcert 또는 자체 서명)**
+
+```bash
+cd /opt/kb_openapi_sample
+sudo apt install mkcert              # 선택: 있으면 mkcert로, 없으면 openssl 자체 서명으로 만듦
+sudo -u kbapp deploy/make-cert.sh 192.168.0.10 jetson.local   # 접속할 때 쓰는 주소 (서버 이름·IP는 자동으로 들어감)
+sudo systemctl restart kb-openapi-spring                       # -> https://192.168.0.10:8080/
+```
+
+mkcert를 썼으면 `mkcert -CAROOT` 폴더의 `rootCA.pem`을 브라우저를 쓰는 PC·휴대폰에 설치해야 경고가 사라집니다
+(안드로이드: 설정 → 보안 → 인증서 설치 → CA 인증서).
+
+**Tailscale**
+
+```bash
+sudo tailscale cert --cert-file /opt/kb_openapi_sample/certs/cert.pem --key-file /opt/kb_openapi_sample/certs/key.pem 서버이름.tailnet이름.ts.net
+sudo chown kbapp /opt/kb_openapi_sample/certs/*.pem && sudo chmod 600 /opt/kb_openapi_sample/certs/key.pem
+```
+
+`.env`에 위 `SSL_CERT`·`SSL_KEY`를 넣고 재시작하면 `https://서버이름.tailnet이름.ts.net:8080/`. 인증서는 90일마다 같은 명령으로 갱신하세요(cron 등).
+
+**함께 바꿀 것**
+- 시그널 알림의 `APP_URL`(ntfy 알림을 눌렀을 때 열 주소)도 `https://...`로 바꿉니다.
+- http로 들어오면 열리지 않습니다(같은 포트를 https로만 엶). 즐겨찾기를 https로 바꾸세요.
+- 방법 B(Tomcat + Python)는 Tomcat의 HTTPS 커넥터(server.xml의 `SSLHostConfig`)에 같은 인증서를 설정하세요. Python 서버는 Tomcat 뒤 127.0.0.1이라 http 그대로 둡니다.
+
 ## 방화벽 (A·B 공통)
 
 ```bash

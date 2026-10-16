@@ -6,6 +6,7 @@
 #   (아래 WorkingDirectory, User, 포트를 서버에 맞게 수정)
 #   sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
 #   journalctl -u kb-openapi-spring -f      # 로그 확인
+#   HTTPS: .env에 SSL_CERT·SSL_KEY를 넣으면 PORT가 https로 열립니다 (deploy/make-cert.sh, deploy/README.md 'HTTPS')
 [Unit]
 Description=KB OpenAPI (Spring Boot)
 After=network-online.target

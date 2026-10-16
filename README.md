@@ -154,7 +154,9 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 
 **브라우저**
 - 거래량 페이지 위쪽 **시그널 알림** 목록이 1분마다 갱신됩니다(누르면 차트). **🔔 알림**을 켜면 새 알림을 브라우저 알림으로 띄웁니다.
-- 브라우저 알림은 **https 주소나 localhost**에서만 됩니다(브라우저 보안 규칙). `http://서버IP:8000`으로 열면 목록만 갱신되니 휴대폰은 ntfy를 쓰세요.
+- 브라우저 알림은 **https 주소나 localhost**에서만 됩니다(브라우저 보안 규칙). `.env`에 `SSL_CERT`·`SSL_KEY`를 넣으면 서버가 https로 열립니다
+  ([deploy/README.md 'HTTPS'](deploy/README.md), `deploy/make-cert.sh`). 안드로이드 크롬은 페이지 알림을 막아 서비스 워커(`sw.js`)로 띄우는데,
+  이건 신뢰되는 인증서(Tailscale, 루트 인증서를 설치한 mkcert)에서만 됩니다. 휴대폰은 ntfy가 가장 확실합니다.
 - `GET /api/alerts[?since=id]`: 최근 알림 200개(최신 먼저)와 시장별 감시 상태(확인 시각, top 30 목록, 다음 확인 시각).
 
 점검: `python signals.py`(시그널 계산), `python alerts.py --offline`(새 시그널 고르기·중복 막기), Java `SignalsTest`·`AlertsTest`.
