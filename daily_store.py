@@ -64,7 +64,7 @@ def history(kinds: tuple[str, ...]) -> list[tuple[str, dict]]:
 # 파일 이름에 들어가는 파라미터는 market·year처럼 값이 몇 개 안 되는 것뿐이고, chart만 연 종목마다 파일이 하나씩 생깁니다.
 
 LAST_DIR = Path(__file__).resolve().parent / "last_api"
-LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart", "kosdaq-volume"}  # 첫 로딩이 느린 API만
+LAST_APIS = {"heatmap", "quarters", "holdings", "dividends", "recurring", "transactions", "chart", "kosdaq-volume", "russell-volume"}  # 첫 로딩이 느린 API만
 _IGNORED = {"refresh", "cached", "recent"}  # recent=0(최근 검색에 안 남김)도 같은 차트라 같은 파일
 
 

@@ -13,7 +13,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /heatmap  -> 국내·해외 섹터 히트맵 (heatmap.html)
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
-    GET /volume   -> 코스닥 전주 대비 거래량 증가 종목 (volume.html)
+    GET /volume   -> 코스닥·러셀 2000 거래량 증가 종목 (volume.html, ?market=russell)
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
@@ -33,10 +33,11 @@ API:
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
                                    장중 10분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
+    GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다 (russell.db)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
-    heatmap, quarters, holdings, dividends, recurring, transactions, chart(종목별), kosdaq-volume은 성공한 마지막 응답을 last_api/*.txt에 저장하고,
+    heatmap, quarters, holdings, dividends, recurring, transactions, chart(종목별), kosdaq-volume, russell-volume은 성공한 마지막 응답을 last_api/*.txt에 저장하고,
     ?cached=1 을 붙이면 KB를 부르지 않고 그 값을 바로 돌려줍니다(없으면 404). 화면은 이 값을 먼저 그리고 실제 응답으로 교체합니다.
 """
 
@@ -53,6 +54,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import chart
+import russell
 import snapshots
 import volume
 from daily_store import daily, last_file, read_last, save_last
@@ -152,7 +154,11 @@ def make_handler(client: KBClient):
             elif url.path == "/api/kosdaq-volume":
                 self._api(lambda q: volume.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/kosdaq-intraday":
-                self._api(lambda q: volume.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
+                self._api(lambda q: volume.KOSDAQ.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
+            elif url.path == "/api/russell-volume":
+                self._api(lambda q: russell.query(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/russell-intraday":
+                self._api(lambda q: russell.RUSSELL.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
@@ -212,7 +218,8 @@ if __name__ == "__main__":
     client = KBClient.from_env()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
     snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
-    volume.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
+    volume.KOSDAQ.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
+    russell.RUSSELL.start(client)  # 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell.db, russell2000.csv가 있을 때)
     url = f"http://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)
     if not args.no_open:

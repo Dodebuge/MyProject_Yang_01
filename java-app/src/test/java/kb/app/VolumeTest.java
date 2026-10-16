@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 
 class VolumeTest {
 
+    private static final Ticks KOSDAQ = new Volume(null, Path.of("unused.db")).ticks;
+
     private static List<Map<String, Object>> candles(Object... dayVolume) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < dayVolume.length; i += 2) {
@@ -56,23 +58,23 @@ class VolumeTest {
 
     @Test
     void nextTickStaysInMarketHours() {
-        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 10), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 9, 3)));
-        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 8, 0)));
-        assertEquals(LocalDateTime.of(2026, 10, 16, 15, 40), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 15, 35)));
-        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 15, 15, 40)));
-        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 23, 0)));  // 금 -> 월
-        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 17, 12, 0)));  // 토 -> 월
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 10), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 9, 3)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 8, 0)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 15, 40), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 15, 35)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 15, 15, 40)));
+        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 23, 0)));  // 금 -> 월
+        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 17, 12, 0)));  // 토 -> 월
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void comparesSameTimeWithPreviousDayAndWeek() throws Exception {
-        Volume v = new Volume(null, Files.createTempDirectory("tick").resolve("kosdaq.db"));
+        Ticks v = new Volume(null, Files.createTempDirectory("tick").resolve("kosdaq.db")).ticks;
         String[][] ticks = {{"2026-10-08T10:30", "50"}, {"2026-10-09T10:20", "80"}, {"2026-10-15T10:30", "100"},
                 {"2026-10-16T10:30", "150"}, {"2026-10-16T10:40", "160"}};
         for (String[] t : ticks) {
             long vol = Long.parseLong(t[1]);
-            v.saveTick(t[0], Arrays.asList(Arrays.<Object>asList("000001", "가", 1000L, 1.5, vol, vol * 1000)));
+            v.save(t[0], Arrays.asList(Arrays.<Object>asList("000001", "가", 1000L, 1.5, vol, vol * 1000)));
         }
         Map<String, Object> r = v.intraday("2026-10-16", "10:35");
         assertEquals("10:30", r.get("at"));
@@ -84,5 +86,6 @@ class VolumeTest {
         assertEquals(87.5, s.get("weekRatio"));
         assertEquals("10:40", v.intraday("", "").get("at"));
         assertNull(v.intraday("2026-10-08", "").get("prev"));
+        assertEquals(540, r.get("utcOffset"));
     }
 }

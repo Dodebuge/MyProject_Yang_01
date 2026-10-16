@@ -59,11 +59,27 @@ public class KbApplication {
         return new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
     }
 
-    /** 코스닥 거래량. 장중 10분마다 코스닥 전 종목 누적 거래량을 kosdaq.db에 기록. */
-    @Bean(destroyMethod = "stop")
+    @Bean
     Volume volume(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
-        Volume v = new Volume(client, dataDir.resolve("kosdaq.db"));
-        v.start();
-        return v;
+        return new Volume(client, dataDir.resolve("kosdaq.db"));
+    }
+
+    @Bean
+    Russell russell(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
+        return new Russell(client, dataDir.resolve("russell2000.csv"), dataDir.resolve("russell.db"));
+    }
+
+    /** 장중 10분마다 코스닥 전 종목 누적 거래량을 kosdaq.db에 기록. */
+    @Bean(destroyMethod = "stop")
+    Ticks kosdaqTicks(Volume volume) {
+        volume.ticks.start();
+        return volume.ticks;
+    }
+
+    /** 뉴욕 장중 30분마다 러셀 2000(russell2000.csv) 거래량을 russell.db에 기록. */
+    @Bean(destroyMethod = "stop")
+    Ticks russellTicks(Russell russell) {
+        russell.ticks.start();
+        return russell.ticks;
     }
 }

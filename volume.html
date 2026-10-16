@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>코스닥 거래량</title>
+<title>거래량 증가</title>
 <!--
-  코스닥 거래량 증가 종목. dividends_web.py가 /volume 으로 제공합니다. 보기 두 가지:
+  코스닥·러셀 2000 거래량 증가 종목. dividends_web.py가 /volume 으로 제공합니다 (/volume?market=russell 이면 러셀 2000).
+  러셀 2000은 같은 API의 russell-* 판(russell2000.csv 종목, 같은 시각은 뉴욕 장중 30분마다)을 씁니다. 보기 두 가지:
   - 같은 시각: 서버가 장중(평일 09:00~15:40) 10분마다 저장한 누적 거래량(kosdaq.db)을 전일·전주 같은 시각과 비교 (/api/kosdaq-intraday, KB 조회 없음)
   - 주간 평균: 이번 주와 전주의 하루 평균 거래량 (/api/kosdaq-volume, 약 1,700종목 일봉 조회라 30초 남짓).
     서버에 저장된 마지막 응답(?cached=1)을 먼저 그리고 새 응답으로 교체합니다.
@@ -32,6 +33,7 @@
   --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--page); color: var(--ink);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
@@ -86,12 +88,15 @@ tbody tr:hover { background: var(--hover); }
   <header class="top">
     <div>
       <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart">차트</a><a href="volume" aria-current="page">거래량</a></nav>
-      <h1>코스닥 거래량 증가</h1>
+      <h1 id="title">거래량 증가</h1>
       <p class="sub" id="status">불러오는 중…</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <div class="seg" role="group" aria-label="보기">
-        <button data-view="intraday" title="장중 10분 기록">같은 시각</button><button data-view="weekly">주간 평균</button>
+      <div class="seg" role="group" aria-label="시장" id="markets">
+        <button data-market="kosdaq">코스닥</button><button data-market="russell">러셀 2000</button>
+      </div>
+      <div class="seg" role="group" aria-label="보기" id="views">
+        <button data-view="intraday" title="장중 기록">같은 시각</button><button data-view="weekly">주간 평균</button>
       </div>
       <button id="reload">다시 조회</button><button id="theme" aria-label="테마 전환">◐</button>
     </div>
@@ -104,7 +109,7 @@ tbody tr:hover { background: var(--hover); }
       <label><select id="basis" aria-label="비교 기준"><option value="prevRatio">전일 대비</option><option value="weekRatio">전주 대비</option></select>
         <span id="basis-weekly" hidden>전주 대비</span> <input id="min" type="number" value="10" step="5" aria-label="최소 증가율"> % 이상</label>
       <label><input id="rise" type="checkbox"> 주가 상승만</label>
-      <label><input id="spac" type="checkbox" checked> 스팩 제외</label>
+      <label id="spac-box"><input id="spac" type="checkbox" checked> 스팩 제외</label>
       <input id="q" type="search" placeholder="종목 이름·번호" aria-label="종목 거르기">
     </div>
     <div id="body"><div class="loading"><div class="spinner"></div>불러오는 중…</div></div>
@@ -119,37 +124,54 @@ const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1
 const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
 const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n, d)}%`;
 const md = d => d ? `${+d.slice(5, 7)}/${+d.slice(8)}` : "";
+const usd = n => n >= 1e9 ? "$" + fmt(n / 1e9, 1) + "B" : n >= 1e6 ? "$" + fmt(n / 1e6, 0) + "M" : n >= 1e3 ? "$" + fmt(n / 1e3, 0) + "K" : "$" + fmt(n);
+
+// 시장별 설정. 러셀 2000의 같은 시각 기록은 뉴욕 시간이라 한국 시간을 함께 보여 줌
+const MARKETS = {
+  kosdaq: { title: "코스닥 거래량 증가", api: "kosdaq", name: "코스닥", chart: "kr", dp: 0, money: compact, spac: true, local: "",
+            every: "장중(평일 09:00~15:40) 10분마다", weekly: "코스닥 전 종목 일봉을 조회해 30초 남짓 걸립니다" },
+  russell: { title: "러셀 2000 거래량 증가", api: "russell", name: "러셀 2000", chart: "us", dp: 2, money: usd, spac: false, local: "뉴욕 ",
+             every: "뉴욕 장중(평일 10:00~16:30 뉴욕 시간, 한국 밤 23:00~05:30 무렵) 30분마다", weekly: "러셀 2000 종목(russell2000.csv)마다 일봉을 조회해 1분 남짓 걸립니다" },
+};
+const M = () => MARKETS[V.market];
+// 현지 시각 "HH:MM" + UTC 오프셋(분) -> 한국 시각 "HH:MM"
+const kst = (hm, offset) => {
+  const m = ((+hm.slice(0, 2) * 60 + +hm.slice(3) - offset + 540) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+};
+const when = (hm, offset) => M().local ? `${M().local}${hm} (한국 ${kst(hm, offset)})` : hm;
 
 // 보기별 열: [키, 제목, 숫자 열, 작은 화면에서 숨김, 칸 HTML]
 const VIEWS = {
   intraday: {
-    url: () => `api/kosdaq-intraday?${new URLSearchParams({ date: $("#date").value, at: $("#at").value })}`,
-    note: "서버가 장중(평일 09:00~15:40) 10분마다 코스닥 전 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다. 행을 누르면 차트가 열립니다.",
+    url: () => `api/${M().api}-intraday?${new URLSearchParams({ date: $("#date").value, at: $("#at").value })}`,
+    note: () => `서버가 ${M().every} ${M().name} 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다.${V.market === "russell" ? " KB 미국 시세는 15분 지연입니다." : ""} 행을 누르면 차트가 열립니다.`,
     cols: [
       ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
-      ["price", "현재가", true, true, s => fmt(s.price)],
+      ["price", "현재가", true, true, s => fmt(s.price, M().dp)],
       ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
       ["vlm", "거래량", true, false, s => fmt(s.vlm)],
       ["prevVlm", "전일 같은 시각", true, true, s => fmt(s.prevVlm)],
       ["prevRatio", "전일 대비", true, false, s => `<span class="ratio ${cls(s.prevRatio)}">${pct(s.prevRatio)}</span>`],
       ["weekVlm", "전주 같은 시각", true, true, s => fmt(s.weekVlm)],
       ["weekRatio", "전주 대비", true, false, s => `<span class="ratio ${cls(s.weekRatio)}">${pct(s.weekRatio)}</span>`],
-      ["value", "거래대금", true, true, s => compact(s.value)]],
+      ["value", "거래대금", true, true, s => M().money(s.value)]],
   },
   weekly: {
-    url: refresh => `api/kosdaq-volume${refresh ? "?refresh=1" : ""}`,
-    note: "이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 코스닥 전 종목 일봉을 조회해 30초 남짓 걸립니다. 행을 누르면 차트가 열립니다.",
+    url: refresh => `api/${M().api}-volume${refresh ? "?refresh=1" : ""}`,
+    note: () => `이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 ${M().weekly}. 행을 누르면 차트가 열립니다.`,
     cols: [
       ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
-      ["price", "현재가", true, true, s => fmt(s.price)],
+      ["price", "현재가", true, true, s => fmt(s.price, M().dp)],
       ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
       ["prevAvg", "전주 하루 평균", true, true, s => `${fmt(s.prevAvg)} <span class="days">${s.prevDays}일</span>`],
       ["avg", "이번 주 하루 평균", true, false, s => `${fmt(s.avg)} <span class="days">${s.days}일</span>`],
       ["ratio", "증가율", true, false, s => `<span class="ratio ${cls(s.ratio)}">${pct(s.ratio)}</span>`],
-      ["value", "거래대금", true, true, s => compact(s.value)]],
+      ["value", "거래대금", true, true, s => M().money(s.value)]],
   },
 };
-const V = { view: "intraday", data: {}, sort: { intraday: "prevRatio", weekly: "ratio" }, desc: true, seq: 0 };
+const V = { market: "kosdaq", view: "intraday", data: {}, sort: { intraday: "prevRatio", weekly: "ratio" }, desc: true, seq: 0 };
+const key = () => `${V.market}:${V.view}`;  // 시장·보기별로 받은 응답
 const basis = () => V.view === "weekly" ? "ratio" : $("#basis").value;
 
 async function getJson(url) {
@@ -160,18 +182,18 @@ async function getJson(url) {
 }
 
 function render() {
-  const d = V.data[V.view], view = VIEWS[V.view];
+  const d = V.data[key()], view = VIEWS[V.view];
   if (!d) return;
   if (V.view === "intraday" && !d.stocks.length) {
     $("#count").textContent = "";
-    $("#body").innerHTML = `<div class="empty">아직 10분 기록이 없습니다. 서버가 켜져 있으면 장중(평일 09:00~15:40) 10분마다 쌓입니다.<br>다음 기록 ${esc(d.nextTick.replace("T", " "))}</div>`;
+    $("#body").innerHTML = `<div class="empty">아직 기록이 없습니다. 서버가 켜져 있으면 ${esc(M().every)} 쌓입니다.<br>다음 기록 ${esc(d.nextTick.slice(0, 10))} ${esc(when(d.nextTick.slice(11), d.utcOffset))}</div>`;
     return;
   }
-  const min = Number($("#min").value) || 0, q = $("#q").value.trim(), b = basis(), k = V.sort[V.view];
+  const min = Number($("#min").value) || 0, q = $("#q").value.trim().toLowerCase(), b = basis(), k = V.sort[V.view];
   const rows = d.stocks
     .filter(s => s[b] != null && s[b] >= min)
-    .filter(s => !($("#rise").checked && !(s.change > 0)) && !($("#spac").checked && s.name.includes("스팩")))
-    .filter(s => !q || s.name.includes(q) || s.code.includes(q))
+    .filter(s => !($("#rise").checked && !(s.change > 0)) && !(M().spac && $("#spac").checked && s.name.includes("스팩")))
+    .filter(s => !q || s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
     .sort((x, y) => (k === "name" ? x.name.localeCompare(y.name, "ko") : (x[k] ?? -Infinity) - (y[k] ?? -Infinity)) * (V.desc ? -1 : 1));
   $("#count").textContent = `${fmt(rows.length)}종목`;
   $("#body").innerHTML = rows.length ? `<div class="table"><table>
@@ -182,36 +204,40 @@ function render() {
 }
 
 function intradayStatus(d) {
-  if (!d.date) return `10분 기록 없음 · 다음 기록 ${d.nextTick.replace("T", " ")}`;
+  const next = `다음 기록 ${md(d.nextTick.slice(0, 10))} ${when(d.nextTick.slice(11), d.utcOffset)}`;
+  if (!d.date) return `기록 없음 · ${next}`;
   const ref = (label, r) => r ? `${label} ${md(r.date)} ${r.at}` : `${label} 기록 없음`;
-  return `${d.date} ${d.at} 기록 · ${ref("전일", d.prev)} · ${ref("전주", d.week)} · 다음 기록 ${d.nextTick.slice(5).replace("T", " ").replace("-", "/")}`;
+  return `${d.date} ${when(d.at, d.utcOffset)} 기록 · ${ref("전일", d.prev)} · ${ref("전주", d.week)} · ${next}`;
 }
 
 function fillWhen(d) {
   $("#date").innerHTML = d.dates.map(x => `<option value="${x}" ${x === d.date ? "selected" : ""}>${x}</option>`).join("");
-  $("#at").innerHTML = d.slots.map(x => `<option ${x === d.at ? "selected" : ""}>${x}</option>`).join("");
+  $("#at").innerHTML = d.slots.map(x => `<option value="${x}" ${x === d.at ? "selected" : ""}>${when(x, d.utcOffset)}</option>`).join("");
 }
 
 async function load(refresh) {
-  const view = V.view, seq = ++V.seq, status = $("#status");
+  const view = V.view, k = key(), seq = ++V.seq, status = $("#status");
   $("#reload").textContent = view === "weekly" ? "KB에서 다시 조회" : "다시 조회";
-  $("#note").textContent = VIEWS[view].note;
+  $("#note").textContent = VIEWS[view].note();
+  $("#title").textContent = document.title = M().title;
+  $("#spac-box").hidden = !M().spac;
+  if (view === "intraday" && !refresh && !V.data[k]) $("#date").innerHTML = $("#at").innerHTML = "";  // 다른 시장의 날짜·시각을 보내지 않게
   $("#when").hidden = $("#basis").hidden = view !== "intraday";
   $("#basis-weekly").hidden = view === "intraday";
-  if (!V.data[view]) $("#body").innerHTML = `<div class="loading"><div class="spinner"></div>${view === "weekly" ? "코스닥 전 종목 일봉을 조회하는 중… (30초 남짓)" : "불러오는 중…"}</div>`;
+  if (!V.data[k]) $("#body").innerHTML = `<div class="loading"><div class="spinner"></div>${view === "weekly" ? `KB에서 ${M().weekly}…` : "불러오는 중…"}</div>`;
   render();
-  if (view === "weekly" && !refresh && !V.data.weekly) {
-    try { const d = await getJson("api/kosdaq-volume?cached=1"); if (seq === V.seq) { V.data.weekly = d; render(); } } catch { /* 저장된 응답이 없으면 기다림 */ }
+  if (view === "weekly" && !refresh && !V.data[k]) {
+    try { const d = await getJson(`api/${M().api}-volume?cached=1`); if (seq === V.seq) { V.data[k] = d; render(); } } catch { /* 저장된 응답이 없으면 기다림 */ }
   }
-  const prev = V.data[view];
+  const prev = V.data[k];
   if (view === "weekly") status.innerHTML = prev ? `${esc(prev.fetchedAt)} 기준 · <span class="stale">KB에서 새로 조회하는 중…</span>` : "KB에서 조회하는 중…";
   $("#reload").disabled = true;
   try {
     const d = await getJson(VIEWS[view].url(refresh));
     if (seq !== V.seq) return;
-    V.data[view] = d;
+    V.data[k] = d;
     if (view === "intraday") fillWhen(d);
-    status.textContent = view === "weekly" ? `${d.fetchedAt} 기준 · 코스닥 ${fmt(d.total)}종목` : intradayStatus(d);
+    status.textContent = view === "weekly" ? `${d.fetchedAt} 기준 · ${M().name} ${fmt(d.total)}종목${d.listed ? ` (목록 ${fmt(d.listed)}종목 중 조회된 종목)` : ""}` : intradayStatus(d);
     render();
   } catch (err) {
     if (seq !== V.seq) return;
@@ -220,11 +246,16 @@ async function load(refresh) {
   } finally { if (seq === V.seq) $("#reload").disabled = false; }
 }
 
-function setView(view) {
+function setView(view, market = V.market) {
   V.view = view;
+  V.market = market;
   V.desc = true;
-  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view));
+  document.querySelectorAll("#views button").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view));
+  document.querySelectorAll("#markets button").forEach(b => b.setAttribute("aria-pressed", b.dataset.market === market));
   try { localStorage.setItem("vol-view", view); } catch {}
+  const url = new URL(location.href);
+  if (market === "kosdaq") url.searchParams.delete("market"); else url.searchParams.set("market", market);
+  history.replaceState(null, "", url);
   load(false);
 }
 
@@ -232,12 +263,13 @@ $("#min").oninput = $("#q").oninput = $("#spac").onchange = $("#rise").onchange 
 $("#basis").onchange = () => { V.sort.intraday = $("#basis").value; V.desc = true; render(); };
 $("#date").onchange = () => { $("#at").value = ""; load(false); };
 $("#at").onchange = () => load(false);
-document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setView(b.dataset.view));
+document.querySelectorAll("#views button").forEach(b => b.onclick = () => setView(b.dataset.view));
+document.querySelectorAll("#markets button").forEach(b => b.onclick = () => setView(V.view, b.dataset.market));
 $("#body").onclick = e => {
   const th = e.target.closest("th button");
   if (th) { const k = th.dataset.k; V.desc = k === V.sort[V.view] ? !V.desc : k !== "name"; V.sort[V.view] = k; return render(); }
   const tr = e.target.closest("tbody tr");
-  if (tr) location.href = `chart?market=kr&code=${encodeURIComponent(tr.dataset.code)}`;
+  if (tr) location.href = `chart?market=${M().chart}&code=${encodeURIComponent(tr.dataset.code)}`;
 };
 $("#reload").onclick = () => load(true);
 try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
@@ -249,7 +281,7 @@ $("#theme").onclick = () => {
 };
 let saved = null;
 try { saved = localStorage.getItem("vol-view"); } catch {}
-setView(saved in VIEWS ? saved : "intraday");
+setView(saved in VIEWS ? saved : "intraday", new URLSearchParams(location.search).get("market") in MARKETS ? new URLSearchParams(location.search).get("market") : "kosdaq");
 </script>
 </body>
 </html>

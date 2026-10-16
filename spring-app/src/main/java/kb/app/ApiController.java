@@ -29,6 +29,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday        장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
+ *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
@@ -42,13 +43,15 @@ class ApiController {
     private final Chart chart;
     private final Snapshots snapshots;
     private final Volume volume;
+    private final Russell russell;
 
-    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume) {
+    ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell) {
         this.heatmap = heatmap;
         this.dividends = dividends;
         this.chart = chart;
         this.snapshots = snapshots;
         this.volume = volume;
+        this.russell = russell;
     }
 
     @GetMapping("/heatmap")
@@ -114,7 +117,18 @@ class ApiController {
     @GetMapping("/kosdaq-intraday")
     ResponseEntity<Map<String, Object>> kosdaqIntraday(@RequestParam(defaultValue = "") String date,
                                                        @RequestParam(defaultValue = "") String at) throws IOException {
-        return ok(volume.intraday(date, at));
+        return ok(volume.ticks.intraday(date, at));
+    }
+
+    @GetMapping("/russell-volume")
+    ResponseEntity<Map<String, Object>> russellVolume(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
+        return ok(russell.query(refresh));
+    }
+
+    @GetMapping("/russell-intraday")
+    ResponseEntity<Map<String, Object>> russellIntraday(@RequestParam(defaultValue = "") String date,
+                                                        @RequestParam(defaultValue = "") String at) throws IOException {
+        return ok(russell.ticks.intraday(date, at));
     }
 
     @GetMapping("/transactions")

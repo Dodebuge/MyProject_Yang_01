@@ -8,6 +8,9 @@ kb.db
 kb.db-*
 kosdaq.db
 kosdaq.db-*
+russell.db
+russell.db-*
+russell2000.csv
 recent_searches.txt
 last_api/
 chart_settings.json

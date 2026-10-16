@@ -12,7 +12,7 @@
 | `dividends_web.py` | 로컬 웹서버: `/` 첫 화면, `/heatmap`, `/me` 페이지와 `/api/*` |
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
 | `chart.py` / `chart.html` | 종목 검색(이름·종목번호·미국 티커) + 일봉 차트 (같은 서버의 `/chart`) |
-| `volume.py` / `volume.html` | 코스닥 전주 대비 거래량 증가 종목 (같은 서버의 `/volume`) |
+| `volume.py` / `russell.py` / `volume.html` | 코스닥·러셀 2000 거래량 증가 종목 (같은 서버의 `/volume`) |
 | `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
@@ -61,7 +61,7 @@ python dividends_web.py --port 8080 --no-open
 - `/` 첫 화면: 히트맵과 내정보 중 선택
 - `/heatmap` 섹터 히트맵 (아래 "섹터 히트맵" 참고)
 - `/chart` 종목 차트: 종목이름·종목번호·티커로 검색해 최근 약 1년 일봉(캔들·거래량)을 그립니다. `/chart?market=kr&code=005930`처럼 주소로 바로 열 수 있습니다.
-- `/volume` 코스닥 거래량 증가: 아래 "코스닥 거래량 증가" 참고
+- `/volume` 코스닥·러셀 2000 거래량 증가: 아래 "코스닥 거래량 증가", "러셀 2000 거래량 증가" 참고
 - `/me` 내정보: 보유 종목 현황(총자산·수익률·현금 비율, 총자산 대비 금액 비중 히트맵, 보유 종목 표)과 배당 내역
 
 ### 배당 내역 (내정보 아래쪽)
@@ -103,6 +103,22 @@ appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1
 - KB 서버는 동시에 많이 부르면 가끔 필드가 밀린 일봉이나 500 오류를 돌려줘서, 날짜·거래량이 이상한 응답은 세 번까지 다시 부릅니다.
   값은 멀쩡해 보이지만 틀린 응답도 1,700종목에 한두 개꼴로 있어, 숫자가 이상하면 차트에서 확인하세요.
 - 점검: `python volume.py --offline`(주간 계산·10분 시각·같은 시각 비교 자체 점검), `python volume.py`(실제 조회해 상위 20개 출력)
+
+## 러셀 2000 거래량 증가
+
+http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러셀 2000**). 코스닥과 같은 두 보기·같은 거르기를 씁니다.
+
+- **종목 목록**: KB OpenAPI에는 미국 종목 목록·순위 TR이 없어 `russell2000.csv`(`.env`와 같은 폴더, git에 올리지 않음)에서 읽습니다.
+  [iShares IWM](https://www.ishares.com/us/products/239710/ishares-russell-2000-etf) 페이지 Holdings의 **Download**(CSV)를 받아 이름만 바꿔 넣으면 됩니다
+  (Asset Class가 Equity인 행만 씀). `Ticker` 열(선택: `Name`, `Exchange`)만 있는 CSV도 됩니다. 구성 종목이 바뀌면(연 1~2회 리밸런싱) 파일만 바꾸세요.
+  서버에서 자동으로 받으려 하면 iShares가 막아서 직접 넣는 방식입니다. 파일이 없으면 화면에 넣는 방법이 나옵니다.
+- **거래소·티커**: CSV의 Exchange 열(NASDAQ, New York Stock Exchange 등)을 먼저 쓰고, 틀리면 NAS·NYS·AMX 순으로 찾습니다.
+  iShares 표기(`MOGA`)와 KB 표기(`MOG.A`)가 다르면 마지막 글자 앞에 점을 넣어 한 번 더 찾습니다. 화면의 종목 코드는 KB 티커라 차트로 바로 열립니다.
+- **같은 시각**: 뉴욕 장중(평일 10:00~16:30 **뉴욕 시간**, 한국 밤 23:00~05:30 무렵, 서머타임이 끝나면 한 시간 늦게) 30분마다
+  종목별 상세시세(`GSS10030`, 약 2,000번 호출)를 `russell.db`에 저장합니다. 그날(뉴욕 날짜) 체결이 없으면(휴장) 저장하지 않습니다.
+  KB 미국 시세는 15분 지연이라 10:00 기록은 09:45 무렵 값이고, 16:30 기록에 종가까지 담깁니다. 화면에는 뉴욕 시각과 한국 시각을 함께 보여 줍니다.
+- **주간 평균**: 종목별 일봉(`GSC10060`)으로 이번 주·전주 하루 평균 거래량을 비교합니다(`/api/russell-volume`, 10분 캐시).
+- 점검: `python russell.py --offline`(CSV 읽기·거래소 이름·기록 시각 자체 점검), `python russell.py`(실제 조회해 상위 20개 출력)
 
 ## 첫 로딩 (마지막 응답 먼저 보여 주기)
 
