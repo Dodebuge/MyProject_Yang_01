@@ -26,4 +26,9 @@ class PageController {
     String chart() {
         return "forward:/chart.html";
     }
+
+    @GetMapping("/volume")
+    String volume() {
+        return "forward:/volume.html";
+    }
 }

@@ -23,7 +23,7 @@ import jakarta.servlet.http.HttpServletResponse;
 /**
  * dividends_web.py와 같은 주소를 처리합니다. 화면(HTML)은 Python 버전과 같은 파일을 씁니다.
  *
- *   GET /, /heatmap, /me, /chart        -> home.html, heatmap.html, me.html, chart.html
+ *   GET /, /heatmap, /me, /chart, /volume -> home.html, heatmap.html, me.html, chart.html, volume.html
  *   GET /docs/*.html                    -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
@@ -34,10 +34,11 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/transactions               -> 최근 1달 거래내역
  *   GET /api/search?q=                  -> 종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
+ *   GET /api/kosdaq-volume              -> 코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET /api/settings, POST /api/settings -> 차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
- *   (heatmap·quarters·holdings·dividends·recurring·transactions는 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
+ *   (heatmap·quarters·holdings·dividends·recurring·transactions·chart·kosdaq-volume은 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
  *
  * 설정: web.xml의 context-param dataDir(기본 /opt/kb_openapi_sample)에 .env와 etf_snapshot.json을 둡니다.
  * 토스 계좌 합산: 같은 .env(또는 환경변수)에 TOSS_OPENAPI_CLIENT_ID/SECRET이 있으면 켜집니다.
@@ -55,12 +56,14 @@ public class AppServlet extends HttpServlet {
         PAGES.put("/heatmap", "/heatmap.html");
         PAGES.put("/me", "/me.html");
         PAGES.put("/chart", "/chart.html");
+        PAGES.put("/volume", "/volume.html");
     }
 
     private Heatmap heatmap;
     private Dividends dividends;
     private LastResponse last;  // 마지막 응답 (?cached=1)
     private Chart chart;
+    private Volume volume;
     private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
 
@@ -101,6 +104,7 @@ public class AppServlet extends HttpServlet {
         dividends = new Dividends(client, store);
         last = new LastResponse(dataDir.resolve("last_api"));
         chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
+        volume = new Volume(client);
         try {
             snapshots = new Snapshots(heatmap, dataDir.resolve(".env"));  // MYSQL_HOST가 있으면 4시간마다 보유 금액 기록
         } catch (IOException e) {
@@ -117,6 +121,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/recent", req -> chart.recent());
         apis.put("/api/settings", req -> chart.settings());
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
+        apis.put("/api/kosdaq-volume", req -> volume.query(refresh(req)));
         apis.put("/api/transactions", req -> dividends.queryTransactions(refresh(req)));
         apis.put("/api/dividends", req -> {
             String year = param(req, "year", String.valueOf(LocalDate.now().getYear()));

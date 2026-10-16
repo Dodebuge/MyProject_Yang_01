@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>코스닥 거래량 증가</title>
+<!--
+  코스닥 전 종목 중 이번 주 하루 평균 거래량이 전주보다 기준(기본 10%) 이상 늘어난 종목. dividends_web.py가 /volume 으로 제공합니다.
+  데이터는 /api/kosdaq-volume (약 1,700종목 일봉 조회라 30초 남짓). 서버에 저장된 마지막 응답(?cached=1)을 먼저 그리고 새 응답으로 교체합니다.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
+  --series-1: #2a78d6; --bad: #d03b3b; --up: #e34948; --down: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+    --series-1: #3987e5; --bad: #e66767; --up: #e66767; --down: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+  --series-1: #3987e5; --bad: #e66767; --up: #e66767; --down: #3987e5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.nav { display: flex; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.nav a:hover { background: var(--hover); color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
+.nav a.home { color: var(--muted); }
+button, input { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); }
+button { cursor: pointer; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.sub { color: var(--muted); font-size: 12px; margin: 0; }
+.stale { color: var(--series-1); }
+.stale.bad { color: var(--bad); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 4px 0 12px; }
+.controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.controls input[type="number"] { width: 80px; padding: 4px 8px; }
+.controls input[type="search"] { width: 180px; padding: 4px 10px; }
+.count { font-size: 16px; font-weight: 650; }
+.table { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: left; padding: 6px; white-space: nowrap; }
+th button { border: 0; padding: 0; background: none; color: inherit; font: inherit; }
+th button[aria-pressed="true"] { color: var(--ink); font-weight: 650; }
+td { padding: 7px 6px; border-top: 1px solid var(--grid); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.up { color: var(--up); } .down { color: var(--down); }
+.ratio { font-weight: 650; }
+.days { color: var(--muted); font-size: 11px; }
+@media (max-width: 640px) { .hide-sm { display: none; } }
+.empty { color: var(--muted); padding: 32px 0; text-align: center; }
+.error { border: 1px solid var(--bad); border-radius: 12px; padding: 16px; }
+.loading { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 60px 0; color: var(--ink-2); }
+.spinner { width: 20px; height: 20px; border: 2px solid var(--grid); border-top-color: var(--series-1); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.note { color: var(--muted); font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart">차트</a><a href="volume" aria-current="page">거래량</a></nav>
+      <h1>코스닥 거래량 증가</h1>
+      <p class="sub" id="status">불러오는 중…</p>
+    </div>
+    <div style="display:flex;gap:8px"><button id="reload">KB에서 다시 조회</button><button id="theme" aria-label="테마 전환">◐</button></div>
+  </header>
+
+  <section class="card">
+    <div class="controls">
+      <span class="count" id="count"></span>
+      <label>전주 대비 <input id="min" type="number" value="10" step="5" aria-label="최소 증가율"> % 이상</label>
+      <label><input id="spac" type="checkbox" checked> 스팩 제외</label>
+      <input id="q" type="search" placeholder="종목 이름·번호" aria-label="종목 거르기">
+    </div>
+    <div id="body"><div class="loading"><div class="spinner"></div>코스닥 전 종목 일봉을 조회하는 중… (30초 남짓)</div></div>
+    <p class="note">이번 주와 전주의 <b>하루 평균 거래량</b>을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. 행을 누르면 차트가 열립니다.</p>
+  </section>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1e8, 0) + "억" : n >= 1e4 ? fmt(n / 1e4, 0) + "만" : fmt(n);
+const COLS = [  // [키, 제목, 숫자 열, 작은 화면에서 숨김]
+  ["name", "종목", false], ["price", "현재가", true, true], ["change", "등락률", true], ["prevAvg", "전주 하루 평균", true, true],
+  ["avg", "이번 주 하루 평균", true], ["ratio", "증가율", true], ["value", "거래대금", true, true]];
+const V = { data: null, sort: "ratio", desc: true };
+
+async function getJson(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+  if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+  return d;
+}
+
+function render() {
+  if (!V.data) return;
+  const min = Number($("#min").value) || 0, q = $("#q").value.trim(), k = V.sort;
+  const rows = V.data.stocks
+    .filter(s => s.ratio != null && s.ratio >= min && !($("#spac").checked && s.name.includes("스팩")))
+    .filter(s => !q || s.name.includes(q) || s.code.includes(q))
+    .sort((a, b) => (k === "name" ? a.name.localeCompare(b.name, "ko") : a[k] - b[k]) * (V.desc ? -1 : 1));
+  $("#count").textContent = `${fmt(rows.length)}종목`;
+  const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
+  $("#body").innerHTML = rows.length ? `<div class="table"><table>
+    <thead><tr>${COLS.map(([key, title, num, sm]) => `<th class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}"><button data-k="${key}" aria-pressed="${key === k}">${title}${key === k ? (V.desc ? " ▼" : " ▲") : ""}</button></th>`).join("")}</tr></thead>
+    <tbody>${rows.map(s => `<tr data-code="${esc(s.code)}" title="차트 열기">
+      <td><b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span></td>
+      <td class="num hide-sm">${fmt(s.price)}</td>
+      <td class="num ${cls(s.change)}">${s.change > 0 ? "+" : ""}${fmt(s.change, 2)}%</td>
+      <td class="num hide-sm">${fmt(s.prevAvg)} <span class="days">${s.prevDays}일</span></td>
+      <td class="num">${fmt(s.avg)} <span class="days">${s.days}일</span></td>
+      <td class="num ratio up">+${fmt(s.ratio, 1)}%</td>
+      <td class="num hide-sm">${compact(s.value)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">조건에 맞는 종목이 없습니다.</div>`;
+}
+
+async function load(refresh) {
+  const status = $("#status");
+  if (!refresh) {
+    try { V.data = await getJson("api/kosdaq-volume?cached=1"); render(); } catch { /* 저장된 응답이 없으면 기다림 */ }
+  }
+  status.innerHTML = V.data ? `${esc(V.data.fetchedAt)} 기준 · <span class="stale">KB에서 새로 조회하는 중…</span>` : "KB에서 조회하는 중…";
+  $("#reload").disabled = true;
+  try {
+    V.data = await getJson(`api/kosdaq-volume${refresh ? "?refresh=1" : ""}`);
+    status.textContent = `${V.data.fetchedAt} 기준 · 코스닥 ${fmt(V.data.total)}종목`;
+    render();
+  } catch (err) {
+    if (V.data) status.innerHTML = `${esc(V.data.fetchedAt)} 기준 · <span class="stale bad">새로 조회 실패: ${esc(err.message)}</span>`;
+    else { status.textContent = ""; $("#body").innerHTML = `<div class="error">조회 실패: ${esc(err.message)}</div>`; }
+  } finally { $("#reload").disabled = false; }
+}
+
+$("#min").oninput = $("#q").oninput = $("#spac").onchange = render;
+$("#body").onclick = e => {
+  const th = e.target.closest("th button");
+  if (th) { V.desc = th.dataset.k === V.sort ? !V.desc : th.dataset.k !== "name"; V.sort = th.dataset.k; return render(); }
+  const tr = e.target.closest("tbody tr");
+  if (tr) location.href = `chart?market=kr&code=${encodeURIComponent(tr.dataset.code)}`;
+};
+$("#reload").onclick = () => load(true);
+try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+$("#theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("div-theme", next); } catch {}
+};
+load(false);
+</script>
+</body>
+</html>

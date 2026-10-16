@@ -13,6 +13,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /heatmap  -> 국내·해외 섹터 히트맵 (heatmap.html)
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
+    GET /volume   -> 코스닥 전주 대비 거래량 증가 종목 (volume.html)
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
@@ -29,10 +30,11 @@ API:
                                       MYSQL_HOST가 있으면 4시간마다(00·04·…·20시) 기록한 MySQL 값도 합침 (snapshots.py)
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
+    GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
-    heatmap, quarters, holdings, dividends, recurring, transactions, chart(종목별)는 성공한 마지막 응답을 last_api/*.txt에 저장하고,
+    heatmap, quarters, holdings, dividends, recurring, transactions, chart(종목별), kosdaq-volume은 성공한 마지막 응답을 last_api/*.txt에 저장하고,
     ?cached=1 을 붙이면 KB를 부르지 않고 그 값을 바로 돌려줍니다(없으면 404). 화면은 이 값을 먼저 그리고 실제 응답으로 교체합니다.
 """
 
@@ -50,13 +52,14 @@ from urllib.parse import parse_qs, urlparse
 
 import chart
 import snapshots
+import volume
 from daily_store import daily, last_file, read_last, save_last
 from dividends import fetch_entries, fetch_recurring, fetch_transactions
 from heatmap import holdings_history, query_heatmap, query_holdings, query_quarters, summarize
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
-PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html"}
+PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html"}
 SETTINGS_MAX_BYTES = 4096  # POST /api/settings 본문 크기 제한 (설정은 수십 바이트)
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
@@ -144,6 +147,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: chart.settings(), {})
             elif url.path == "/api/recent":
                 self._api(lambda q: {"items": chart.recent()}, {})
+            elif url.path == "/api/kosdaq-volume":
+                self._api(lambda q: volume.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
