@@ -13,6 +13,7 @@ Ticker 열(선택: Name, Exchange)만 있는 CSV도 됩니다. 구성 종목이 
 
     python russell.py           # 주간 평균 전주 대비 10% 이상 오른 종목 (CSV 필요)
     python russell.py --offline # CSV 읽기·거래소 이름 자체 점검
+    python russell.py --check   # russell2000.csv 종목을 실제 KB에서 찾아 봄 (Java: RussellTest -Drussell.live=true)
 """
 
 from __future__ import annotations
@@ -160,6 +161,17 @@ def query(client: KBClient, refresh: bool = False) -> dict:
         return payload
 
 
+def check(client: KBClient) -> dict:
+    """점검: CSV 종목마다 KB 시세를 찾아 {"listed", "found", "missing": [...], "renamed": ["MOGA -> NYS:MOG.A", ...]}."""
+    items = load_list()
+    client.access_token
+    with ThreadPoolExecutor(WORKERS) as pool:
+        missing = [i["code"] for i, q in zip(items, pool.map(lambda i: _quote(client, i), items)) if not q]
+    renamed = [f"{i['code']} -> {_found[i['code']][0]}:{_found[i['code']][1]}" for i in items
+               if i["code"] in _found and _found[i["code"]][1] != i["code"]]
+    return {"listed": len(items), "found": len(items) - len(missing), "missing": missing, "renamed": renamed}
+
+
 def _rows(client: KBClient, at: datetime) -> list[list]:
     """러셀 2000 종목별 상세시세. 그날(뉴욕 날짜) 체결이 있는 종목만 (휴장일이면 빈 목록)."""
     items = load_list()
@@ -204,6 +216,12 @@ if __name__ == "__main__":
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()
+    if "--check" in sys.argv:
+        r = check(KBClient.from_env())
+        print(f"{CSV}: {r['listed']}종목 중 {r['found']}종목 KB에서 찾음")
+        print(f"  표기를 바꿔 찾은 종목 {len(r['renamed'])}개: {r['renamed']}")
+        print(f"  못 찾은 종목 {len(r['missing'])}개: {r['missing']}")
+        sys.exit(0 if r["found"] >= r["listed"] * 0.95 else 1)
     t = time.time()
     data = query(KBClient.from_env())
     up = sorted((s for s in data["stocks"] if (s["ratio"] or 0) >= 10), key=lambda s: -s["ratio"])

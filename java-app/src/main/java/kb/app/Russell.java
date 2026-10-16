@@ -282,6 +282,30 @@ final class Russell {
         return payload;
     }
 
+    /**
+     * 점검: CSV 종목마다 KB 시세(GSS10030)를 찾아 {"listed", "found", "missing": [못 찾은 티커], "renamed": ["MOGA -> NYS:MOG.A", ...]}.
+     * 단위 테스트 RussellTest(-Drussell.live=true)와 python russell.py --check가 씁니다.
+     */
+    Map<String, Object> check() throws IOException {
+        List<Map<String, String>> items = loadList(csv);
+        client.accessToken();
+        List<String> missing = Values.parallel(items, WORKERS, item -> quote(item) == null ? item.get("code") : null);
+        missing.removeIf(Objects::isNull);
+        List<String> renamed = new ArrayList<>();
+        for (Map<String, String> item : items) {
+            String[] f = found.get(item.get("code"));
+            if (f != null && !f[1].equals(item.get("code"))) {
+                renamed.add(item.get("code") + " -> " + f[0] + ":" + f[1]);
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("listed", items.size());
+        out.put("found", items.size() - missing.size());
+        out.put("missing", missing);
+        out.put("renamed", renamed);
+        return out;
+    }
+
     /** 러셀 2000 종목별 상세시세. 그날(뉴욕 날짜) 체결이 있는 종목만 (휴장일이면 빈 목록). */
     private List<List<Object>> rows(LocalDateTime at) throws IOException {
         List<Map<String, String>> items = loadList(csv);

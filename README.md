@@ -119,6 +119,9 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
   KB 미국 시세는 15분 지연이라 10:00 기록은 09:45 무렵 값이고, 16:30 기록에 종가까지 담깁니다. 화면에는 뉴욕 시각과 한국 시각을 함께 보여 줍니다.
 - **주간 평균**: 종목별 일봉(`GSC10060`)으로 이번 주·전주 하루 평균 거래량을 비교합니다(`/api/russell-volume`, 10분 캐시).
 - 점검: `python russell.py --offline`(CSV 읽기·거래소 이름·기록 시각 자체 점검), `python russell.py`(실제 조회해 상위 20개 출력)
+- CSV를 넣은 뒤 종목이 KB에서 다 찾아지는지 확인: `python russell.py --check` 또는 Java 단위 테스트
+  `../spring-app/mvnw test -Dtest=RussellTest -Drussell.live=true`(java-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
+  몇 종목 중 몇 종목을 찾았는지, 표기를 바꿔 찾은 종목(`MOGA -> NYS:MOG.A`), 못 찾은 종목을 출력하고, 95% 미만이면 실패합니다.
 
 ## 첫 로딩 (마지막 응답 먼저 보여 주기)
 
