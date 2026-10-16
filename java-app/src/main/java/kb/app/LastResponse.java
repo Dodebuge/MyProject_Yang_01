@@ -58,10 +58,20 @@ final class LastResponse {
         }
     }
 
-    static void save(Path file, String body) throws IOException {
+    /**
+     * 읽는 쪽이 반쯤 쓴 파일을 보지 않게 임시 파일에 쓰고 통째로 교체합니다.
+     * 임시 파일 이름은 요청마다 다르게: 같은 API 요청 두 개가 동시에 끝나면(예: 러셀 주간 평균을 두 화면이 함께 기다림)
+     * 고정 이름(.tmp)은 한쪽이 옮긴 파일을 다른 쪽이 다시 옮기려다 NoSuchFileException이 났습니다. 나중에 끝난 쪽이 이깁니다.
+     * synchronized: Windows는 같은 파일을 동시에 교체하면 AccessDeniedException이라 한 서버 안에서는 하나씩 (리눅스는 없어도 안전).
+     */
+    static synchronized void save(Path file, String body) throws IOException {
         Files.createDirectories(file.getParent());
-        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-        Files.write(tmp, body.getBytes(StandardCharsets.UTF_8));
-        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);  // 읽는 쪽이 반쯤 쓴 파일을 보지 않게 통째로 교체
+        Path tmp = Files.createTempFile(file.getParent(), file.getFileName() + ".", ".tmp");
+        try {
+            Files.write(tmp, body.getBytes(StandardCharsets.UTF_8));
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(tmp);  // 옮기지 못했을 때 남은 임시 파일
+        }
     }
 }

@@ -49,7 +49,11 @@ class LastResponseFilter extends OncePerRequestFilter {
         ContentCachingResponseWrapper wrapped = new ContentCachingResponseWrapper(resp);
         chain.doFilter(req, wrapped);
         if (wrapped.getStatus() == 200) {
-            LastResponse.save(file, new String(wrapped.getContentAsByteArray(), StandardCharsets.UTF_8));
+            try {
+                LastResponse.save(file, new String(wrapped.getContentAsByteArray(), StandardCharsets.UTF_8));
+            } catch (IOException e) {  // 첫 로딩용 저장이 안 돼도 응답은 그대로 보냄 (예전엔 여기서 예외가 나 응답 본문이 사라졌음)
+                logger.warn("마지막 응답 저장 실패 (" + file + "): " + e);
+            }
         }
         wrapped.copyBodyToResponse();
     }

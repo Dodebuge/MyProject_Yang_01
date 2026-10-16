@@ -258,7 +258,11 @@ public class AppServlet extends HttpServlet {
         }
         String json = GSON.toJson(payload);
         if (lastFile != null && status == 200) {
-            LastResponse.save(lastFile, json);
+            try {
+                LastResponse.save(lastFile, json);
+            } catch (IOException e) {  // 첫 로딩용 저장이 안 돼도 응답은 그대로 보냄
+                log("마지막 응답 저장 실패 (" + lastFile + "): " + e);
+            }
         }
         byte[] body = json.getBytes(StandardCharsets.UTF_8);
         resp.setStatus(status);

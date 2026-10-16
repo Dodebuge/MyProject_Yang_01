@@ -197,7 +197,10 @@ def make_handler(client: KBClient):
                 status, payload = 502, {"error": f"{type(e).__name__}: {e}"}
             body = json.dumps(payload, ensure_ascii=False)
             if last and status == 200:
-                save_last(last, body)
+                try:
+                    save_last(last, body)
+                except OSError as e:  # 첫 로딩용 저장이 안 돼도 응답은 그대로 보냄
+                    print(f"[{datetime.now():%H:%M:%S}] 마지막 응답 저장 실패 ({last}): {e}", flush=True)
             self._send(status, body.encode("utf-8"), "application/json; charset=utf-8")
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:

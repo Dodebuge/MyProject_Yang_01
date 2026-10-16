@@ -13,6 +13,8 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
+import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,11 +79,27 @@ def last_file(api: str, params: dict[str, str]) -> Path | None:
     return LAST_DIR / f"{name}.txt"
 
 
+_save_lock = threading.Lock()
+
+
 def save_last(file: Path, body: str) -> None:
+    """읽는 쪽이 반쯤 쓴 파일을 보지 않게 임시 파일에 쓰고 통째로 교체합니다.
+    임시 파일 이름은 요청마다 다르게: 같은 API 요청 두 개가 동시에 끝나면 고정 이름(.tmp)은 서로 옮기다 FileNotFoundError가 남.
+    잠금: Windows는 같은 파일을 동시에 교체하면 PermissionError라 한 서버 안에서는 하나씩 (리눅스는 잠금 없이도 안전)."""
     file.parent.mkdir(exist_ok=True)
-    tmp = file.with_suffix(".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    os.replace(tmp, file)  # 읽는 쪽이 반쯤 쓴 파일을 보지 않게 통째로 교체
+    with _save_lock:
+        _replace(file, body)
+
+
+def _replace(file: Path, body: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=file.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(tmp, file)
+    finally:
+        if os.path.exists(tmp):  # 옮기지 못했을 때 남은 임시 파일
+            os.remove(tmp)
 
 
 def read_last(file: Path) -> str | None:
@@ -114,4 +132,10 @@ if __name__ == "__main__":
     assert read_last(f) is None
     save_last(f, '{"a": "첫"}'); save_last(f, '{"a": "둘"}')
     assert read_last(f) == '{"a": "둘"}'
+    # 같은 마지막 응답 파일을 여러 요청이 동시에 저장해도 실패하지 않고 임시 파일이 남지 않음
+    from concurrent.futures import ThreadPoolExecutor
+    last = Path(tempfile.mkdtemp()) / "russell-volume.txt"
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda n: save_last(last, f'{{"n": {n}}}'), range(200)))
+    assert read_last(last).startswith('{"n": ') and [p.name for p in last.parent.iterdir()] == ["russell-volume.txt"]
     print("ok")
