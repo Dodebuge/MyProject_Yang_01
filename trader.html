@@ -157,6 +157,15 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); vertical-align: top; }
   </section>
 
   <section class="card">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;justify-content:space-between">
+      <h2>매수 내역 <span class="sub" id="hist-sum"></span></h2>
+      <button id="csv">CSV 저장</button>
+    </div>
+    <p class="sub">체결된 매수를 날짜와 상관없이 남깁니다 (최근 500건). 손익은 수수료·세금 전 평균 체결가 기준입니다.</p>
+    <div class="table" id="history"></div>
+  </section>
+
+  <section class="card">
     <h2>기록</h2>
     <ul class="log" id="log"></ul>
   </section>
@@ -238,9 +247,39 @@ function render() {
           <td>${esc(p.reason || "")}${p.note ? `<div class="sub">${esc(p.note)}</div>` : ""}</td>
           <td class="sub">${esc((p.closed || p.opened || "").slice(11, 19))}</td></tr>`;
       }).join("")}</tbody></table>` : `<p class="sub">오늘 매매가 없습니다.</p>`;
+  renderHistory(S.history || []);
   $("#log").innerHTML = S.log.map(l => `<li><span class="when">${esc(l.at.slice(5))}</span><span class="tag">${esc(MK[l.market] || "전체")}</span> ${esc(l.text)}</li>`).join("")
     || `<li class="sub">기록이 없습니다.</li>`;
 }
+
+// 매수 내역 (체결된 매수, 날짜와 상관없이)
+const HIST_COLS = [["bought", "매수 체결"], ["market", "시장"], ["symbol", "종목번호"], ["name", "종목"], ["source", "출처"], ["qty", "수량"],
+  ["avg", "평균 체결가"], ["amount", "매수금액"], ["status", "상태"], ["sell_avg", "매도가"], ["pnl", "손익(%)"], ["pnlAmount", "손익금액"], ["reason", "매도 사유"], ["closed", "매도 시각"]];
+function renderHistory(h) {
+  const sum = m => h.filter(x => x.market === m && x.pnlAmount != null).reduce((a, x) => a + x.pnlAmount, 0);
+  $("#hist-sum").textContent = h.length ? `${fmt(h.length)}건 · 청산 손익 국내 ${money("KR", sum("KR"))}, 미국 ${money("US", sum("US"))}` : "";
+  $("#history").innerHTML = h.length ? `<table><thead><tr><th>매수 체결</th><th>시장</th><th>종목</th><th>출처</th><th class="num">수량</th>
+      <th class="num">평균 체결가</th><th class="num">매수금액</th><th>상태</th><th class="num">매도가</th><th class="num">손익</th><th>매도 사유</th></tr></thead><tbody>
+      ${h.map(x => { const dp = x.market === "US" ? 2 : 0, cls = x.pnl > 0 ? "up" : x.pnl < 0 ? "down" : "";
+        return `<tr><td class="sub">${esc(x.bought)}</td><td>${MK[x.market]}</td><td><b>${esc(x.name)}</b><span class="code">${esc(x.symbol)}</span></td><td>${esc(x.source)}</td>
+          <td class="num">${fmt(x.qty, x.market === "US" ? 4 : 0)}</td><td class="num">${fmt(x.avg, dp)}</td><td class="num">${money(x.market, x.amount || x.est)}</td>
+          <td>${ST[x.status] || esc(x.status)}</td><td class="num">${x.sell_avg ? fmt(x.sell_avg, dp) : "—"}</td>
+          <td class="num ${cls}">${x.pnl == null ? "—" : `${x.pnl > 0 ? "+" : ""}${fmt(x.pnl, 2)}% · ${x.pnlAmount > 0 ? "+" : ""}${money(x.market, x.pnlAmount)}`}</td>
+          <td>${esc(x.reason || "")}${x.closed ? `<div class="sub">${esc(x.closed)}</div>` : ""}</td></tr>`; }).join("")}</tbody></table>`
+    : `<p class="sub">아직 체결된 매수가 없습니다.</p>`;
+}
+$("#csv").onclick = () => {
+  const h = S?.history || [];
+  if (!h.length) return alert("저장할 매수 내역이 없습니다.");
+  const cell = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [HIST_COLS.map(c => c[1]).join(","), ...h.map(x => HIST_COLS.map(([k]) => cell(k === "market" ? MK[x.market] : k === "status" ? (ST[x.status] || x.status)
+    : k === "amount" ? (x.amount || x.est) : x[k])).join(","))];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }));  // 엑셀이 한글을 읽게 BOM
+  a.download = `toss-trades-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
 
 // 토스 계좌 금액 (원화·달러 따로). 서버가 30초마다 받아 둔 값이고, 자동매매가 산 종목만이 아니라 계좌 전체입니다.
 function renderAccount(a) {

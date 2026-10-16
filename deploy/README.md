@@ -172,6 +172,13 @@ sudo ufw allow 8080/tcp                                                         
 
 ## 확인과 문제 해결
 
+토스 자동매매 주문 로그 (주문 요청·접수·거절·재전송·취소·체결):
+
+```bash
+tail -f /opt/kb_openapi_sample/trader.log                        # 데이터 폴더의 자동매매 로그
+journalctl -u kb-openapi-spring -f | grep --line-buffered 자동매매  # 서비스 로그에서 자동매매 줄만
+```
+
 | 증상 | 확인 |
 |---|---|
 | 화면에 "Python 서버에 연결할 수 없습니다" (502) | `systemctl status kb-openapi`, `journalctl -u kb-openapi -f` |

@@ -79,7 +79,7 @@ final class Trader {
             + " symbol TEXT NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL,"  // BUYING OPEN SELLING CLOSED FAILED
             + " order_qty REAL, est REAL, qty REAL, avg REAL, amount REAL,"
             + " buy_client TEXT, buy_order TEXT, buy_sent INTEGER, sell_client TEXT, sell_order TEXT, sell_sent INTEGER,"
-            + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, UNIQUE (market, day, symbol));"
+            + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, bought TEXT, UNIQUE (market, day, symbol));"
             + "CREATE TABLE IF NOT EXISTS trader_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, market TEXT NOT NULL, text TEXT NOT NULL);"
             + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL)";
 
@@ -92,6 +92,7 @@ final class Trader {
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile boolean leader;
+    private volatile boolean migrated;  // 예전 trader.db에 새 칸 추가 (프로세스당 한 번)
     private volatile Map<String, Object> account;  // 토스 계좌 원화·달러 (accountSummary, ACCOUNT_SECONDS마다)
     private volatile long accountAt;
     private ScheduledExecutorService timer;
@@ -498,12 +499,12 @@ final class Trader {
         }
         log(m, "매수 주문: " + c[1] + "(" + c[0] + ") " + qty + "주 · 약 " + round(est) + " · " + c[2]);
         Map<String, Object> p = rows("SELECT * FROM trader_position WHERE buy_client = ?", client).get(0);
-        sendBuy(m, p);
+        sendBuy(m, p, false);
     }
 
-    private void sendBuy(String m, Map<String, Object> p) throws SQLException {
+    private void sendBuy(String m, Map<String, Object> p, boolean resend) throws SQLException {
         try {
-            Map<String, Object> r = order(Values.str(p.get("buy_client")), Values.str(p.get("symbol")), "BUY", Values.num(p.get("order_qty")));
+            Map<String, Object> r = order(m, Values.str(p.get("buy_client")), Values.str(p.get("symbol")), "BUY", Values.num(p.get("order_qty")), resend);
             update(p, "buy_order", Values.str(r.get("orderId")));
         } catch (TossClient.TossApiException e) {
             if (e.status == 409 || e.status >= 500) {
@@ -536,12 +537,12 @@ final class Trader {
         update(p, "sell_sent", System.currentTimeMillis());
         update(p, "reason", reason);
         log(m, "매도 주문: " + p.get("name") + "(" + p.get("symbol") + ") " + fmtQty(Math.min(qty, sellable)) + "주 · " + reason);
-        sendSell(m, rows("SELECT * FROM trader_position WHERE id = ?", p.get("id")).get(0));
+        sendSell(m, rows("SELECT * FROM trader_position WHERE id = ?", p.get("id")).get(0), false);
     }
 
-    private void sendSell(String m, Map<String, Object> p) throws SQLException {
+    private void sendSell(String m, Map<String, Object> p, boolean resend) throws SQLException {
         try {
-            Map<String, Object> r = order(Values.str(p.get("sell_client")), Values.str(p.get("symbol")), "SELL", Values.num(p.get("sell_qty")));
+            Map<String, Object> r = order(m, Values.str(p.get("sell_client")), Values.str(p.get("symbol")), "SELL", Values.num(p.get("sell_qty")), resend);
             update(p, "sell_order", Values.str(r.get("orderId")));
         } catch (TossClient.TossApiException e) {
             if (e.status == 409 || e.status >= 500) {
@@ -556,21 +557,37 @@ final class Trader {
         }
     }
 
-    private Map<String, Object> order(String client, String symbol, String side, double qty) throws IOException {
+    /** 시장가 주문. 보내기 전·후를 터미널과 trader.log에 남깁니다 (resend: 응답을 못 받았던 주문을 같은 키로 다시 보냄). */
+    private Map<String, Object> order(String m, String client, String symbol, String side, double qty, boolean resend) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("clientOrderId", client);
         body.put("symbol", symbol);
         body.put("side", side);
         body.put("orderType", "MARKET");
         body.put("quantity", fmtQty(qty));
-        return map(api.post("/api/v1/orders", body, true));
+        String what = ("BUY".equals(side) ? "매수" : "매도") + " " + symbol + " " + fmtQty(qty) + "주 시장가 (키 " + client + ")";
+        trace(m, (resend ? "주문 다시 보냄 (응답을 못 받았던 주문, 같은 키라 두 번 체결 안 됨): " : "주문 요청: ") + what);
+        try {
+            Map<String, Object> r = map(api.post("/api/v1/orders", body, true));
+            trace(m, "주문 접수: " + what + " -> 주문번호 " + r.get("orderId"));
+            return r;
+        } catch (TossClient.TossApiException e) {
+            trace(m, "주문 거절: " + what + " -> " + e.getMessage()
+                    + (e.status == 409 || e.status >= 500 ? " (잠시 뒤 같은 키로 다시)" : ""));
+            throw e;
+        } catch (IOException e) {
+            trace(m, "주문 응답 없음: " + what + " -> " + e.getClass().getSimpleName() + ": " + e.getMessage() + " (다음 확인에 같은 키로 다시)");
+            throw e;
+        }
     }
 
     private void cancel(String m, Map<String, Object> p) throws SQLException {
+        trace(m, "취소 요청: 매수 " + p.get("symbol") + " 주문번호 " + p.get("buy_order"));
         try {
             api.post("/api/v1/orders/" + p.get("buy_order") + "/cancel", new LinkedHashMap<>(), true);
             log(m, "미체결 매수 취소: " + p.get("name") + "(" + p.get("symbol") + ")");
         } catch (IOException e) {
+            trace(m, "취소 결과: " + e.getMessage());
             if (!(e instanceof TossClient.TossApiException) || ((TossClient.TossApiException) e).status >= 500) {
                 return;  // 다음 확인에 다시
             }
@@ -590,9 +607,9 @@ final class Trader {
                     update(p, "status", buying ? "FAILED" : "OPEN");
                     log(m, "주문 확인 실패: " + p.get("name") + "(" + p.get("symbol") + ") 토스 앱에서 확인하세요");
                 } else if (buying) {
-                    sendBuy(m, p);
+                    sendBuy(m, p, true);
                 } else {
-                    sendSell(m, p);
+                    sendSell(m, p, true);
                 }
                 continue;
             }
@@ -617,6 +634,7 @@ final class Trader {
                 if (done) {
                     if (filled > 0) {
                         update(p, "est", amount > 0 ? amount : filled * avg);
+                        update(p, "bought", filledAt(ex.get("filledAt")));  // 매수 내역: 체결 시각
                         update(p, "status", "OPEN");
                         log(m, "매수 체결: " + p.get("name") + "(" + p.get("symbol") + ") " + fmtQty(filled) + "주 · 평균 " + avg);
                     } else {
@@ -685,6 +703,15 @@ final class Trader {
                 : new Session(day, null, null, System.currentTimeMillis());
         sessions.put(m, s);
         return s;
+    }
+
+    /** 토스 체결 시각(ISO, KST) -> '2026-10-19 09:00:05'. 없으면 지금 */
+    private String filledAt(Object iso) {
+        try {
+            return zoned(iso).format(AT);
+        } catch (RuntimeException e) {
+            return now().format(AT);
+        }
     }
 
     private static ZonedDateTime zoned(Object iso) {
@@ -801,6 +828,17 @@ final class Trader {
             }
             out.put("markets", ms);
             out.put("positions", positions);
+            // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
+            List<Map<String, Object>> history = rows("SELECT id, market, day, symbol, name, source, status, qty, avg, amount, est, bought,"
+                    + " sell_qty, sell_avg, reason, closed FROM trader_position WHERE bought IS NOT NULL ORDER BY bought DESC, id DESC LIMIT 500");
+            for (Map<String, Object> h : history) {
+                double avg = Values.num(h.get("avg"));
+                double sellAvg = Values.num(h.get("sell_avg"));
+                boolean closed = "CLOSED".equals(h.get("status")) && sellAvg > 0 && avg > 0;
+                h.put("pnl", closed ? (Object) ((sellAvg / avg - 1) * 100) : null);
+                h.put("pnlAmount", closed ? (Object) ((sellAvg - avg) * Values.num(h.get("sell_qty") != null ? h.get("sell_qty") : h.get("qty"))) : null);
+            }
+            out.put("history", history);
             out.put("log", rows("SELECT at, market, text FROM trader_log ORDER BY id DESC LIMIT 100"));
         } catch (SQLException e) {
             throw new IOException("trader.db 오류: " + e.getMessage(), e);
@@ -855,8 +893,9 @@ final class Trader {
         }
     }
 
+    /** 화면 '기록'(trader.db)에도 남기는 줄. 터미널·trader.log에도 같이 */
     void log(String m, String text) {
-        System.out.println("[자동매매] " + m + " " + text);
+        trace(m, text);
         try (Connection con = connect();
              PreparedStatement ps = con.prepareStatement("INSERT INTO trader_log (at, market, text) VALUES (?, ?, ?)");
              PreparedStatement prune = con.prepareStatement("DELETE FROM trader_log WHERE id <= (SELECT MAX(id) - 2000 FROM trader_log)")) {
@@ -868,6 +907,33 @@ final class Trader {
         } catch (SQLException e) {
             System.out.println("[자동매매] 기록 실패: " + e.getMessage());
         }
+    }
+
+    /**
+     * 터미널(서버 로그, systemd면 journalctl)과 데이터 폴더의 trader.log에 한 줄. 주문 요청·접수·거절·재전송·취소처럼 자세한 줄은
+     * 화면 '기록'에는 넣지 않고 여기만 남깁니다. trader.log는 5MB가 넘으면 trader.log.1로 넘기고 새로 씁니다.
+     *   tail -f trader.log        # 서버 폴더에서 실시간으로 보기
+     */
+    void trace(String m, String text) {
+        String line = "[자동매매] " + now().format(AT) + " " + ("ALL".equals(m) ? "전체" : "KR".equals(m) ? "국내" : "미국") + " " + text;
+        System.out.println(line);
+        synchronized (Trader.class) {
+            try {
+                Path file = logFile();
+                if (java.nio.file.Files.exists(file) && java.nio.file.Files.size(file) > 5_000_000) {
+                    java.nio.file.Files.move(file, file.resolveSibling("trader.log.1"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                java.nio.file.Files.write(file, (line + System.lineSeparator()).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+            } catch (IOException e) {
+                System.out.println("[자동매매] trader.log 쓰기 실패: " + e.getMessage());
+            }
+        }
+    }
+
+    /** trader.db와 같은 폴더의 trader.log */
+    Path logFile() {
+        return db.toAbsolutePath().resolveSibling("trader.log");
     }
 
     private List<Map<String, Object>> rows(String sql, Object... args) throws SQLException {
@@ -901,6 +967,19 @@ final class Trader {
             st.execute("PRAGMA busy_timeout = 30000");
             for (String sql : SCHEMA.split(";")) {
                 st.execute(sql);
+            }
+            if (!migrated) {  // 이 기능 전에 만든 trader.db: 매수 체결 시각 칸 추가
+                boolean has = false;
+                try (ResultSet rs = st.executeQuery("PRAGMA table_info(trader_position)")) {
+                    while (rs.next()) {
+                        has |= "bought".equals(rs.getString("name"));
+                    }
+                }
+                if (!has) {
+                    st.execute("ALTER TABLE trader_position ADD COLUMN bought TEXT");
+                    st.execute("UPDATE trader_position SET bought = opened WHERE avg > 0");  // 예전 체결분은 주문 시각으로
+                }
+                migrated = true;
             }
         } catch (SQLException e) {
             c.close();

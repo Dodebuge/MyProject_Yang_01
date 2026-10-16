@@ -33,6 +33,7 @@ class TraderTest {
         boolean krOpen = true;
         boolean fillNow = true;
         int failNextPosts;  // 주문은 접수하되 응답을 못 받은 것처럼 IOException
+        boolean rejectBuys;  // 매수를 주문 가능 금액 부족으로 거절
 
         @Override
         public Object get(String path, Map<String, String> params, boolean account) throws IOException {
@@ -82,6 +83,9 @@ class TraderTest {
                 Map<String, Object> o = orders.get(path.split("/")[4]);
                 o.put("status", "CANCELED");
                 return Map.of();
+            }
+            if (rejectBuys && "BUY".equals(body.get("side"))) {
+                throw new TossClient.TossApiException(422, "insufficient-buying-power", "주문 가능 금액이 부족합니다.", "req-1");
             }
             String client = (String) body.get("clientOrderId");
             String id = byClient.get(client);
@@ -320,6 +324,69 @@ class TraderTest {
         assertEquals(820.5, usd.get("stock"));
         assertEquals(20.5, usd.get("profit"));
         assertEquals(1, usd.get("count"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void keepsBuyHistoryWithFillTimeAndProfit() throws Exception {
+        config(true, 1_000_000, 5, false);
+        toss.price.put("000660", 300_000.0);  // 종목당 20만 원보다 비싸 실패 -> 내역에 없음
+        pick("005930");
+        pick("000660");
+        trader.tick();
+        trader.tick();
+        toss.price.put("005930", 72_100.0);
+        trader.tick();
+        trader.tick();
+        List<Map<String, Object>> h = (List<Map<String, Object>>) trader.status().get("history");
+        assertEquals(1, h.size());
+        Map<String, Object> x = h.get(0);
+        assertEquals("005930", x.get("symbol"));
+        assertEquals("2026-10-19 09:01:00", x.get("bought"));  // 토스 체결 시각이 없으면 지금
+        assertEquals("CLOSED", x.get("status"));
+        assertEquals(3.0, (Double) x.get("pnl"), 1e-9);
+        assertEquals(4_200.0, (Double) x.get("pnlAmount"), 1e-9);  // (72,100 - 70,000) × 2주
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void upgradesOldDbAndKeepsEarlierBuys() throws Exception {
+        Path old = Files.createTempDirectory("trader-old").resolve("trader.db");
+        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + old);
+             java.sql.Statement st = c.createStatement()) {  // 매수 내역 기능 전의 trader_position (bought 칸 없음)
+            st.execute("CREATE TABLE trader_position (id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT NOT NULL, day TEXT NOT NULL,"
+                    + " symbol TEXT NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL,"
+                    + " order_qty REAL, est REAL, qty REAL, avg REAL, amount REAL,"
+                    + " buy_client TEXT, buy_order TEXT, buy_sent INTEGER, sell_client TEXT, sell_order TEXT, sell_sent INTEGER,"
+                    + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, UNIQUE (market, day, symbol))");
+            st.execute("INSERT INTO trader_position (market, day, symbol, name, source, status, qty, avg, est, opened)"
+                    + " VALUES ('KR', '2026-10-16', '005930', '삼성전자', '직접 고름', 'CLOSED', 2, 70000, 140000, '2026-10-16 09:00:05')");
+            st.execute("INSERT INTO trader_position (market, day, symbol, name, source, status, qty, est, opened)"
+                    + " VALUES ('KR', '2026-10-16', '000660', 'SK하이닉스', '직접 고름', 'FAILED', 0, 0, '2026-10-16 09:00:05')");
+        }
+        List<Map<String, Object>> h = (List<Map<String, Object>>) new Trader(toss, old, () -> now).status().get("history");
+        assertEquals(1, h.size());
+        assertEquals("2026-10-16 09:00:05", h.get(0).get("bought"));
+    }
+
+    @Test
+    void writesEveryOrderAttemptToTraderLog() throws Exception {
+        config(true, 1_000_000, 5, false);
+        pick("005930");
+        toss.failNextPosts = 1;
+        trader.tick();  // 요청 -> 응답 없음
+        trader.tick();  // 같은 키로 다시 -> 접수
+        toss.rejectBuys = true;
+        toss.price.put("000660", 100_000.0);
+        pick("000660");
+        trader.tick();  // 거절
+        String log = new String(Files.readAllBytes(trader.logFile()), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(log.contains("국내 주문 요청: 매수 005930 2주 시장가"), log);
+        assertTrue(log.contains("주문 응답 없음: 매수 005930 2주"), log);
+        assertTrue(log.contains("주문 다시 보냄 (응답을 못 받았던 주문, 같은 키라 두 번 체결 안 됨): 매수 005930 2주"), log);
+        assertTrue(log.contains("주문 접수: 매수 005930 2주 시장가") && log.contains("-> 주문번호 o1"), log);
+        assertTrue(log.contains("주문 거절: 매수 000660 2주 시장가") && log.contains("insufficient-buying-power"), log);
+        assertTrue(log.contains("[자동매매] 2026-10-19 09:01:00 국내 매수 체결: 005930(005930) 2주"), log);
     }
 
     @Test
