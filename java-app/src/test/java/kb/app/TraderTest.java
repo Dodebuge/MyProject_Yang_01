@@ -390,6 +390,33 @@ class TraderTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void explainsWhyNothingIsBoughtOncePerChange() throws Exception {
+        config(true, 1_000_000, 5, false);
+        trader.tick();
+        trader.tick();
+        Map<String, Object> kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
+        assertEquals("매매 중 · 매수 대상 없음: 직접 고른 국내 종목이 없고 시그널 자동 매수가 꺼져 있음", kr.get("phase"));
+        pick("005930");
+        trader.tick();
+        trader.tick();
+        String log = new String(Files.readAllBytes(trader.logFile()), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(1, log.split("상태: 매매 중 · 매수 대상 없음").length - 1, "같은 이유는 한 번만 남김\n" + log);
+        assertTrue(log.contains("주문 담당: 이 서버"), log);
+        assertTrue(log.contains("상태: 매매 중 · 오늘 매수 대상 1종목을 모두 처리함"), log);
+        toss.price.put("000660", 100_000.0);
+        config(true, 100_000, 1, false);
+        pick("000660");
+        trader.tick();
+        kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
+        assertEquals("매매 중 · 오늘 최대 종목 수(1) 도달, 남은 매수 대상은 사지 않음", kr.get("phase"));
+        now = ZonedDateTime.of(2026, 10, 19, 8, 30, 0, 0, SEOUL);
+        trader.tick();
+        kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
+        assertEquals("장 시작 전 (정규장 10-19 09:00 시작, 한국 시간)", kr.get("phase"));
+    }
+
+    @Test
     void rejectsBadSettings() {
         assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config", Map.of("takeProfit", 0))));
         assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pick", "market", "KR", "symbol", "12")));

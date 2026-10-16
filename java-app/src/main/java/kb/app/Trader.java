@@ -91,6 +91,7 @@ final class Trader {
     private final Map<String, Double> lastPrice = new ConcurrentHashMap<>();   // "KR:005930" -> 현재가 (화면 손익 표시용)
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
+    private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
     private volatile boolean leader;
     private volatile boolean migrated;  // 예전 trader.db에 새 칸 추가 (프로세스당 한 번)
     private volatile Map<String, Object> account;  // 토스 계좌 원화·달러 (accountSummary, ACCOUNT_SECONDS마다)
@@ -355,6 +356,10 @@ final class Trader {
             log("ALL", "trader.db 오류: " + e.getMessage());
             return;
         }
+        if (!Boolean.valueOf(leader).equals(lastLeader)) {
+            lastLeader = leader;
+            log("ALL", leader ? "주문 담당: 이 서버 (5초마다 확인)" : "다른 서버가 주문을 맡고 있어 이 서버는 기다림 (같은 trader.db 임대)");
+        }
         if (!leader) {
             return;
         }
@@ -384,21 +389,21 @@ final class Trader {
         Session s = session(m);
         ZonedDateTime now = now();
         if (s.open == null) {
-            phase.put(m, "휴장");
+            setPhase(m, "휴장");
             return;
         }
         ZonedDateTime cutoff = s.close.minusMinutes(CUTOFF_MINUTES);
         if (now.isBefore(s.open)) {
-            phase.put(m, "장 시작 전");
+            setPhase(m, "장 시작 전 (정규장 " + s.open.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")) + " 시작, 한국 시간)");
             return;
         }
         if (!now.isBefore(s.close)) {
-            phase.put(m, "장 마감");
+            setPhase(m, "장 마감");
             return;
         }
         List<Map<String, Object>> open = positions(m, "status = 'OPEN'");
         if (!now.isBefore(cutoff)) {  // 마감 10분 전: 미체결 매수 취소, 전량 매도, 새 매수 없음
-            phase.put(m, "마감 정리");
+            setPhase(m, "마감 정리 (새 매수 없음, 남은 종목 전량 매도)");
             for (Map<String, Object> p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
                 cancel(m, p);
             }
@@ -408,7 +413,9 @@ final class Trader {
             return;
         }
         boolean halted = getFlag("halt:" + m + ":" + s.day) != null;
-        phase.put(m, halted ? "매수 중단 (전량 매도 요청)" : Boolean.TRUE.equals(cfg.get("enabled")) ? "매매 중" : "꺼짐 (보유분 익절·손절만)");
+        if (halted || !Boolean.TRUE.equals(cfg.get("enabled"))) {  // 켜져 있으면 아래에서 매수 상황(대기 이유)으로 정함
+            setPhase(m, halted ? "매수 중단 (전량 매도 요청)" : "꺼짐 (새 매수 없음, 보유분 익절·손절만)");
+        }
         if (halted) {
             for (Map<String, Object> p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
                 cancel(m, p);
@@ -455,6 +462,13 @@ final class Trader {
                 candidates.add(new String[]{Values.str(r.get("symbol")), Values.str(r.get("name")), "시그널"});
             }
         }
+        String name = "KR".equals(m) ? "국내" : "미국";
+        if (candidates.isEmpty()) {  // 왜 사지 않는지 화면·로그에 (바뀔 때 한 번)
+            setPhase(m, "매매 중 · 매수 대상 없음: 직접 고른 " + name + " 종목이 없고 "
+                    + (Boolean.TRUE.equals(mc.get("auto")) ? "오늘 " + name + " 시그널 알림이 아직 없음" : "시그널 자동 매수가 꺼져 있음"));
+            return;
+        }
+        String waiting = "매매 중 · 오늘 매수 대상 " + candidates.size() + "종목을 모두 처리함 (같은 종목은 하루 한 번)";
         for (String[] c : candidates) {
             if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
                 continue;  // 오늘 이미 샀거나 시도함
@@ -462,11 +476,14 @@ final class Trader {
             List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'", m, s.day);
             double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
             if (today.size() >= maxStocks || spent >= budget) {
+                waiting = "매매 중 · " + (today.size() >= maxStocks ? "오늘 최대 종목 수(" + maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
+                        + ", 남은 매수 대상은 사지 않음";
                 break;
             }
             double amount = Math.min(budget / maxStocks, budget - spent);
             Double price = prices(m, c[0]).get(c[0]);
             if (price == null || price <= 0) {
+                waiting = "매매 중 · " + c[1] + "(" + c[0] + ") 현재가를 받지 못해 다시 시도";
                 continue;  // 현재가를 못 받음: 다음 확인에 다시
             }
             long qty = (long) Math.floor(amount / price);
@@ -475,6 +492,14 @@ final class Trader {
                 continue;
             }
             buy(m, s.day, c, qty, qty * price);
+        }
+        setPhase(m, waiting);
+    }
+
+    /** 시장 단계 (화면에 표시). 바뀔 때만 기록·터미널·trader.log에 한 줄 남겨 '왜 주문이 없는지' 알 수 있게 */
+    private void setPhase(String m, String text) {
+        if (!text.equals(phase.put(m, text))) {
+            log(m, "상태: " + text);
         }
     }
 
