@@ -67,7 +67,7 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: left; p
 th button { border: 0; padding: 0; background: none; color: inherit; font: inherit; }
 th button[aria-pressed="true"] { color: var(--ink); font-weight: 650; }
 td { padding: 7px 6px; border-top: 1px solid var(--grid); }
-tbody tr { cursor: pointer; }
+tbody tr { cursor: default; user-select: none; }  /* 더블클릭 때 글자가 선택되지 않게 */
 tbody tr:hover { background: var(--hover); }
 .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .code { color: var(--muted); font-size: 11px; margin-left: 4px; }
@@ -152,7 +152,7 @@ const SIG_NOTE = "기술적 시그널 태그(▲ 매수 쪽, ▼ 매도 쪽)와 
 const VIEWS = {
   intraday: {
     url: () => `api/${M().api}-intraday?${new URLSearchParams({ date: $("#date").value, at: $("#at").value })}`,
-    note: () => `서버가 ${M().every} ${M().name} 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다.${V.market === "russell" ? " KB 미국 시세는 15분 지연입니다." : ""} ${SIG_NOTE} 행을 누르면 차트가 열립니다.`,
+    note: () => `서버가 ${M().every} ${M().name} 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다.${V.market === "russell" ? " KB 미국 시세는 15분 지연입니다." : ""} ${SIG_NOTE} 행을 더블클릭하면 차트가 열립니다.`,
     cols: [
       ["name", "종목", false, false, s => nameCell(s)],
       ["score", "시그널", true, false, s => scoreCell(s)],
@@ -167,7 +167,7 @@ const VIEWS = {
   },
   weekly: {
     url: refresh => `api/${M().api}-volume${refresh ? "?refresh=1" : ""}`,
-    note: () => `이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 ${M().weekly}. ${SIG_NOTE} 행을 누르면 차트가 열립니다.`,
+    note: () => `이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 ${M().weekly}. ${SIG_NOTE} 행을 더블클릭하면 차트가 열립니다.`,
     cols: [
       ["name", "종목", false, false, s => nameCell(s)],
       ["score", "시그널", true, false, s => scoreCell(s)],
@@ -248,7 +248,7 @@ function render() {
   $("#count").textContent = `${fmt(rows.length)}종목`;
   $("#body").innerHTML = rows.length ? `<div class="table"><table>
     <thead><tr>${view.cols.map(([key, title, num, sm]) => `<th class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}"><button data-k="${key}" aria-pressed="${key === k}">${title}${key === k ? (V.desc ? " ▼" : " ▲") : ""}</button></th>`).join("")}</tr></thead>
-    <tbody>${rows.map(s => `<tr data-code="${esc(s.code)}" title="차트 열기">${view.cols.map(([, , num, sm, cell]) =>
+    <tbody>${rows.map(s => `<tr data-code="${esc(s.code)}" title="더블클릭하면 차트 열기">${view.cols.map(([, , num, sm, cell]) =>
       `<td class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}">${cell(s)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
     : `<div class="empty">조건에 맞는 종목이 없습니다.</div>`;
 }
@@ -320,6 +320,9 @@ document.querySelectorAll("#markets button").forEach(b => b.onclick = () => setV
 $("#body").onclick = e => {
   const th = e.target.closest("th button");
   if (th) { const k = th.dataset.k; V.desc = k === V.sort[V.view] ? !V.desc : k !== "name"; V.sort[V.view] = k; return render(); }
+};
+// 행을 더블클릭하면 그 종목 차트로 이동 (한 번 클릭은 태그를 읽거나 글자를 고를 때 실수로 넘어가지 않게)
+$("#body").ondblclick = e => {
   const tr = e.target.closest("tbody tr");
   if (tr) location.href = `chart?market=${M().chart}&code=${encodeURIComponent(tr.dataset.code)}`;
 };
