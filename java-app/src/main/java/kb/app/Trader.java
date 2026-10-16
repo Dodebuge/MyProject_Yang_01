@@ -715,10 +715,11 @@ final class Trader {
     @SuppressWarnings("unchecked")
     Session session(String m) throws IOException {
         Session s = sessions.get(m);
-        if (s != null && System.currentTimeMillis() - s.fetchedAt < 600_000) {
+        if (s != null && System.currentTimeMillis() - s.fetchedAt < 600_000 && s.day.equals(localDate(m))) {  // 현지 날짜가 바뀌면 바로 다시
             return s;
         }
-        Map<String, Object> cal = map(api.get("/api/v1/market-calendar/" + m, null, false));
+        // date: 그 시장의 현지 날짜. 안 넘기면 토스가 한국 날짜로 답해서, 한국 토요일 새벽(뉴욕 금요일 장중)에 미국을 휴장으로 판단했음
+        Map<String, Object> cal = map(api.get("/api/v1/market-calendar/" + m, param("date", localDate(m)), false));
         Map<String, Object> today = map(cal.get("today"));
         Object regular = "KR".equals(m) ? (today.get("integrated") instanceof Map ? map(today.get("integrated")).get("regularMarket") : null)
                 : today.get("regularMarket");
@@ -743,12 +744,14 @@ final class Trader {
         return OffsetDateTime.parse(Values.str(iso)).atZoneSameInstant(SEOUL);
     }
 
-    /** 시장의 오늘 (정규장 정보가 있으면 그 날짜, 없으면 국내는 한국 날짜, 미국은 뉴욕 날짜). */
+    /** 시장의 오늘 (정규장 정보가 있으면 그 날짜, 없으면 현지 날짜). */
     private String todayKey(String m) {
         Session s = sessions.get(m);
-        if (s != null) {
-            return s.day;
-        }
+        return s != null ? s.day : localDate(m);
+    }
+
+    /** 현지 날짜: 국내는 한국, 미국은 뉴욕 (서머타임 자동). 예: 한국 10-17 02:44 -> 미국 2026-10-16 */
+    String localDate(String m) {
         return now().withZoneSameInstant("KR".equals(m) ? SEOUL : ZoneId.of("America/New_York")).toLocalDate().toString();
     }
 

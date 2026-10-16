@@ -37,17 +37,20 @@ class TraderTest {
 
         @Override
         public Object get(String path, Map<String, String> params, boolean account) throws IOException {
+            // 토스처럼 date(현지 날짜)를 받아 그날 정보를 줌. 날짜를 안 넘기면 한국 날짜로 답하는 것까지 흉내 (2026-10-19 월요일만 영업일)
+            String date = params != null && params.containsKey("date") ? params.get("date") : "2026-10-20";
             if (path.equals("/api/v1/market-calendar/KR")) {
                 Map<String, Object> reg = Map.of("startTime", "2026-10-19T09:00:00+09:00", "endTime", "2026-10-19T15:30:00+09:00");
                 Map<String, Object> today = new HashMap<>();
-                today.put("date", "2026-10-19");
-                today.put("integrated", krOpen ? Map.of("regularMarket", reg) : null);
+                today.put("date", date);
+                today.put("integrated", krOpen && date.equals("2026-10-19") ? Map.of("regularMarket", reg) : null);
                 return Map.of("today", today);
             }
             if (path.equals("/api/v1/market-calendar/US")) {
                 Map<String, Object> today = new HashMap<>();
-                today.put("date", "2026-10-19");
-                today.put("regularMarket", Map.of("startTime", "2026-10-19T22:30:00+09:00", "endTime", "2026-10-20T05:00:00+09:00"));
+                today.put("date", date);
+                today.put("regularMarket", date.equals("2026-10-19")
+                        ? Map.of("startTime", "2026-10-19T22:30:00+09:00", "endTime", "2026-10-20T05:00:00+09:00") : null);
                 return Map.of("today", today);
             }
             if (path.equals("/api/v1/prices")) {
@@ -414,6 +417,29 @@ class TraderTest {
         trader.tick();
         kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
         assertEquals("장 시작 전 (정규장 10-19 09:00 시작, 한국 시간)", kr.get("phase"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void usesNewYorkDateForUsMarket() throws Exception {
+        // 한국 화요일 새벽 02:00 = 뉴욕 월요일 13:00 (장중). 한국 날짜로 물으면 휴장이라고 잘못 판단했던 경우
+        now = ZonedDateTime.of(2026, 10, 20, 2, 0, 0, 0, SEOUL);
+        Map<String, Object> us = new HashMap<>();
+        us.put("budget", 500.0);
+        us.put("maxStocks", 1);
+        us.put("auto", false);
+        Map<String, Object> c = new HashMap<>();
+        c.put("enabled", true);
+        c.put("US", us);
+        trader.command(Map.of("action", "config", "config", c));
+        trader.command(Map.of("action", "pick", "market", "US", "symbol", "AAPL", "name", "Apple"));
+        toss.price.put("AAPL", 230.0);
+        trader.tick();
+        Map<String, Object> m = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("US");
+        assertEquals("2026-10-19", m.get("day"));
+        assertEquals(List.of("BUY AAPL 2"), toss.sides());
+        Map<String, Object> kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
+        assertEquals("휴장", kr.get("phase"), "국내는 한국 날짜(10-20)로 물어 휴장");
     }
 
     @Test
