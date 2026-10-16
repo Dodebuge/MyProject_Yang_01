@@ -36,7 +36,6 @@ final class Russell {
     private static final String[] EXCHANGES = {"NAS", "NYS", "AMX"};
     private static final Pattern TICKER = Pattern.compile("[A-Z][A-Z0-9.]{0,7}");
     private static final int CACHE_SECONDS = 600;  // 2,000번 가까이 부르는 조회라 10분 동안은 다시 부르지 않음
-    private static final int DAYS = 15;            // 이번 주 + 전주 (휴장일이 끼어도 넉넉하게)
     private static final int WORKERS = 8;
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -237,11 +236,11 @@ final class Russell {
         return resolve(item, (x, n) -> {
             List<Map<String, Object>> rows = KBClient.records(client.call("GSC10060", Heatmap.body("chrt_clsf", "3",  // 3 = 일봉
                     "mdfy_stk_prc_use_f", "", "is_cd", n, "clsf", "1", "srch_strt_dy", LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE),
-                    "rcrd_c", String.valueOf(DAYS), "bndl", "", "krx_cd", x)), "out2");
+                    "rcrd_c", Chart.CHART_DAYS, "bndl", "", "krx_cd", x)), "out2");
             if (rows.isEmpty()) {
                 return null;
             }
-            if (!Volume.sane(rows)) {
+            if (!Volume.sane(Volume.recent(rows))) {  // 주간 비교에 쓰는 최근 행만 엄격히
                 throw new Shifted();
             }
             return rows;
@@ -257,7 +256,11 @@ final class Russell {
         client.accessToken();  // 병렬 호출 전에 토큰을 한 번만 발급
         List<Map<String, Object>> stocks = Values.parallel(items, WORKERS, item -> {
             List<Map<String, Object>> rows = candles(item);
-            Map<String, Object> w = rows == null ? null : Volume.weekChange(rows);
+            for (int attempt = 0; attempt < 2 && rows != null && !Volume.whole(rows, "p4"); attempt++) {  // 오래된 행이 깨졌으면 한 번 더
+                List<Map<String, Object>> again = candles(item);
+                rows = again == null ? rows : again;
+            }
+            Map<String, Object> w = rows == null ? null : Volume.weekChange(Volume.recent(rows));
             if (w == null) {
                 return null;
             }
@@ -269,6 +272,7 @@ final class Russell {
             s.put("change", Values.num(last.get("up_dwn_r_p2")));
             s.put("value", Values.lng(last.get("dl_tw_amt")));
             s.putAll(w);
+            s.putAll(Volume.closes(Chart.candles(rows, "p4", 1)));  // 화면의 기술적 시그널 태그용
             return s;
         });
         stocks.removeIf(Objects::isNull);

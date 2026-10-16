@@ -74,6 +74,11 @@ tbody tr:hover { background: var(--hover); }
 .up { color: var(--up); } .down { color: var(--down); }
 .ratio { font-weight: 650; }
 .days { color: var(--muted); font-size: 11px; }
+/* 기술적 시그널 태그 (chart.html과 같은 모양): 매수 쪽 빨강, 매도 쪽 파랑 */
+.sigs { margin-top: 2px; line-height: 1; }
+.sig { display: inline-block; font-size: 11px; line-height: 17px; padding: 0 6px; border-radius: 999px; margin: 2px 4px 0 0; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.sig.buy { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); background: color-mix(in srgb, var(--up) 8%, transparent); }
+.sig.sell { color: var(--down); border-color: color-mix(in srgb, var(--down) 45%, transparent); background: color-mix(in srgb, var(--down) 8%, transparent); }
 @media (max-width: 640px) { .hide-sm { display: none; } }
 .empty { color: var(--muted); padding: 32px 0; text-align: center; }
 .error { border: 1px solid var(--bad); border-radius: 12px; padding: 16px; }
@@ -116,6 +121,7 @@ tbody tr:hover { background: var(--hover); }
     <p class="note" id="note"></p>
   </section>
 </div>
+<script src="signals.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -129,7 +135,7 @@ const usd = n => n >= 1e9 ? "$" + fmt(n / 1e9, 1) + "B" : n >= 1e6 ? "$" + fmt(n
 // 시장별 설정. 러셀 2000의 같은 시각 기록은 뉴욕 시간이라 한국 시간을 함께 보여 줌
 const MARKETS = {
   kosdaq: { title: "코스닥 거래량 증가", api: "kosdaq", name: "코스닥", chart: "kr", dp: 0, money: compact, spac: true, local: "",
-            every: "장중(평일 09:00~15:40) 10분마다", weekly: "코스닥 전 종목 일봉을 조회해 30초 남짓 걸립니다" },
+            every: "장중(평일 09:00~15:40) 10분마다", weekly: "코스닥 전 종목 일봉을 조회해 1분 가까이 걸립니다" },
   russell: { title: "러셀 2000 거래량 증가", api: "russell", name: "러셀 2000", chart: "us", dp: 2, money: usd, spac: false, local: "뉴욕 ",
              every: "뉴욕 장중(평일 10:00~16:30 뉴욕 시간, 한국 밤 23:00~05:30 무렵) 30분마다", weekly: "러셀 2000 종목(russell2000.csv)마다 일봉을 조회해 1분 남짓 걸립니다" },
 };
@@ -141,13 +147,15 @@ const kst = (hm, offset) => {
 };
 const when = (hm, offset) => M().local ? `${M().local}${hm} (한국 ${kst(hm, offset)})` : hm;
 
+const SIG_NOTE = "기술적 시그널 태그(▲ 매수 쪽, ▼ 매도 쪽)와 종합 점수는 차트 페이지와 같은 규칙(이평선·MACD 교차는 최근 5거래일, RSI, 볼린저밴드, 이평선 배열)으로 주간 평균 조회 때 받은 약 1년 일봉 기준입니다. 투자 판단의 참고용입니다.";
 // 보기별 열: [키, 제목, 숫자 열, 작은 화면에서 숨김, 칸 HTML]
 const VIEWS = {
   intraday: {
     url: () => `api/${M().api}-intraday?${new URLSearchParams({ date: $("#date").value, at: $("#at").value })}`,
-    note: () => `서버가 ${M().every} ${M().name} 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다.${V.market === "russell" ? " KB 미국 시세는 15분 지연입니다." : ""} 행을 누르면 차트가 열립니다.`,
+    note: () => `서버가 ${M().every} ${M().name} 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다.${V.market === "russell" ? " KB 미국 시세는 15분 지연입니다." : ""} ${SIG_NOTE} 행을 누르면 차트가 열립니다.`,
     cols: [
-      ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
+      ["name", "종목", false, false, s => nameCell(s)],
+      ["score", "시그널", true, false, s => scoreCell(s)],
       ["price", "현재가", true, true, s => fmt(s.price, M().dp)],
       ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
       ["vlm", "거래량", true, false, s => fmt(s.vlm)],
@@ -159,9 +167,10 @@ const VIEWS = {
   },
   weekly: {
     url: refresh => `api/${M().api}-volume${refresh ? "?refresh=1" : ""}`,
-    note: () => `이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 ${M().weekly}. 행을 누르면 차트가 열립니다.`,
+    note: () => `이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 ${M().weekly}. ${SIG_NOTE} 행을 누르면 차트가 열립니다.`,
     cols: [
-      ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
+      ["name", "종목", false, false, s => nameCell(s)],
+      ["score", "시그널", true, false, s => scoreCell(s)],
       ["price", "현재가", true, true, s => fmt(s.price, M().dp)],
       ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
       ["prevAvg", "전주 하루 평균", true, true, s => `${fmt(s.prevAvg)} <span class="days">${s.prevDays}일</span>`],
@@ -170,7 +179,48 @@ const VIEWS = {
       ["value", "거래대금", true, true, s => M().money(s.value)]],
   },
 };
-const V = { market: "kosdaq", view: "intraday", data: {}, sort: { intraday: "prevRatio", weekly: "ratio" }, desc: true, seq: 0 };
+// ---------------------------------------------------------------- 기술적 시그널 태그 (signals.js, 차트 페이지와 같은 규칙)
+// 주간 평균 응답의 종가(closes, 약 1년)로 계산합니다. 같은 시각 보기는 같은 시장의 주간 평균 응답에서 종목 코드로 찾아 씁니다.
+function sigOf(s) {
+  if (!("sig" in s)) {
+    const n = s.closes?.length || 0, k = s.lastDays?.length || 0;
+    s.sig = n ? signalsOf(s.closes.map((c, i) => ({ c, d: i >= n - k ? s.lastDays[i - (n - k)] : "" }))) : null;
+    s.score = s.sig ? s.sig.reduce((a, g) => a + g.dir, 0) : null;
+  }
+  return s.sig;
+}
+function weeklyOf(s) {  // 이 종목의 주간 평균 응답 행 (시그널용 종가가 있는 쪽)
+  if (V.view === "weekly") return s;
+  const w = V.data[`${V.market}:weekly`];
+  if (!w) return null;
+  w.byCode ??= Object.fromEntries(w.stocks.map(x => [x.code, x]));
+  return w.byCode[s.code] || null;
+}
+const nameCell = s => {
+  const w = weeklyOf(s), list = w && sigOf(w);
+  return `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>${list?.length ? `<div class="sigs">${sigBadges(list)}</div>` : ""}`;
+};
+const scoreCell = s => {
+  const w = weeklyOf(s);
+  if (!w) return `<span class="days">${V.weeklyLoading[V.market] ? "…" : "—"}</span>`;
+  sigOf(w);
+  return w.score == null ? "—" : `<span class="ratio ${cls(w.score)}">${w.score > 0 ? "+" : ""}${w.score}</span>`;
+};
+const val = (s, k) => k === "score" ? (weeklyOf(s) && (sigOf(weeklyOf(s)), weeklyOf(s).score)) : s[k];
+
+// 같은 시각 보기에서도 시그널을 보이도록 주간 평균 응답을 뒤에서 받아 둠 (저장된 응답 먼저, 없으면 KB 조회)
+async function ensureWeekly(market) {
+  const k = `${market}:weekly`, api = MARKETS[market].api;
+  if (V.data[k] || V.weeklyLoading[market]) return;
+  V.weeklyLoading[market] = true;
+  try {
+    V.data[k] = await getJson(`api/${api}-volume?cached=1`).catch(() => getJson(`api/${api}-volume`));
+  } catch { /* 시그널 없이 표만 보여 줌 */ }
+  V.weeklyLoading[market] = false;
+  if (V.market === market && V.view === "intraday") render();
+}
+
+const V = { weeklyLoading: {}, market: "kosdaq", view: "intraday", data: {}, sort: { intraday: "prevRatio", weekly: "ratio" }, desc: true, seq: 0 };
 const key = () => `${V.market}:${V.view}`;  // 시장·보기별로 받은 응답
 const basis = () => V.view === "weekly" ? "ratio" : $("#basis").value;
 
@@ -194,7 +244,7 @@ function render() {
     .filter(s => s[b] != null && s[b] >= min)
     .filter(s => !($("#rise").checked && !(s.change > 0)) && !(M().spac && $("#spac").checked && s.name.includes("스팩")))
     .filter(s => !q || s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
-    .sort((x, y) => (k === "name" ? x.name.localeCompare(y.name, "ko") : (x[k] ?? -Infinity) - (y[k] ?? -Infinity)) * (V.desc ? -1 : 1));
+    .sort((x, y) => (k === "name" ? x.name.localeCompare(y.name, "ko") : (val(x, k) ?? -Infinity) - (val(y, k) ?? -Infinity)) * (V.desc ? -1 : 1));
   $("#count").textContent = `${fmt(rows.length)}종목`;
   $("#body").innerHTML = rows.length ? `<div class="table"><table>
     <thead><tr>${view.cols.map(([key, title, num, sm]) => `<th class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}"><button data-k="${key}" aria-pressed="${key === k}">${title}${key === k ? (V.desc ? " ▼" : " ▲") : ""}</button></th>`).join("")}</tr></thead>
@@ -229,6 +279,7 @@ async function load(refresh) {
   if (view === "weekly" && !refresh && !V.data[k]) {
     try { const d = await getJson(`api/${M().api}-volume?cached=1`); if (seq === V.seq) { V.data[k] = d; render(); } } catch { /* 저장된 응답이 없으면 기다림 */ }
   }
+  if (view === "intraday") ensureWeekly(V.market);
   const prev = V.data[k];
   if (view === "weekly") status.innerHTML = prev ? `${esc(prev.fetchedAt)} 기준 · <span class="stale">KB에서 새로 조회하는 중…</span>` : "KB에서 조회하는 중…";
   $("#reload").disabled = true;
@@ -236,7 +287,7 @@ async function load(refresh) {
     const d = await getJson(VIEWS[view].url(refresh));
     if (seq !== V.seq) return;
     V.data[k] = d;
-    if (view === "intraday") fillWhen(d);
+    if (view === "intraday") { fillWhen(d); $("#when").hidden = !d.dates.length; }
     status.textContent = view === "weekly" ? `${d.fetchedAt} 기준 · ${M().name} ${fmt(d.total)}종목${d.listed ? ` (목록 ${fmt(d.listed)}종목 중 조회된 종목)` : ""}` : intradayStatus(d);
     render();
   } catch (err) {
@@ -255,6 +306,7 @@ function setView(view, market = V.market) {
   try { localStorage.setItem("vol-view", view); } catch {}
   const url = new URL(location.href);
   if (market === "kosdaq") url.searchParams.delete("market"); else url.searchParams.set("market", market);
+  url.searchParams.delete("view");
   history.replaceState(null, "", url);
   load(false);
 }
@@ -279,9 +331,11 @@ $("#theme").onclick = () => {
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("div-theme", next); } catch {}
 };
-let saved = null;
-try { saved = localStorage.getItem("vol-view"); } catch {}
-setView(saved in VIEWS ? saved : "intraday", new URLSearchParams(location.search).get("market") in MARKETS ? new URLSearchParams(location.search).get("market") : "kosdaq");
+// 주소의 ?market=russell&view=weekly 가 있으면 그 시장·보기로 열고, 없으면 마지막으로 본 보기
+const params = new URLSearchParams(location.search);
+let saved = params.get("view");
+try { if (!(saved in VIEWS)) saved = localStorage.getItem("vol-view"); } catch {}
+setView(saved in VIEWS ? saved : "intraday", params.get("market") in MARKETS ? params.get("market") : "kosdaq");
 </script>
 </body>
 </html>

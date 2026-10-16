@@ -20,7 +20,7 @@ import java.util.TreeMap;
  * 코스닥 전 종목의 이번 주 거래량을 전주와 비교합니다 (volume.py와 같은 계산).
  *
  * 코스닥 종목 목록: 거래대금 상위(IVU10210, mkt_clsf=3)를 전부(약 1,700종목) 받습니다.
- * 종목별 최근 일봉(IVS11560)을 주(월~일)별로 묶어 이번 주와 전주의 '하루 평균 거래량'을 비교합니다.
+ * 종목별 최근 일봉(IVS11560, 차트와 같은 약 1년)의 최근 15거래일을 주(월~일)별로 묶어 이번 주와 전주의 '하루 평균 거래량'을 비교합니다.
  * 휴장일이 있는 주나 아직 끝나지 않은 이번 주도 공정하게 비교하려고 합계 대신 하루 평균을 씁니다.
  * 여러 종목을 동시에 부르면 가끔(수백 번에 한 번꼴) 필드가 밀린 응답(거래량 빈 값 등)이나 500 오류가 와서, 그런 응답은 다시 부릅니다.
  * 장중 10분마다 코스닥 전 종목의 누적 거래량을 kosdaq.db에 저장해, 같은 시각의 거래량을 전일·전주와 비교합니다 (Ticks, 아래 '장중 기록').
@@ -28,7 +28,8 @@ import java.util.TreeMap;
 final class Volume {
 
     private static final int CACHE_SECONDS = 600;  // 1,700번 넘게 부르는 조회라 10분 동안은 다시 부르지 않음
-    private static final int DAYS = 15;            // 이번 주 + 전주 (휴장일이 끼어도 넉넉하게)
+    static final int DAYS = 15;                    // 이번 주 + 전주 (휴장일이 끼어도 넉넉하게)
+    private static final int LAST_DAYS = 10;       // 화면이 시그널 교차 날짜(최근 5거래일)를 보여 줄 수 있게 날짜를 보내는 마지막 거래일 수
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final KBClient client;
@@ -64,19 +65,26 @@ final class Volume {
         client.accessToken();  // 병렬 호출 전에 토큰을 한 번만 발급
         List<Map<String, Object>> rows = Values.parallel(listed, 8, row -> {
             List<Map<String, Object>> candles = null;
-            for (int attempt = 0; attempt < 3 && !sane(candles); attempt++) {  // 밀린 응답·500 오류면 다시
+            for (int attempt = 0; attempt < 3; attempt++) {  // 밀린 응답·500 오류면 다시
+                List<Map<String, Object>> got;
                 try {
-                    candles = KBClient.records(client.call("IVS11560", Heatmap.body("info_ccd", "1", "mkt_clsf", "1", "chrt_clsf", "D",
+                    got = KBClient.records(client.call("IVS11560", Heatmap.body("info_ccd", "1", "mkt_clsf", "1", "chrt_clsf", "D",
                             "minute_tck_indx", "", "is_cd", Values.str(row.get("is_cd")), "inq_clsf", "2", "strt_dy", "",
-                            "inq_cnt", String.valueOf(DAYS))), "out2");
+                            "inq_cnt", Chart.CHART_DAYS)), "out2");
                 } catch (KBApiException | IOException e) {
-                    candles = null;
+                    continue;
+                }
+                if (sane(recent(got))) {  // 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
+                    candles = got;
+                    if (whole(got, "p2")) {  // 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
+                        break;
+                    }
                 }
             }
-            if (!sane(candles)) {
+            if (candles == null) {
                 return null;  // 거래정지 등
             }
-            Map<String, Object> w = weekChange(candles);
+            Map<String, Object> w = weekChange(recent(candles));
             if (w == null) {
                 return null;
             }
@@ -87,10 +95,41 @@ final class Volume {
             s.put("change", Values.num(row.get("up_dwn_r_p2")));
             s.put("value", Values.lng(row.get("dl_tw_amt")));
             s.putAll(w);
+            s.putAll(closes(Chart.candles(candles, "p2", 10)));
             return s;
         });
         rows.removeIf(Objects::isNull);
         return rows;
+    }
+
+    /** 주간 비교에 쓰는 최근 DAYS개 행 (최신순). 이 행만 엄격히 검사하고, 오래된 밀린 행은 closes에서 건너뜁니다. */
+    static List<Map<String, Object>> recent(List<Map<String, Object>> candles) {
+        return candles == null ? null : candles.subList(0, Math.min(DAYS, candles.size()));
+    }
+
+    /** 일봉 행이 하나도 깨지지 않았는지 (깨진 행은 차트 계산에서 빠져 시그널이 달라질 수 있음). */
+    static boolean whole(List<Map<String, Object>> rows, String suffix) {
+        return Chart.candles(rows, suffix, 1).size() == rows.size();
+    }
+
+    /**
+     * 차트 페이지와 같은 기술적 시그널(signals.js)을 화면에서 계산하도록 일봉 종가(오래된 날부터, 약 1년)와
+     * 마지막 LAST_DAYS 거래일 날짜(교차 날짜 표시용)를 보냅니다. 날짜를 다 보내지 않는 건 응답 크기 때문. (volume.closes와 같음)
+     */
+    static Map<String, Object> closes(List<Map<String, Object>> candles) {
+        List<Object> c = new ArrayList<>();
+        List<Object> d = new ArrayList<>();
+        for (int i = 0; i < candles.size(); i++) {
+            double v = Values.num(candles.get(i).get("c"));
+            c.add(v == Math.rint(v) ? (Object) Math.round(v) : (Object) v);  // 12345.0 -> 12345 (응답 크기)
+            if (i >= candles.size() - LAST_DAYS) {
+                d.add(candles.get(i).get("d"));
+            }
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("closes", c);
+        m.put("lastDays", d);
+        return m;
     }
 
     /** 필드가 밀리지 않은 일봉인지: 날짜가 실제 날짜이고 최신순으로 겹치지 않으며, 거래량이 숫자. */

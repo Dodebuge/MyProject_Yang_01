@@ -4,7 +4,8 @@ KB OpenAPI에는 미국 종목 목록·순위 TR이 없어, 구성 종목은 rus
 iShares IWM(러셀 2000 ETF) 페이지 Holdings의 'Download' CSV를 그대로 넣으면 되고(Asset Class가 Equity인 행만),
 Ticker 열(선택: Name, Exchange)만 있는 CSV도 됩니다. 구성 종목이 바뀌면(연 1~2회 리밸런싱) 파일만 바꾸면 됩니다.
 
-주간 평균: 종목별 일봉(GSC10060)으로 이번 주·전주 하루 평균 거래량 비교 (volume.week_change와 같은 계산).
+주간 평균: 종목별 일봉(GSC10060, 차트와 같은 약 1년)으로 이번 주·전주 하루 평균 거래량 비교 (volume.week_change와 같은 계산).
+         종가도 함께 보내 화면이 기술적 시그널을 태그로 보여 줍니다 (volume.closes).
 같은 시각: 뉴욕 장중(평일 10:00~16:30, 뉴욕 시간) 30분마다 종목별 상세시세(GSS10030)의 누적 거래량을 russell.db에 저장.
          KB 미국 시세는 15분 지연이라 10:00 기록은 09:45 무렵 값이고, 16:30 기록에 16:00 종가까지 담깁니다.
 화면·기록의 종목 코드는 KB 티커(MOG.A)라 차트 링크로 바로 열립니다.
@@ -33,7 +34,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from kb_client import KBApiError, KBClient
-from volume import Ticks, sane, week_change
+import chart
+from volume import Ticks, closes, sane, week_change, whole
 
 HERE = Path(__file__).resolve().parent
 CSV = HERE / "russell2000.csv"
@@ -121,11 +123,11 @@ def _quote(client: KBClient, item: dict) -> dict | None:
 def _candles(client: KBClient, item: dict) -> list[dict] | None:
     def probe(x: str, n: str) -> list[dict] | None:
         rows = client.call("GSC10060", {"chrt_clsf": "3", "mdfy_stk_prc_use_f": "", "is_cd": n, "clsf": "1",  # chrt_clsf 3 = 일봉
-                                        "srch_strt_dy": date.today().strftime("%Y%m%d"), "rcrd_c": str(DAYS), "bndl": "",
+                                        "srch_strt_dy": date.today().strftime("%Y%m%d"), "rcrd_c": chart.CHART_DAYS, "bndl": "",
                                         "krx_cd": x}).get("out2", [])
         if not rows:
             return None  # 이 거래소·표기에는 없음
-        if not sane(rows):
+        if not sane(rows[:DAYS]):  # 주간 비교에 쓰는 최근 행만 엄격히 (오래된 밀린 행은 closes에서 건너뜀)
             raise _Shifted
         return rows
     return _resolve(client, item, probe)
@@ -136,12 +138,17 @@ def fetch(client: KBClient) -> list[dict]:
 
     def one(item: dict) -> dict | None:
         rows = _candles(client, item)
-        w = week_change(rows) if rows else None
+        for _ in range(2):  # 오래된 행이 깨졌으면 한 번 더 (끝내 안 되면 깨진 행만 빼고 씀)
+            if not rows or whole(rows, "p4"):
+                break
+            rows = _candles(client, item) or rows
+        w = week_change(rows[:DAYS]) if rows else None
         if not w:
             return None
         last = rows[0]
         return {"code": _found[item["code"]][1], "name": item["name"], "price": last.get("cls_prc_p4"),
-                "change": float(last.get("up_dwn_r_p2") or 0), "value": int(last.get("dl_tw_amt") or 0), **w}
+                "change": float(last.get("up_dwn_r_p2") or 0), "value": int(last.get("dl_tw_amt") or 0), **w,
+                **closes(chart._candles(rows, "p4", 1))}
 
     client.access_token  # 병렬 호출 전에 토큰을 한 번만 발급
     with ThreadPoolExecutor(WORKERS) as pool:

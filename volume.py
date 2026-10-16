@@ -1,8 +1,9 @@
 """코스닥 전 종목의 이번 주 거래량을 전주와 비교합니다.
 
 코스닥 종목 목록: 거래대금 상위(IVU10210, mkt_clsf=3)를 전부(약 1,700종목) 받습니다.
-종목별 최근 일봉(IVS11560)을 받아 주(월~일)별로 묶고, 이번 주와 전주의 '하루 평균 거래량'을 비교합니다.
+종목별 최근 일봉(IVS11560, 차트와 같은 약 1년)을 받아 최근 15거래일을 주(월~일)별로 묶고, 이번 주와 전주의 '하루 평균 거래량'을 비교합니다.
 휴장일이 있는 주나 아직 끝나지 않은 이번 주도 공정하게 비교하려고 합계 대신 하루 평균을 씁니다.
+종가(closes)도 함께 보내 화면이 차트 페이지와 같은 기술적 시그널(signals.js)을 태그로 보여 줍니다.
 (주봉 chrt_clsf=W의 거래량은 일봉 합과 맞지 않아 쓰지 않습니다.)
 여러 종목을 동시에 부르면 가끔(수백 번에 한 번꼴) 필드가 밀린 응답(거래량 빈 값 등)이나 500 오류가 와서, 그런 응답은 다시 부릅니다.
 
@@ -28,12 +29,14 @@ from typing import Callable
 
 import requests
 
+import chart
 from daily_store import KST
 from heatmap import _valid_day
 from kb_client import KBApiError, KBClient
 
 CACHE_SECONDS = 600  # 1,700번 넘게 부르는 조회라 10분 동안은 다시 부르지 않음
 DAYS = 15            # 이번 주 + 전주 (휴장일이 끼어도 넉넉하게)
+LAST_DAYS = 10       # 화면이 시그널 교차 날짜(최근 5거래일)를 보여 줄 수 있게 날짜를 보내는 마지막 거래일 수
 _cache: tuple[float, dict] | None = None
 _lock = threading.Lock()  # 동시에 두 요청이 와도 KB 조회는 한 번
 
@@ -60,26 +63,42 @@ def sane(rows: list[dict]) -> bool:
             and all(type(r.get("vlm")) is int for r in rows))
 
 
+def whole(rows: list[dict], suffix: str) -> bool:
+    """일봉 행이 하나도 깨지지 않았는지 (깨진 행은 차트 계산에서 빠져 시그널이 달라질 수 있음)."""
+    return len(chart._candles(rows, suffix, 1)) == len(rows)
+
+
+def closes(candles: list[dict]) -> dict:
+    """차트 페이지와 같은 기술적 시그널(signals.js)을 화면에서 계산하도록 일봉 종가(오래된 날부터, 약 1년)와
+    마지막 LAST_DAYS 거래일 날짜(교차 날짜 표시용)를 보냅니다. 날짜를 다 보내지 않는 건 응답 크기 때문."""
+    num = lambda v: int(v) if v == int(v) else v  # 12345.0 -> 12345 (응답 크기)
+    return {"closes": [num(c["c"]) for c in candles], "lastDays": [c["d"] for c in candles[-LAST_DAYS:]]}
+
+
 def fetch(client: KBClient) -> list[dict]:
     listed = client.call("IVU10210", {"srt_clsf": "", "inq_cnt": "3000", "excg_clsf": "0", "mkt_clsf": "3",
                                       "thdy_bdy_clsf": ""}).get("out2", [])
 
     def one(row: dict) -> dict | None:
+        rows = None
         for _ in range(3):  # 밀린 응답·500 오류면 다시
             try:
-                rows = client.call("IVS11560", {"info_ccd": "1", "mkt_clsf": "1", "chrt_clsf": "D", "minute_tck_indx": "",
-                                                "is_cd": row["is_cd"], "inq_clsf": "2", "strt_dy": "", "inq_cnt": str(DAYS)}).get("out2", [])
+                got = client.call("IVS11560", {"info_ccd": "1", "mkt_clsf": "1", "chrt_clsf": "D", "minute_tck_indx": "",
+                                               "is_cd": row["is_cd"], "inq_clsf": "2", "strt_dy": "", "inq_cnt": chart.CHART_DAYS}).get("out2", [])
             except (KBApiError, requests.RequestException):
                 continue
-            if sane(rows):
-                break
-        else:
+            if sane(got[:DAYS]):  # 주간 비교에 쓰는 최근 행은 반드시 멀쩡해야 함
+                rows = got
+                if whole(got, "p2"):  # 오래된 행까지 멀쩡하면 끝 (아니면 한 번 더 받아 보고, 끝내 안 되면 깨진 행만 빼고 씀)
+                    break
+        if rows is None:
             return None  # 거래정지 등
-        w = week_change(rows)
+        w = week_change(rows[:DAYS])
         if not w:
             return None
         return {"code": row["is_cd"], "name": row["is_nm"], "price": row.get("now_prc"),
-                "change": float(row.get("up_dwn_r_p2") or 0), "value": int(row.get("dl_tw_amt") or 0), **w}
+                "change": float(row.get("up_dwn_r_p2") or 0), "value": int(row.get("dl_tw_amt") or 0), **w,
+                **closes(chart._candles(rows, "p2", 10))}
 
     client.access_token  # 병렬 호출 전에 토큰을 한 번만 발급
     with ThreadPoolExecutor(8) as pool:

@@ -14,6 +14,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
     GET /volume   -> 코스닥·러셀 2000 거래량 증가 종목 (volume.html, ?market=russell)
+    GET /signals.js  -> 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
     GET /docs/*.html -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
 
 API:
@@ -161,6 +162,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: russell.RUSSELL.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/signals.js":  # 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
+                self._send(200, (HERE / "signals.js").read_bytes(), "text/javascript; charset=utf-8")
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
                 self._send(200, (HERE / url.path.lstrip("/")).read_bytes(), "text/html; charset=utf-8")
             else:

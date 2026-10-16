@@ -37,7 +37,7 @@ import com.google.gson.JsonParser;
 final class Chart {
 
     private static final long LIST_CACHE_MS = 3_600_000;  // 상장 종목 목록은 하루에 거의 안 바뀜
-    private static final String CHART_DAYS = "250";
+    static final String CHART_DAYS = "250";
     private static final List<String> US_EXCHANGES = Arrays.asList("NAS", "NYS", "AMX");  // 나스닥, 뉴욕, 아멕스(NYSE Arca ETF 포함)
     private static final Pattern TICKER = Pattern.compile("[A-Z][A-Z.]{0,5}");
     private static final Pattern KR_CODE = Pattern.compile("[0-9A-Z]{6}");

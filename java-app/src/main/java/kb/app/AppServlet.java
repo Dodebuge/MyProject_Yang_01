@@ -24,6 +24,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * dividends_web.py와 같은 주소를 처리합니다. 화면(HTML)은 Python 버전과 같은 파일을 씁니다.
  *
  *   GET /, /heatmap, /me, /chart, /volume -> home.html, heatmap.html, me.html, chart.html, volume.html
+ *   GET /signals.js                     -> 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
  *   GET /docs/*.html                    -> Archify 구조도·순서도 (첫 화면의 '구조 문서')
  *   GET /api/heatmap?market=kr|us       -> 섹터 히트맵
  *   GET /api/quarters?market=kr|us      -> 분기별 일평균 거래대금
@@ -59,6 +60,7 @@ public class AppServlet extends HttpServlet {
         PAGES.put("/me", "/me.html");
         PAGES.put("/chart", "/chart.html");
         PAGES.put("/volume", "/volume.html");
+        PAGES.put("/signals.js", "/signals.js");  // 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
     }
 
     private Heatmap heatmap;
@@ -207,7 +209,7 @@ public class AppServlet extends HttpServlet {
                     resp.sendError(404);
                     return;
                 }
-                resp.setContentType("text/html; charset=utf-8");
+                resp.setContentType(page.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/html; charset=utf-8");
                 copy(in, resp.getOutputStream());
             }
             return;
