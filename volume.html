@@ -3,31 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>코스닥 거래량 증가</title>
+<title>코스닥 거래량</title>
 <!--
-  코스닥 전 종목 중 이번 주 하루 평균 거래량이 전주보다 기준(기본 10%) 이상 늘어난 종목. dividends_web.py가 /volume 으로 제공합니다.
-  데이터는 /api/kosdaq-volume (약 1,700종목 일봉 조회라 30초 남짓). 서버에 저장된 마지막 응답(?cached=1)을 먼저 그리고 새 응답으로 교체합니다.
+  코스닥 거래량 증가 종목. dividends_web.py가 /volume 으로 제공합니다. 보기 두 가지:
+  - 같은 시각: 서버가 장중(평일 09:00~15:40) 10분마다 저장한 누적 거래량(kosdaq.db)을 전일·전주 같은 시각과 비교 (/api/kosdaq-intraday, KB 조회 없음)
+  - 주간 평균: 이번 주와 전주의 하루 평균 거래량 (/api/kosdaq-volume, 약 1,700종목 일봉 조회라 30초 남짓).
+    서버에 저장된 마지막 응답(?cached=1)을 먼저 그리고 새 응답으로 교체합니다.
 -->
 <style>
 :root {
   color-scheme: light;
   --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
-  --series-1: #2a78d6; --bad: #d03b3b; --up: #e34948; --down: #2a78d6;
+  --series-1: #2a78d6; --select: rgba(42,120,214,0.08); --bad: #d03b3b; --up: #e34948; --down: #2a78d6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
-    --series-1: #3987e5; --bad: #e66767; --up: #e66767; --down: #3987e5;
+    --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
-  --series-1: #3987e5; --bad: #e66767; --up: #e66767; --down: #3987e5;
+  --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5;
 }
 * { box-sizing: border-box; }
 body {
@@ -42,8 +44,11 @@ h1 { font-size: 20px; margin: 0; font-weight: 650; }
 .nav a:hover { background: var(--hover); color: var(--ink); }
 .nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
 .nav a.home { color: var(--muted); }
-button, input { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); }
-button { cursor: pointer; }
+button, input, select { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); }
+button, select { cursor: pointer; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 12px; font-size: 13px; }
+.seg button[aria-pressed="true"] { background: var(--select); color: var(--series-1); font-weight: 600; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
 .sub { color: var(--muted); font-size: 12px; margin: 0; }
 .stale { color: var(--series-1); }
@@ -52,6 +57,7 @@ button { cursor: pointer; }
 .controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
 .controls input[type="number"] { width: 80px; padding: 4px 8px; }
 .controls input[type="search"] { width: 180px; padding: 4px 10px; }
+.controls select { padding: 4px 8px; }
 .count { font-size: 16px; font-weight: 650; }
 .table { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -83,18 +89,26 @@ tbody tr:hover { background: var(--hover); }
       <h1>코스닥 거래량 증가</h1>
       <p class="sub" id="status">불러오는 중…</p>
     </div>
-    <div style="display:flex;gap:8px"><button id="reload">KB에서 다시 조회</button><button id="theme" aria-label="테마 전환">◐</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="seg" role="group" aria-label="보기">
+        <button data-view="intraday" title="장중 10분 기록">같은 시각</button><button data-view="weekly">주간 평균</button>
+      </div>
+      <button id="reload">다시 조회</button><button id="theme" aria-label="테마 전환">◐</button>
+    </div>
   </header>
 
   <section class="card">
     <div class="controls">
       <span class="count" id="count"></span>
-      <label>전주 대비 <input id="min" type="number" value="10" step="5" aria-label="최소 증가율"> % 이상</label>
+      <span id="when" hidden><select id="date" aria-label="날짜"></select> <select id="at" aria-label="시각"></select></span>
+      <label><select id="basis" aria-label="비교 기준"><option value="prevRatio">전일 대비</option><option value="weekRatio">전주 대비</option></select>
+        <span id="basis-weekly" hidden>전주 대비</span> <input id="min" type="number" value="10" step="5" aria-label="최소 증가율"> % 이상</label>
+      <label><input id="rise" type="checkbox"> 주가 상승만</label>
       <label><input id="spac" type="checkbox" checked> 스팩 제외</label>
       <input id="q" type="search" placeholder="종목 이름·번호" aria-label="종목 거르기">
     </div>
-    <div id="body"><div class="loading"><div class="spinner"></div>코스닥 전 종목 일봉을 조회하는 중… (30초 남짓)</div></div>
-    <p class="note">이번 주와 전주의 <b>하루 평균 거래량</b>을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. 행을 누르면 차트가 열립니다.</p>
+    <div id="body"><div class="loading"><div class="spinner"></div>불러오는 중…</div></div>
+    <p class="note" id="note"></p>
   </section>
 </div>
 <script>
@@ -102,10 +116,41 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1e8, 0) + "억" : n >= 1e4 ? fmt(n / 1e4, 0) + "만" : fmt(n);
-const COLS = [  // [키, 제목, 숫자 열, 작은 화면에서 숨김]
-  ["name", "종목", false], ["price", "현재가", true, true], ["change", "등락률", true], ["prevAvg", "전주 하루 평균", true, true],
-  ["avg", "이번 주 하루 평균", true], ["ratio", "증가율", true], ["value", "거래대금", true, true]];
-const V = { data: null, sort: "ratio", desc: true };
+const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
+const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n, d)}%`;
+const md = d => d ? `${+d.slice(5, 7)}/${+d.slice(8)}` : "";
+
+// 보기별 열: [키, 제목, 숫자 열, 작은 화면에서 숨김, 칸 HTML]
+const VIEWS = {
+  intraday: {
+    url: () => `api/kosdaq-intraday?${new URLSearchParams({ date: $("#date").value, at: $("#at").value })}`,
+    note: "서버가 장중(평일 09:00~15:40) 10분마다 코스닥 전 종목의 누적 거래량을 저장합니다. 고른 시각까지의 거래량을 전일·전주(7일 전, 휴장이면 그 전 거래일)의 같은 시각과 비교합니다. 같은 시각 기록이 없으면 그 이전 마지막 기록과 비교합니다. 행을 누르면 차트가 열립니다.",
+    cols: [
+      ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
+      ["price", "현재가", true, true, s => fmt(s.price)],
+      ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
+      ["vlm", "거래량", true, false, s => fmt(s.vlm)],
+      ["prevVlm", "전일 같은 시각", true, true, s => fmt(s.prevVlm)],
+      ["prevRatio", "전일 대비", true, false, s => `<span class="ratio ${cls(s.prevRatio)}">${pct(s.prevRatio)}</span>`],
+      ["weekVlm", "전주 같은 시각", true, true, s => fmt(s.weekVlm)],
+      ["weekRatio", "전주 대비", true, false, s => `<span class="ratio ${cls(s.weekRatio)}">${pct(s.weekRatio)}</span>`],
+      ["value", "거래대금", true, true, s => compact(s.value)]],
+  },
+  weekly: {
+    url: refresh => `api/kosdaq-volume${refresh ? "?refresh=1" : ""}`,
+    note: "이번 주와 전주의 하루 평균 거래량을 비교합니다 (휴장일이 있거나 아직 끝나지 않은 주도 공정하게). 장중이면 오늘 거래량은 진행 중인 값입니다. KB에서 코스닥 전 종목 일봉을 조회해 30초 남짓 걸립니다. 행을 누르면 차트가 열립니다.",
+    cols: [
+      ["name", "종목", false, false, s => `<b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span>`],
+      ["price", "현재가", true, true, s => fmt(s.price)],
+      ["change", "등락률", true, false, s => `<span class="${cls(s.change)}">${pct(s.change, 2)}</span>`],
+      ["prevAvg", "전주 하루 평균", true, true, s => `${fmt(s.prevAvg)} <span class="days">${s.prevDays}일</span>`],
+      ["avg", "이번 주 하루 평균", true, false, s => `${fmt(s.avg)} <span class="days">${s.days}일</span>`],
+      ["ratio", "증가율", true, false, s => `<span class="ratio ${cls(s.ratio)}">${pct(s.ratio)}</span>`],
+      ["value", "거래대금", true, true, s => compact(s.value)]],
+  },
+};
+const V = { view: "intraday", data: {}, sort: { intraday: "prevRatio", weekly: "ratio" }, desc: true, seq: 0 };
+const basis = () => V.view === "weekly" ? "ratio" : $("#basis").value;
 
 async function getJson(url) {
   const res = await fetch(url, { cache: "no-store" });
@@ -115,48 +160,82 @@ async function getJson(url) {
 }
 
 function render() {
-  if (!V.data) return;
-  const min = Number($("#min").value) || 0, q = $("#q").value.trim(), k = V.sort;
-  const rows = V.data.stocks
-    .filter(s => s.ratio != null && s.ratio >= min && !($("#spac").checked && s.name.includes("스팩")))
+  const d = V.data[V.view], view = VIEWS[V.view];
+  if (!d) return;
+  if (V.view === "intraday" && !d.stocks.length) {
+    $("#count").textContent = "";
+    $("#body").innerHTML = `<div class="empty">아직 10분 기록이 없습니다. 서버가 켜져 있으면 장중(평일 09:00~15:40) 10분마다 쌓입니다.<br>다음 기록 ${esc(d.nextTick.replace("T", " "))}</div>`;
+    return;
+  }
+  const min = Number($("#min").value) || 0, q = $("#q").value.trim(), b = basis(), k = V.sort[V.view];
+  const rows = d.stocks
+    .filter(s => s[b] != null && s[b] >= min)
+    .filter(s => !($("#rise").checked && !(s.change > 0)) && !($("#spac").checked && s.name.includes("스팩")))
     .filter(s => !q || s.name.includes(q) || s.code.includes(q))
-    .sort((a, b) => (k === "name" ? a.name.localeCompare(b.name, "ko") : a[k] - b[k]) * (V.desc ? -1 : 1));
+    .sort((x, y) => (k === "name" ? x.name.localeCompare(y.name, "ko") : (x[k] ?? -Infinity) - (y[k] ?? -Infinity)) * (V.desc ? -1 : 1));
   $("#count").textContent = `${fmt(rows.length)}종목`;
-  const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
   $("#body").innerHTML = rows.length ? `<div class="table"><table>
-    <thead><tr>${COLS.map(([key, title, num, sm]) => `<th class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}"><button data-k="${key}" aria-pressed="${key === k}">${title}${key === k ? (V.desc ? " ▼" : " ▲") : ""}</button></th>`).join("")}</tr></thead>
-    <tbody>${rows.map(s => `<tr data-code="${esc(s.code)}" title="차트 열기">
-      <td><b>${esc(s.name)}</b><span class="code">${esc(s.code)}</span></td>
-      <td class="num hide-sm">${fmt(s.price)}</td>
-      <td class="num ${cls(s.change)}">${s.change > 0 ? "+" : ""}${fmt(s.change, 2)}%</td>
-      <td class="num hide-sm">${fmt(s.prevAvg)} <span class="days">${s.prevDays}일</span></td>
-      <td class="num">${fmt(s.avg)} <span class="days">${s.days}일</span></td>
-      <td class="num ratio up">+${fmt(s.ratio, 1)}%</td>
-      <td class="num hide-sm">${compact(s.value)}</td></tr>`).join("")}</tbody></table></div>`
+    <thead><tr>${view.cols.map(([key, title, num, sm]) => `<th class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}"><button data-k="${key}" aria-pressed="${key === k}">${title}${key === k ? (V.desc ? " ▼" : " ▲") : ""}</button></th>`).join("")}</tr></thead>
+    <tbody>${rows.map(s => `<tr data-code="${esc(s.code)}" title="차트 열기">${view.cols.map(([, , num, sm, cell]) =>
+      `<td class="${num ? "num" : ""} ${sm ? "hide-sm" : ""}">${cell(s)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
     : `<div class="empty">조건에 맞는 종목이 없습니다.</div>`;
 }
 
-async function load(refresh) {
-  const status = $("#status");
-  if (!refresh) {
-    try { V.data = await getJson("api/kosdaq-volume?cached=1"); render(); } catch { /* 저장된 응답이 없으면 기다림 */ }
-  }
-  status.innerHTML = V.data ? `${esc(V.data.fetchedAt)} 기준 · <span class="stale">KB에서 새로 조회하는 중…</span>` : "KB에서 조회하는 중…";
-  $("#reload").disabled = true;
-  try {
-    V.data = await getJson(`api/kosdaq-volume${refresh ? "?refresh=1" : ""}`);
-    status.textContent = `${V.data.fetchedAt} 기준 · 코스닥 ${fmt(V.data.total)}종목`;
-    render();
-  } catch (err) {
-    if (V.data) status.innerHTML = `${esc(V.data.fetchedAt)} 기준 · <span class="stale bad">새로 조회 실패: ${esc(err.message)}</span>`;
-    else { status.textContent = ""; $("#body").innerHTML = `<div class="error">조회 실패: ${esc(err.message)}</div>`; }
-  } finally { $("#reload").disabled = false; }
+function intradayStatus(d) {
+  if (!d.date) return `10분 기록 없음 · 다음 기록 ${d.nextTick.replace("T", " ")}`;
+  const ref = (label, r) => r ? `${label} ${md(r.date)} ${r.at}` : `${label} 기록 없음`;
+  return `${d.date} ${d.at} 기록 · ${ref("전일", d.prev)} · ${ref("전주", d.week)} · 다음 기록 ${d.nextTick.slice(5).replace("T", " ").replace("-", "/")}`;
 }
 
-$("#min").oninput = $("#q").oninput = $("#spac").onchange = render;
+function fillWhen(d) {
+  $("#date").innerHTML = d.dates.map(x => `<option value="${x}" ${x === d.date ? "selected" : ""}>${x}</option>`).join("");
+  $("#at").innerHTML = d.slots.map(x => `<option ${x === d.at ? "selected" : ""}>${x}</option>`).join("");
+}
+
+async function load(refresh) {
+  const view = V.view, seq = ++V.seq, status = $("#status");
+  $("#reload").textContent = view === "weekly" ? "KB에서 다시 조회" : "다시 조회";
+  $("#note").textContent = VIEWS[view].note;
+  $("#when").hidden = $("#basis").hidden = view !== "intraday";
+  $("#basis-weekly").hidden = view === "intraday";
+  if (!V.data[view]) $("#body").innerHTML = `<div class="loading"><div class="spinner"></div>${view === "weekly" ? "코스닥 전 종목 일봉을 조회하는 중… (30초 남짓)" : "불러오는 중…"}</div>`;
+  render();
+  if (view === "weekly" && !refresh && !V.data.weekly) {
+    try { const d = await getJson("api/kosdaq-volume?cached=1"); if (seq === V.seq) { V.data.weekly = d; render(); } } catch { /* 저장된 응답이 없으면 기다림 */ }
+  }
+  const prev = V.data[view];
+  if (view === "weekly") status.innerHTML = prev ? `${esc(prev.fetchedAt)} 기준 · <span class="stale">KB에서 새로 조회하는 중…</span>` : "KB에서 조회하는 중…";
+  $("#reload").disabled = true;
+  try {
+    const d = await getJson(VIEWS[view].url(refresh));
+    if (seq !== V.seq) return;
+    V.data[view] = d;
+    if (view === "intraday") fillWhen(d);
+    status.textContent = view === "weekly" ? `${d.fetchedAt} 기준 · 코스닥 ${fmt(d.total)}종목` : intradayStatus(d);
+    render();
+  } catch (err) {
+    if (seq !== V.seq) return;
+    if (prev) status.innerHTML = `${esc(prev.fetchedAt || "")} · <span class="stale bad">새로 조회 실패: ${esc(err.message)}</span>`;
+    else { status.textContent = ""; $("#body").innerHTML = `<div class="error">조회 실패: ${esc(err.message)}</div>`; }
+  } finally { if (seq === V.seq) $("#reload").disabled = false; }
+}
+
+function setView(view) {
+  V.view = view;
+  V.desc = true;
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view));
+  try { localStorage.setItem("vol-view", view); } catch {}
+  load(false);
+}
+
+$("#min").oninput = $("#q").oninput = $("#spac").onchange = $("#rise").onchange = render;
+$("#basis").onchange = () => { V.sort.intraday = $("#basis").value; V.desc = true; render(); };
+$("#date").onchange = () => { $("#at").value = ""; load(false); };
+$("#at").onchange = () => load(false);
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setView(b.dataset.view));
 $("#body").onclick = e => {
   const th = e.target.closest("th button");
-  if (th) { V.desc = th.dataset.k === V.sort ? !V.desc : th.dataset.k !== "name"; V.sort = th.dataset.k; return render(); }
+  if (th) { const k = th.dataset.k; V.desc = k === V.sort[V.view] ? !V.desc : k !== "name"; V.sort[V.view] = k; return render(); }
   const tr = e.target.closest("tbody tr");
   if (tr) location.href = `chart?market=kr&code=${encodeURIComponent(tr.dataset.code)}`;
 };
@@ -168,7 +247,9 @@ $("#theme").onclick = () => {
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("div-theme", next); } catch {}
 };
-load(false);
+let saved = null;
+try { saved = localStorage.getItem("vol-view"); } catch {}
+setView(saved in VIEWS ? saved : "intraday");
 </script>
 </body>
 </html>

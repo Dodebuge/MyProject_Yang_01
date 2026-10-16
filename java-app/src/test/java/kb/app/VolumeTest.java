@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,5 +52,37 @@ class VolumeTest {
     @Test
     void needsTwoWeeks() {
         assertNull(Volume.weekChange(candles("20261016", 200, "20261015", 100)));
+    }
+
+    @Test
+    void nextTickStaysInMarketHours() {
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 10), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 9, 3)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 8, 0)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 15, 40), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 15, 35)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 15, 15, 40)));
+        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 16, 23, 0)));  // 금 -> 월
+        assertEquals(LocalDateTime.of(2026, 10, 19, 9, 0), Volume.nextTick(LocalDateTime.of(2026, 10, 17, 12, 0)));  // 토 -> 월
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void comparesSameTimeWithPreviousDayAndWeek() throws Exception {
+        Volume v = new Volume(null, Files.createTempDirectory("tick").resolve("kosdaq.db"));
+        String[][] ticks = {{"2026-10-08T10:30", "50"}, {"2026-10-09T10:20", "80"}, {"2026-10-15T10:30", "100"},
+                {"2026-10-16T10:30", "150"}, {"2026-10-16T10:40", "160"}};
+        for (String[] t : ticks) {
+            long vol = Long.parseLong(t[1]);
+            v.saveTick(t[0], Arrays.asList(Arrays.<Object>asList("000001", "가", 1000L, 1.5, vol, vol * 1000)));
+        }
+        Map<String, Object> r = v.intraday("2026-10-16", "10:35");
+        assertEquals("10:30", r.get("at"));
+        assertEquals("2026-10-15", ((Map<String, String>) r.get("prev")).get("date"));
+        assertEquals("2026-10-09", ((Map<String, String>) r.get("week")).get("date"));
+        assertEquals("10:20", ((Map<String, String>) r.get("week")).get("at"));
+        Map<String, Object> s = ((List<Map<String, Object>>) r.get("stocks")).get(0);
+        assertEquals(50.0, s.get("prevRatio"));
+        assertEquals(87.5, s.get("weekRatio"));
+        assertEquals("10:40", v.intraday("", "").get("at"));
+        assertNull(v.intraday("2026-10-08", "").get("prev"));
     }
 }

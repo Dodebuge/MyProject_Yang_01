@@ -59,8 +59,11 @@ public class KbApplication {
         return new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
     }
 
-    @Bean
-    Volume volume(KBClient client) {
-        return new Volume(client);
+    /** 코스닥 거래량. 장중 10분마다 코스닥 전 종목 누적 거래량을 kosdaq.db에 기록. */
+    @Bean(destroyMethod = "stop")
+    Volume volume(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
+        Volume v = new Volume(client, dataDir.resolve("kosdaq.db"));
+        v.start();
+        return v;
     }
 }

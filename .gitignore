@@ -6,6 +6,8 @@ java-app/target/
 spring-app/target/
 kb.db
 kb.db-*
+kosdaq.db
+kosdaq.db-*
 recent_searches.txt
 last_api/
 chart_settings.json

@@ -28,6 +28,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/search?q=               종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
+ *   GET /api/kosdaq-intraday        장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
@@ -108,6 +109,12 @@ class ApiController {
     @GetMapping("/kosdaq-volume")
     ResponseEntity<Map<String, Object>> kosdaqVolume(@RequestParam(defaultValue = "false") boolean refresh) throws IOException {
         return ok(volume.query(refresh));
+    }
+
+    @GetMapping("/kosdaq-intraday")
+    ResponseEntity<Map<String, Object>> kosdaqIntraday(@RequestParam(defaultValue = "") String date,
+                                                       @RequestParam(defaultValue = "") String at) throws IOException {
+        return ok(volume.intraday(date, at));
     }
 
     @GetMapping("/transactions")

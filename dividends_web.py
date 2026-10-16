@@ -31,6 +31,8 @@ API:
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
+    GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
+                                   장중 10분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
     GET /api/transactions          -> {"start", "end", "fetchedAt", "rows": [...]}  최근 1달 거래내역 (SWQA2301 전체)
     내정보 API(holdings, dividends, recurring, transactions)는 하루(한국 날짜) 한 번만 KB를 조회해 kb.db(SQLite)에 저장하고, 같은 날은 저장된 값을 돌려줍니다.
     ?refresh=1 을 붙이면 지금 다시 조회해 오늘 값을 덮어씁니다.
@@ -149,6 +151,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: {"items": chart.recent()}, {})
             elif url.path == "/api/kosdaq-volume":
                 self._api(lambda q: volume.query(client, _refresh(q)), parse_qs(url.query))
+            elif url.path == "/api/kosdaq-intraday":
+                self._api(lambda q: volume.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/transactions":
                 self._api(lambda q: query_transactions(client, _refresh(q)), parse_qs(url.query))
             elif DOC.fullmatch(url.path) and (HERE / url.path.lstrip("/")).is_file():
@@ -208,6 +212,7 @@ if __name__ == "__main__":
     client = KBClient.from_env()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
     snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
+    volume.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
     url = f"http://localhost:{args.port}"
     print(f"배당금 페이지 실행 중: {url}  (종료: Ctrl+C)", flush=True)
     if not args.no_open:
