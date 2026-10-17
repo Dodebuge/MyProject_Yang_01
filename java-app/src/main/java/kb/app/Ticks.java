@@ -39,10 +39,10 @@ import java.util.concurrent.TimeUnit;
  * 전일·전주(7일 전 이전의 마지막 거래일) 같은 시각과 비교합니다 (volume.py의 Ticks와 같은 파일·같은 테이블).
  * 같은 시각 기록이 없으면 그날 그 시각 이전의 마지막 기록을 씁니다. 시각은 그 시장의 현지 시간입니다 (코스닥 한국, 러셀 2000 뉴욕).
  */
-final class Ticks {
+public final class Ticks {
 
     /** at(현지 시간) 시각의 [[종목번호, 이름, 현재가, 등락률, 누적 거래량, 거래대금], ...]. 휴장이면 빈 목록. */
-    interface Take {
+    public interface Take {
         List<List<Object>> rows(LocalDateTime at) throws IOException;
     }
 

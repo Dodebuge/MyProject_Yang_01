@@ -4,7 +4,8 @@
 같은 주소, 같은 JSON을 돌려주므로 화면(`../home.html`, `../heatmap.html`, `../me.html`, `../chart.html`)은 그대로 씁니다.
 
 **Kotlin으로 단계적 전환 중**: `.kt`와 `.java`를 같은 `src/main/java`에 두고 Kotlin(1.9.25)을 먼저, 그다음 Java를 컴파일합니다(spring-app도 같은 설정).
-지금 Kotlin: `Values.kt`, `KBApiException.kt`, `LastResponse.kt`. 아래 표의 `.java`는 바뀐 파일부터 `.kt`로 읽으세요.
+지금 Kotlin: `Values.kt`, `KBApiException.kt`, `LastResponse.kt`, `Volume.kt`, `Russell.kt`.
+`Volume`·`Russell`의 종목별 KB 조회는 코루틴(`Values.parallelIO`: `Dispatchers.IO` + `Semaphore`로 8개씩)으로 동시에 부릅니다. 아래 표의 `.java`는 바뀐 파일부터 `.kt`로 읽으세요.
 
 | Java | Python |
 |---|---|

@@ -3,6 +3,12 @@ package kb.app
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.function.Function
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /** 정리된 응답 값(Long, Double, String, null)을 다루는 도우미. Python의 `int(x or 0)`, `float(x or 0)`에 해당합니다. */
 internal object Values {
@@ -49,5 +55,15 @@ internal object Values {
         } finally {
             pool.shutdown()
         }
+    }
+
+    /**
+     * 외부 API를 코루틴으로 동시에 부릅니다 (Kotlin 전용). 결과는 items 순서.
+     * KB 호출은 블로킹 HTTP라 Dispatchers.IO에서 돌리고, Semaphore로 한 번에 workers개까지만 (KB 서버 부담·밀린 응답 줄이기).
+     * fn에서 처리하지 않은 예외가 나면 나머지 호출은 취소하고 그 예외를 그대로 던집니다.
+     */
+    fun <T, R> parallelIO(items: List<T>, workers: Int, fn: (T) -> R): List<R> = runBlocking {
+        val permits = Semaphore(workers)
+        items.map { item -> async(Dispatchers.IO) { permits.withPermit { fn(item) } } }.awaitAll()
     }
 }

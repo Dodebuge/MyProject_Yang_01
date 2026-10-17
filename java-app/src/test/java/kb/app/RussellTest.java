@@ -67,7 +67,7 @@ class RussellTest {
 
     @Test
     void ticksEveryThirtyMinutesInNewYorkHours() {
-        Ticks t = new Russell(null, Path.of("unused.csv"), Path.of("unused.db")).ticks;
+        Ticks t = new Russell(new KBClient("", "", "", "", ""), Path.of("unused.csv"), Path.of("unused.db")).ticks;
         assertEquals(LocalDateTime.of(2026, 10, 16, 10, 0), t.nextTick(LocalDateTime.of(2026, 10, 16, 9, 0)));
         assertEquals(LocalDateTime.of(2026, 10, 16, 10, 30), t.nextTick(LocalDateTime.of(2026, 10, 16, 10, 5)));
         assertEquals(LocalDateTime.of(2026, 10, 16, 16, 30), t.nextTick(LocalDateTime.of(2026, 10, 16, 16, 10)));

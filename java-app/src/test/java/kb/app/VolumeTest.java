@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 
 class VolumeTest {
 
-    private static final Ticks KOSDAQ = new Volume(null, Path.of("unused.db")).ticks;
+    private static final Ticks KOSDAQ = new Volume(new KBClient("", "", "", "", ""), Path.of("unused.db")).ticks;
 
     private static List<Map<String, Object>> candles(Object... dayVolume) {
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -69,7 +69,7 @@ class VolumeTest {
     @Test
     @SuppressWarnings("unchecked")
     void comparesSameTimeWithPreviousDayAndWeek() throws Exception {
-        Ticks v = new Volume(null, Files.createTempDirectory("tick").resolve("kosdaq.db")).ticks;
+        Ticks v = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("tick").resolve("kosdaq.db")).ticks;
         String[][] ticks = {{"2026-10-08T10:30", "50"}, {"2026-10-09T10:20", "80"}, {"2026-10-15T10:30", "100"},
                 {"2026-10-16T10:30", "150"}, {"2026-10-16T10:40", "160"}};
         for (String[] t : ticks) {
