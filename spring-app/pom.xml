@@ -28,6 +28,11 @@
   </properties>
 
   <dependencies>
+    <!-- java-app의 .kt (Kotlin·Java 혼합, 버전은 Spring Boot가 관리: 1.9.25) -->
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
@@ -97,6 +102,33 @@
               </sources>
             </configuration>
           </execution>
+        </executions>
+      </plugin>
+      <!-- Kotlin을 먼저 컴파일(Java 소스도 읽음)하고, 그다음 Java를 컴파일. jvmTarget은 Spring Boot가 java.version으로 맞춤 -->
+      <plugin>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>compile</id>
+            <goals><goal>compile</goal></goals>
+            <configuration>
+              <sourceDirs>
+                <sourceDir>${project.basedir}/src/main/java</sourceDir>
+                <sourceDir>${project.basedir}/../java-app/src/main/java</sourceDir>
+              </sourceDirs>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <executions>
+          <execution><id>default-compile</id><phase>none</phase></execution>
+          <execution><id>default-testCompile</id><phase>none</phase></execution>
+          <execution><id>java-compile</id><phase>compile</phase><goals><goal>compile</goal></goals></execution>
+          <execution><id>java-test-compile</id><phase>test-compile</phase><goals><goal>testCompile</goal></goals></execution>
         </executions>
       </plugin>
       <plugin>
