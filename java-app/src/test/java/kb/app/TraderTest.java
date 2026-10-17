@@ -27,6 +27,7 @@ class TraderTest {
     /** 토스 흉내: 장 운영 정보, 현재가, 시장가 주문(바로 체결 또는 대기), 주문 조회·취소, 판매 가능 수량. */
     static final class FakeToss implements Trader.Api {
         final Map<String, Double> price = new HashMap<>();
+        final Map<String, Double> prevClose = new HashMap<>();  // 일봉 전일 종가 (지수 ETF)
         final Map<String, Double> held = new HashMap<>();
         final Map<String, Map<String, Object>> orders = new LinkedHashMap<>();
         final Map<String, String> byClient = new HashMap<>();
@@ -61,6 +62,11 @@ class TraderTest {
                     }
                 }
                 return out;
+            }
+            if (path.equals("/api/v1/candles")) {  // 최신순: 오늘 봉(2026-10-19), 전일 봉
+                String sym = params.get("symbol");
+                return Map.of("candles", List.of(Map.of("timestamp", "2026-10-19T09:00:00+09:00", "closePrice", String.valueOf(price.get(sym))),
+                        Map.of("timestamp", "2026-10-16T09:00:00+09:00", "closePrice", String.valueOf(prevClose.get(sym)))));
             }
             if (path.equals("/api/v1/sellable-quantity")) {
                 return Map.of("sellableQuantity", String.valueOf(held.getOrDefault(params.get("symbol"), 0.0)));
@@ -138,6 +144,10 @@ class TraderTest {
         now = ZonedDateTime.of(2026, 10, 19, 9, 1, 0, 0, SEOUL);
         trader = new Trader(toss, db, () -> now);
         toss.price.put("005930", 70_000.0);
+        toss.price.put("229200", 10_100.0);  // 코스닥(추종 ETF) 전일 대비 +1%: 기본은 매수 가능
+        toss.prevClose.put("229200", 10_000.0);
+        toss.price.put("IWM", 202.0);
+        toss.prevClose.put("IWM", 200.0);
     }
 
     private void config(boolean enabled, double budget, int maxStocks, boolean auto) throws Exception {
@@ -179,6 +189,21 @@ class TraderTest {
         assertTrue(String.valueOf(p.get("reason")).startsWith("익절"));
         trader.tick();
         assertEquals(2, toss.orders.size(), "같은 날 같은 종목은 다시 사지 않음");
+    }
+
+    @Test
+    void buysOnlyWhenIndexIsUpFromPrevClose() throws Exception {
+        config(true, 1_000_000, 5, false);
+        pick("005930");
+        toss.price.put("229200", 10_000.0);  // 보합: 상승 아님
+        trader.tick();
+        toss.price.put("229200", 9_900.0);   // 하락
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "코스닥이 전일 대비 상승이 아니면 사지 않음");
+        assertTrue(String.valueOf(((Map<?, ?>) ((Map<?, ?>) trader.status().get("markets")).get("KR")).get("phase")).contains("코스닥"));
+        toss.price.put("229200", 10_050.0);  // 장중에 상승 전환 -> 매수
+        trader.tick();
+        assertEquals(List.of("BUY 005930 2"), toss.sides());
     }
 
     @Test

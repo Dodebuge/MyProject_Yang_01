@@ -38,6 +38,7 @@ import java.util.function.Supplier;
  * 매수: 켜져 있고 장중(정규장 시작 ~ 마감 10분 전)이면
  *   - 내가 고른 종목: 매일 한 번 시장가 매수
  *   - 시그널 알림 종목(시장별로 켤 수 있음): 코스닥 → 국내, 러셀 2000 → 미국. 알림이 뜬 날 한 번 시장가 매수
+ *   지수가 전일 대비 상승일 때만 새 매수: 국내는 코스닥, 미국은 러셀 2000 (토스엔 지수 시세가 없어 추종 ETF INDEX로 봄). 하락·보합이면 대기하다 오르면 매수
  *   종목당 금액 = 하루 최대 매수금액 ÷ 최대 종목 수, 수량은 현재가로 나눈 정수(1주가 더 비싸면 건너뜀). 하루 매수 합계는 최대 매수금액을 넘지 않음.
  * 매도 (이 자동매매가 산 종목만, 다른 보유 종목은 건드리지 않음):
  *   - 평균 체결가 대비 +익절% 이상 → 시장가 매도, -손절% 이하 → 시장가 매도
@@ -61,6 +62,8 @@ final class Trader {
     }
 
     static final List<String> MARKETS = Arrays.asList("KR", "US");
+    // ponytail: 지수 대신 추종 ETF(코스닥150·IWM)로 봄. 코스닥 종합지수와 조금 다를 수 있음, 정확히 필요하면 KB 지수 시세로 바꿀 것
+    static final Map<String, String[]> INDEX = Map.of("KR", new String[]{"229200", "코스닥"}, "US", new String[]{"IWM", "러셀 2000"});
     static final int TICK_SECONDS = 5;
     static final int CUTOFF_MINUTES = 10;            // 정규장 마감 몇 분 전에 전량 매도·매수 중단
     static final int ACCOUNT_SECONDS = 30;           // 화면의 토스 계좌 금액 갱신 간격
@@ -89,6 +92,7 @@ final class Trader {
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Double> lastPrice = new ConcurrentHashMap<>();   // "KR:005930" -> 현재가 (화면 손익 표시용)
+    private final Map<String, Double> prevClose = new ConcurrentHashMap<>();   // "KR:2026-10-19" -> 지수 ETF 전일 종가 (하루 한 번 받음)
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
@@ -469,6 +473,7 @@ final class Trader {
             return;
         }
         String waiting = "매매 중 · 오늘 매수 대상 " + candidates.size() + "종목을 모두 처리함 (같은 종목은 하루 한 번)";
+        Boolean up = null;  // 지수 전일 대비 상승: 실제로 살 종목이 있을 때만 확인 (시세 1번)
         for (String[] c : candidates) {
             if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
                 continue;  // 오늘 이미 샀거나 시도함
@@ -478,6 +483,13 @@ final class Trader {
             if (today.size() >= maxStocks || spent >= budget) {
                 waiting = "매매 중 · " + (today.size() >= maxStocks ? "오늘 최대 종목 수(" + maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
                         + ", 남은 매수 대상은 사지 않음";
+                break;
+            }
+            if (up == null) {
+                up = indexUp(m, s.day);
+            }
+            if (!up) {  // 다음 확인(5초 뒤)에 다시 봐서 오르면 매수
+                waiting = "매매 중 · " + INDEX.get(m)[1] + " 지수가 전일 대비 상승이 아니라 새 매수 대기 (상승하면 매수)";
                 break;
             }
             double amount = Math.min(budget / maxStocks, budget - spent);
@@ -709,6 +721,31 @@ final class Trader {
             }
         }
         return out;
+    }
+
+    /** 지수(추종 ETF) 현재가 > 전일 종가. 전일 종가는 일봉(/candles)에서 오늘이 아닌 가장 최근 봉, 시장·날짜마다 한 번. 시세를 못 받으면 false */
+    @SuppressWarnings("unchecked")
+    private boolean indexUp(String m, String day) throws IOException {
+        String symbol = INDEX.get(m)[0];
+        Double prev = prevClose.get(m + ":" + day);
+        if (prev == null) {
+            Map<String, String> q = param("symbol", symbol);
+            q.put("interval", "1d");
+            q.put("count", "2");
+            Object candles = map(api.get("/api/v1/candles", q, false)).get("candles");
+            for (Object o : candles instanceof List ? (List<Object>) candles : new ArrayList<>()) {
+                if (!Values.str(map(o).get("timestamp")).startsWith(day)) {  // 장중이면 맨 앞은 오늘 봉
+                    prev = Values.numOrNull(map(o).get("closePrice"));
+                    break;
+                }
+            }
+            if (prev == null || prev <= 0) {
+                return false;
+            }
+            prevClose.put(m + ":" + day, prev);
+        }
+        Double last = prices(m, symbol).get(symbol);
+        return last != null && last > prev;
     }
 
     /** 그날 정규장 (/market-calendar, 10분마다 다시 받음). 국내는 KRX·NXT 통합 정규장, 미국은 정규장. */
