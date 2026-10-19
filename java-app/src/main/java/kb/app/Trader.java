@@ -39,10 +39,13 @@ import java.util.function.Supplier;
  *   - 내가 고른 종목: 매일 한 번 시장가 매수
  *   - 시그널 알림 종목(시장별로 켤 수 있음): 코스닥 → 국내, 러셀 2000 → 미국. 알림이 뜬 날 한 번 시장가 매수
  *   지수가 전일 대비 상승일 때만 새 매수: 국내는 코스닥, 미국은 러셀 2000 (토스엔 지수 시세가 없어 추종 ETF INDEX로 봄). 하락·보합이면 대기하다 오르면 매수
+ *   - 미장 연동 (시장 모니터 화면, 따로 켜고 끔): 미국 종목 ↔ 코스피 종목 짝마다, 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면
+ *     코스피 장 시작 후 PAIR_WINDOW_MINUTES분 안에 지정한 수량을 시장가 매수. 위의 최대 매수금액·종목 수·지수 조건과 따로 셈
  *   종목당 금액 = 하루 최대 매수금액 ÷ 최대 종목 수, 수량은 현재가로 나눈 정수(1주가 더 비싸면 건너뜀). 하루 매수 합계는 최대 매수금액을 넘지 않음.
  * 매도 (이 자동매매가 산 종목만, 다른 보유 종목은 건드리지 않음):
  *   - 평균 체결가 대비 +익절% 이상 → 시장가 매도, -손절% 이하 → 시장가 매도
  *   - 정규장 마감 10분 전: 미체결 매수 취소, 남은 종목 전량 시장가 매도, 그날 새 매수 중단
+ *     (미장 연동 종목은 '장마감 전량 매도'를 끄면 팔지 않고 보유, 다음 날부터도 익절·손절만)
  *   - 꺼도 이미 산 종목의 익절·손절·장마감 매도는 계속 (켜고 끄는 건 새 매수만)
  *   - 서버가 꺼져 있어 전날 못 판 종목은 다음 장 시작 후 바로 매도
  * 안전장치:
@@ -65,6 +68,8 @@ final class Trader {
     // ponytail: 지수 대신 추종 ETF(코스닥150·IWM)로 봄. 코스닥 종합지수와 조금 다를 수 있음, 정확히 필요하면 KB 지수 시세로 바꿀 것
     static final Map<String, String[]> INDEX = Map.of("KR", new String[]{"229200", "코스닥"}, "US", new String[]{"IWM", "러셀 2000"});
     static final int TICK_SECONDS = 5;
+    static final String PAIR = "미장 연동";       // 미장 연동 매수의 source
+    static final int PAIR_WINDOW_MINUTES = 30;   // 코스피 장 시작 후 몇 분 안에만 미장 연동 매수 (서버가 늦게 켜져 오후에 사지 않게)
     static final int CUTOFF_MINUTES = 10;            // 정규장 마감 몇 분 전에 전량 매도·매수 중단
     static final int ACCOUNT_SECONDS = 30;           // 화면의 토스 계좌 금액 갱신 간격
     private static final long LEASE_MS = 30_000;      // 주문하는 프로세스 임대 시간 (5초마다 연장)
@@ -84,7 +89,10 @@ final class Trader {
             + " buy_client TEXT, buy_order TEXT, buy_sent INTEGER, sell_client TEXT, sell_order TEXT, sell_sent INTEGER,"
             + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, bought TEXT, UNIQUE (market, day, symbol));"
             + "CREATE TABLE IF NOT EXISTS trader_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, market TEXT NOT NULL, text TEXT NOT NULL);"
-            + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL)";
+            + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL);"
+            // 미장 연동 짝: 미국 종목(signal)이 오르면 코스피 종목(symbol)을 qty주 매수. 같은 코스피 종목은 짝 하나
+            + "CREATE TABLE IF NOT EXISTS trader_pair (symbol TEXT PRIMARY KEY, name TEXT NOT NULL, signal TEXT NOT NULL, qty INTEGER NOT NULL,"
+            + " added TEXT NOT NULL)";
 
     private final Api api;
     private final Path db;
@@ -93,6 +101,8 @@ final class Trader {
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Double> lastPrice = new ConcurrentHashMap<>();   // "KR:005930" -> 현재가 (화면 손익 표시용)
     private final Map<String, Double> prevClose = new ConcurrentHashMap<>();   // "KR:2026-10-19" -> 지수 ETF 전일 종가 (하루 한 번 받음)
+    private final Map<String, Map<String, Object>> pairChecks = new ConcurrentHashMap<>();  // "NVDA:2026-10-19"(코스피 날짜) -> 직전 미장 종가 비교
+    private volatile String pairPhase = "확인 전";
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
@@ -170,6 +180,10 @@ final class Trader {
         c.put("stopLoss", 2.0);     // %
         c.put("KR", market(1_000_000, 5, false));  // 원
         c.put("US", market(1_000, 5, false));      // 달러
+        Map<String, Object> pair = new LinkedHashMap<>();
+        pair.put("enabled", false);    // 미장 연동 매수 (위 enabled와 따로)
+        pair.put("closeSell", true);   // 미장 연동 종목도 장마감 10분 전 전량 매도. 끄면 보유하고 익절·손절만
+        c.put("pair", pair);
         return c;
     }
 
@@ -241,13 +255,22 @@ final class Trader {
                 dst.put("auto", Boolean.TRUE.equals(src.get("auto")));
             }
         }
+        if (in.get("pair") instanceof Map) {
+            Map<String, Object> src = (Map<String, Object>) in.get("pair");
+            Map<String, Object> dst = (Map<String, Object>) c.get("pair");
+            for (String k : new String[]{"enabled", "closeSell"}) {
+                if (src.containsKey(k)) {
+                    dst.put(k, Boolean.TRUE.equals(src.get(k)));
+                }
+            }
+        }
         try (Connection con = connect();
              PreparedStatement ps = con.prepareStatement("INSERT OR REPLACE INTO trader_config (k, v) VALUES ('config', ?)")) {
             ps.setString(1, GSON.toJson(c));
             ps.executeUpdate();
         }
         log("ALL", "설정 저장: " + (Boolean.TRUE.equals(c.get("enabled")) ? "켜짐" : "꺼짐") + " · 익절 " + c.get("takeProfit")
-                + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US"));
+                + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US") + " · 미장 연동 " + c.get("pair"));
     }
 
     private static double number(Object v, String name) {
@@ -260,7 +283,7 @@ final class Trader {
 
     // ------------------------------------------------------------------ 화면 명령
 
-    /** POST /api/trader {"action": "config"|"pick"|"unpick"|"sellAll", ...} -> status() */
+    /** POST /api/trader {"action": "config"|"pick"|"unpick"|"pair"|"unpair"|"sellAll", ...} -> status() */
     @SuppressWarnings("unchecked")
     Map<String, Object> command(Map<String, Object> body) throws IOException {
         if (api == null) {
@@ -296,6 +319,34 @@ final class Trader {
                         ps.executeUpdate();
                     }
                     log(m, "매수 대상 삭제: " + body.get("symbol"));
+                    break;
+                case "pair": {  // 미장 연동 짝 추가·수정: {signal: 미국 티커, symbol: 코스피 종목번호, name, qty}
+                    String signal = symbol("US", Values.str(body.get("signal")));
+                    String kr = symbol("KR", Values.str(body.get("symbol")));
+                    double qty = number(body.get("qty"), "수량");
+                    if (qty < 1 || qty > 10_000 || qty != Math.rint(qty)) {
+                        throw new IllegalArgumentException("수량은 1~10000 사이 정수여야 합니다: " + body.get("qty"));
+                    }
+                    String krName = Values.str(body.get("name")).trim();
+                    try (Connection con = connect();
+                         PreparedStatement ps = con.prepareStatement("INSERT OR REPLACE INTO trader_pair (symbol, name, signal, qty, added) VALUES (?, ?, ?, ?, ?)")) {
+                        ps.setString(1, kr);
+                        ps.setString(2, krName.isEmpty() ? kr : krName);
+                        ps.setString(3, signal);
+                        ps.setLong(4, (long) qty);
+                        ps.setString(5, now().format(AT));
+                        ps.executeUpdate();
+                    }
+                    log("KR", "미장 연동 추가: " + signal + " 상승 → " + krName + "(" + kr + ") " + (long) qty + "주");
+                    break;
+                }
+                case "unpair":
+                    try (Connection con = connect();
+                         PreparedStatement ps = con.prepareStatement("DELETE FROM trader_pair WHERE symbol = ?")) {
+                        ps.setString(1, Values.str(body.get("symbol")).trim().toUpperCase());
+                        ps.executeUpdate();
+                    }
+                    log("KR", "미장 연동 삭제: " + body.get("symbol"));
                     break;
                 case "sellAll":
                     market(m);
@@ -406,13 +457,17 @@ final class Trader {
             return;
         }
         List<Map<String, Object>> open = positions(m, "status = 'OPEN'");
+        Map<String, Object> pc = (Map<String, Object>) cfg.get("pair");
+        boolean holdPairs = !Boolean.TRUE.equals(pc.get("closeSell"));  // 미장 연동 종목은 장마감에 팔지 않고 보유
         if (!now.isBefore(cutoff)) {  // 마감 10분 전: 미체결 매수 취소, 전량 매도, 새 매수 없음
-            setPhase(m, "마감 정리 (새 매수 없음, 남은 종목 전량 매도)");
+            setPhase(m, "마감 정리 (새 매수 없음, 남은 종목 전량 매도" + (holdPairs ? ", 미장 연동 종목은 보유" : "") + ")");
             for (Map<String, Object> p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
                 cancel(m, p);
             }
             for (Map<String, Object> p : open) {
-                sell(m, p, "장마감");
+                if (!(holdPairs && PAIR.equals(p.get("source")))) {
+                    sell(m, p, "장마감");
+                }
             }
             return;
         }
@@ -434,7 +489,7 @@ final class Trader {
         double sl = Values.num(cfg.get("stopLoss")) / 100;
         Map<String, Double> prices = prices(m, open.stream().map(p -> Values.str(p.get("symbol"))).toArray(String[]::new));
         for (Map<String, Object> p : open) {
-            if (!s.day.equals(p.get("day"))) {
+            if (!s.day.equals(p.get("day")) && !(holdPairs && PAIR.equals(p.get("source")))) {  // 보유로 둔 미장 연동 종목은 익절·손절만
                 sell(m, p, "전날 미청산");
                 continue;
             }
@@ -449,6 +504,9 @@ final class Trader {
             } else if (r <= -sl) {
                 sell(m, p, "손절 " + pct(r));
             }
+        }
+        if ("KR".equals(m)) {
+            buyPairs(s, now, pc);
         }
         if (!Boolean.TRUE.equals(cfg.get("enabled"))) {
             return;
@@ -478,7 +536,8 @@ final class Trader {
             if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
                 continue;  // 오늘 이미 샀거나 시도함
             }
-            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'", m, s.day);
+            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source <> ?",
+                    m, s.day, PAIR);  // 미장 연동은 따로 셈
             double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
             if (today.size() >= maxStocks || spent >= budget) {
                 waiting = "매매 중 · " + (today.size() >= maxStocks ? "오늘 최대 종목 수(" + maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
@@ -506,6 +565,102 @@ final class Trader {
             buy(m, s.day, c, qty, qty * price);
         }
         setPhase(m, waiting);
+    }
+
+    /**
+     * 미장 연동 매수 (코스피, 장 시작 후 PAIR_WINDOW_MINUTES분 안): 짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면 qty주 시장가 매수.
+     * 같은 코스피 종목은 하루 한 번 (trader_position UNIQUE). 미장 확인은 짝·날짜마다 한 번만 받아 둠.
+     */
+    private void buyPairs(Session s, ZonedDateTime now, Map<String, Object> pc) throws SQLException, IOException {
+        List<Map<String, Object>> pairs = rows("SELECT symbol, name, signal, qty FROM trader_pair ORDER BY added, rowid");
+        String text;
+        if (!Boolean.TRUE.equals(pc.get("enabled"))) {
+            text = "꺼짐 (새 매수 없음, 보유분 익절·손절" + (Boolean.TRUE.equals(pc.get("closeSell")) ? "·장마감 매도)" : "만)");
+        } else if (pairs.isEmpty()) {
+            text = "켜짐 · 짝이 없음";
+        } else if (!now.isBefore(s.open.plusMinutes(PAIR_WINDOW_MINUTES))) {
+            text = "켜짐 · 오늘 매수 시간(장 시작 후 " + PAIR_WINDOW_MINUTES + "분) 지남";
+        } else {
+            text = "켜짐 · 오늘 짝 " + pairs.size() + "개 확인함";
+            for (Map<String, Object> p : pairs) {
+                String symbol = Values.str(p.get("symbol"));
+                String signal = Values.str(p.get("signal"));
+                if (!rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
+                    continue;  // 오늘 이미 샀거나 시도함
+                }
+                Map<String, Object> chk;
+                try {
+                    chk = pairCheck(signal, s.day);
+                } catch (IOException e) {
+                    text = "켜짐 · " + signal + " 미장 종가를 받지 못해 다시 시도 (" + e.getMessage() + ")";
+                    continue;
+                }
+                if (chk == null) {
+                    text = "켜짐 · " + signal + " 미장 종가가 부족해 다시 시도";
+                    continue;
+                }
+                if (!Boolean.TRUE.equals(chk.get("up"))) {
+                    continue;  // 하락·보합: 오늘은 사지 않음 (확인 결과는 기록에 한 번 남김)
+                }
+                Double price = prices("KR", symbol).get(symbol);
+                if (price == null || price <= 0) {
+                    text = "켜짐 · " + p.get("name") + "(" + symbol + ") 현재가를 받지 못해 다시 시도";
+                    continue;
+                }
+                long qty = Values.lng(p.get("qty"));
+                buy("KR", s.day, new String[]{symbol, Values.str(p.get("name")), PAIR}, qty, qty * price);
+            }
+        }
+        if (!text.equals(pairPhase)) {
+            pairPhase = text;
+            log("KR", "미장 연동: " + text);
+        }
+    }
+
+    /**
+     * 미국 종목의 직전 미장 종가 비교 {usDay, close, prev, change(%), up}. 코스피 날짜마다 한 번만 받아 기억.
+     * 일봉(최신순)에서 아직 끝나지 않은 오늘 미장 봉은 빼고, 남은 맨 앞 두 봉의 종가를 비교. 봉이 모자라면 null (다음 확인에 다시)
+     */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> pairCheck(String signal, String krDay) throws IOException {
+        String key = signal + ":" + krDay;
+        Map<String, Object> got = pairChecks.get(key);
+        if (got != null) {
+            return got;
+        }
+        Session us = session("US");
+        boolean closed = us.open != null && !now().isBefore(us.close);  // 오늘 미장이 끝났으면 오늘 봉도 확정
+        Map<String, String> q = param("symbol", signal);
+        q.put("interval", "1d");
+        q.put("count", "5");
+        Object candles = map(api.get("/api/v1/candles", q, false)).get("candles");
+        List<Map<String, Object>> done = new ArrayList<>();
+        for (Object o : candles instanceof List ? (List<Object>) candles : new ArrayList<>()) {
+            String d = Values.str(map(o).get("timestamp"));
+            d = d.length() >= 10 ? d.substring(0, 10) : d;
+            if (d.compareTo(us.day) < 0 || d.equals(us.day) && closed) {
+                Map<String, Object> c = new LinkedHashMap<>();
+                c.put("d", d);
+                c.put("c", Values.numOrNull(map(o).get("closePrice")));
+                done.add(c);
+            }
+        }
+        done.sort((a, b) -> Values.str(b.get("d")).compareTo(Values.str(a.get("d"))));
+        if (done.size() < 2 || done.get(0).get("c") == null || done.get(1).get("c") == null || Values.num(done.get(1).get("c")) <= 0) {
+            return null;
+        }
+        double close = Values.num(done.get(0).get("c"));
+        double prev = Values.num(done.get(1).get("c"));
+        got = new LinkedHashMap<>();
+        got.put("usDay", done.get(0).get("d"));
+        got.put("close", close);
+        got.put("prev", prev);
+        got.put("change", (close / prev - 1) * 100);
+        got.put("up", close > prev);
+        pairChecks.put(key, got);
+        log("KR", "미장 연동 확인: " + signal + " " + got.get("usDay") + " 종가 " + close + " (전일 " + prev + ", " + pct(close / prev - 1) + ") → "
+                + (close > prev ? "상승, 짝 종목 매수" : "상승 아님, 오늘은 사지 않음"));
+        return got;
     }
 
     /** 시장 단계 (화면에 표시). 바뀔 때만 기록·터미널·trader.log에 한 줄 남겨 '왜 주문이 없는지' 알 수 있게 */
@@ -874,7 +1029,8 @@ final class Trader {
                 x.put("open", s == null || s.open == null ? null : s.open.format(AT));
                 x.put("cutoff", s == null || s.close == null ? null : s.close.minusMinutes(CUTOFF_MINUTES).format(AT));
                 x.put("close", s == null || s.close == null ? null : s.close.format(AT));
-                List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'", m, day);
+                List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'"
+                        + " AND source <> ?", m, day, PAIR);  // 미장 연동은 따로 셈
                 x.put("spent", today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum());
                 x.put("count", today.size());
                 x.put("halted", getFlag("halt:" + m + ":" + day) != null);
@@ -893,6 +1049,15 @@ final class Trader {
             }
             out.put("markets", ms);
             out.put("positions", positions);
+            // 미장 연동 짝: 오늘(코스피 날짜) 미장 확인 결과와 함께
+            String krDay = todayKey("KR");
+            List<Map<String, Object>> pairs = rows("SELECT symbol, name, signal, qty, added FROM trader_pair ORDER BY added, rowid");
+            for (Map<String, Object> p : pairs) {
+                p.put("check", pairChecks.get(p.get("signal") + ":" + krDay));
+            }
+            out.put("pairs", pairs);
+            out.put("pairPhase", api == null ? "토스 미설정" : leader ? pairPhase : "다른 서버가 주문 중이거나 확인 전");
+            out.put("pairWindowMinutes", PAIR_WINDOW_MINUTES);
             // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
             List<Map<String, Object>> history = rows("SELECT id, market, day, symbol, name, source, status, qty, avg, amount, est, bought,"
                     + " sell_qty, sell_avg, reason, closed FROM trader_position WHERE bought IS NOT NULL ORDER BY bought DESC, id DESC LIMIT 500");

@@ -31,6 +31,8 @@ class TraderTest {
         final Map<String, Double> held = new HashMap<>();
         final Map<String, Map<String, Object>> orders = new LinkedHashMap<>();
         final Map<String, String> byClient = new HashMap<>();
+        final Map<String, List<Object>> candles = new HashMap<>();  // 종목별 일봉 (최신순), 없으면 오늘·전일 두 봉
+        final java.util.Set<String> krDays = new java.util.HashSet<>(List.of("2026-10-19"));  // 코스피 영업일
         boolean krOpen = true;
         boolean fillNow = true;
         int failNextPosts;  // 주문은 접수하되 응답을 못 받은 것처럼 IOException
@@ -41,10 +43,10 @@ class TraderTest {
             // 토스처럼 date(현지 날짜)를 받아 그날 정보를 줌. 날짜를 안 넘기면 한국 날짜로 답하는 것까지 흉내 (2026-10-19 월요일만 영업일)
             String date = params != null && params.containsKey("date") ? params.get("date") : "2026-10-20";
             if (path.equals("/api/v1/market-calendar/KR")) {
-                Map<String, Object> reg = Map.of("startTime", "2026-10-19T09:00:00+09:00", "endTime", "2026-10-19T15:30:00+09:00");
+                Map<String, Object> reg = Map.of("startTime", date + "T09:00:00+09:00", "endTime", date + "T15:30:00+09:00");
                 Map<String, Object> today = new HashMap<>();
                 today.put("date", date);
-                today.put("integrated", krOpen && date.equals("2026-10-19") ? Map.of("regularMarket", reg) : null);
+                today.put("integrated", krOpen && krDays.contains(date) ? Map.of("regularMarket", reg) : null);
                 return Map.of("today", today);
             }
             if (path.equals("/api/v1/market-calendar/US")) {
@@ -65,6 +67,9 @@ class TraderTest {
             }
             if (path.equals("/api/v1/candles")) {  // 최신순: 오늘 봉(2026-10-19), 전일 봉
                 String sym = params.get("symbol");
+                if (candles.containsKey(sym)) {
+                    return Map.of("candles", candles.get(sym));
+                }
                 return Map.of("candles", List.of(Map.of("timestamp", "2026-10-19T09:00:00+09:00", "closePrice", String.valueOf(price.get(sym))),
                         Map.of("timestamp", "2026-10-16T09:00:00+09:00", "closePrice", String.valueOf(prevClose.get(sym)))));
             }
@@ -465,6 +470,104 @@ class TraderTest {
         assertEquals(List.of("BUY AAPL 2"), toss.sides());
         Map<String, Object> kr = (Map<String, Object>) ((Map<String, Object>) trader.status().get("markets")).get("KR");
         assertEquals("휴장", kr.get("phase"), "국내는 한국 날짜(10-20)로 물어 휴장");
+    }
+
+    // ------------------------------------------------------------------ 미장 연동 (미국 종목 상승 -> 코스피 종목 n주)
+
+    private void pairConfig(boolean enabled, boolean closeSell) throws Exception {
+        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("enabled", enabled, "closeSell", closeSell))));
+    }
+
+    /** 미국 종목 일봉 (최신순, 뉴욕 날짜): 10-16 금요일 종가 close, 10-15 목요일 종가 prev */
+    private void usCandles(String symbol, double close, double prev) {
+        toss.candles.put(symbol, List.of(Map.of("timestamp", "2026-10-16T16:00:00-04:00", "closePrice", String.valueOf(close)),
+                Map.of("timestamp", "2026-10-15T16:00:00-04:00", "closePrice", String.valueOf(prev))));
+    }
+
+    @Test
+    void pairBuysQtyAtOpenWhenUsCloseRose() throws Exception {
+        pairConfig(true, true);
+        usCandles("NVDA", 110, 100);  // 직전 미장(금) +10%
+        trader.command(Map.of("action", "pair", "signal", "nvda", "symbol", "005930", "name", "삼성전자", "qty", 3));
+        trader.tick();  // 09:01, 일반 매수(enabled)는 꺼져 있어도 미장 연동은 따로
+        assertEquals(List.of("BUY 005930 3"), toss.sides());
+        trader.tick();
+        assertEquals("미장 연동", positions().get(0).get("source"));
+        assertEquals("OPEN", positions().get(0).get("status"));
+        trader.tick();
+        assertEquals(1, toss.orders.size(), "같은 날 다시 사지 않음");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> chk = (Map<String, Object>) ((List<Map<String, Object>>) trader.status().get("pairs")).get(0).get("check");
+        assertEquals("2026-10-16", chk.get("usDay"));
+        assertEquals(true, chk.get("up"));
+        now = ZonedDateTime.of(2026, 10, 19, 15, 20, 0, 0, SEOUL);
+        trader.tick();
+        trader.tick();
+        assertEquals(List.of("BUY 005930 3", "SELL 005930 3"), toss.sides(), "장마감 전량 매도가 켜져 있으면 팔음");
+        assertEquals("장마감", positions().get(0).get("reason"));
+    }
+
+    @Test
+    void pairSkipsWhenUsCloseDidNotRiseOrAfterWindow() throws Exception {
+        pairConfig(true, true);
+        usCandles("NVDA", 100, 100);  // 보합
+        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 1));
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "미장이 오르지 않았으면 사지 않음");
+        trader = new Trader(toss, db, () -> now);  // 확인 결과를 잊은 새 서버
+        usCandles("NVDA", 110, 100);
+        now = ZonedDateTime.of(2026, 10, 19, 9, 31, 0, 0, SEOUL);  // 장 시작 30분 뒤
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "장 시작 후 30분이 지나면 사지 않음");
+        pairConfig(false, true);
+        now = ZonedDateTime.of(2026, 10, 19, 9, 5, 0, 0, SEOUL);
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "꺼져 있으면 사지 않음");
+    }
+
+    @Test
+    void pairHoldsOvernightWhenCloseSellOffButStillTakesProfit() throws Exception {
+        pairConfig(true, false);
+        usCandles("NVDA", 110, 100);
+        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 3));
+        config(true, 1_000_000, 5, false);
+        pick("000660");  // 일반 매수 종목은 그대로 장마감에 팖
+        toss.price.put("000660", 100_000.0);
+        trader.tick();
+        trader.tick();
+        now = ZonedDateTime.of(2026, 10, 19, 15, 20, 0, 0, SEOUL);
+        trader.tick();
+        trader.tick();
+        assertEquals(List.of("BUY 005930 3", "BUY 000660 2", "SELL 000660 2"), toss.sides(), "미장 연동 종목은 장마감에 팔지 않음");
+        toss.krDays.add("2026-10-20");
+        usCandles("NVDA", 100, 110);  // 다음 날은 미장 하락 -> 새로 사지 않음
+        now = ZonedDateTime.of(2026, 10, 20, 9, 1, 0, 0, SEOUL);
+        trader.tick();
+        assertEquals(3, toss.orders.size(), "전날 산 미장 연동 종목은 '전날 미청산'으로 팔지 않고 보유");
+        toss.price.put("005930", 72_100.0);  // +3% 익절
+        trader.tick();
+        trader.tick();
+        assertEquals("SELL 005930 3", toss.sides().get(3), "보유 중에도 익절·손절은 함");
+    }
+
+    @Test
+    void pairBuysDoNotUseDailyBudget() throws Exception {
+        pairConfig(true, true);
+        usCandles("NVDA", 110, 100);
+        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 3));  // 21만 원어치
+        config(true, 140_000, 1, false);  // 하루 14만 원·1종목
+        toss.price.put("000660", 70_000.0);
+        pick("000660");
+        trader.tick();
+        assertEquals(List.of("BUY 005930 3", "BUY 000660 2"), toss.sides(), "미장 연동 매수는 최대 매수금액·종목 수에 세지 않음");
+    }
+
+    @Test
+    void rejectsBadPairs() {
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "5930", "qty", 1)));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "1NV", "symbol", "005930", "qty", 1)));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 0)));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 1.5)));
     }
 
     @Test
