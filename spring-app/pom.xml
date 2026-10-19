@@ -75,6 +75,7 @@
           <include>chart.html</include>
           <include>volume.html</include>
           <include>trader.html</include>
+          <include>monitor.html</include>
           <include>signals.js</include>
           <include>sw.js</include>
         </includes>

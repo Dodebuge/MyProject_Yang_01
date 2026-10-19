@@ -14,6 +14,7 @@ appKey/appSecret은 서버에만 있고 브라우저로 전달되지 않습니�
     GET /me       -> 내정보: 보유 종목 현황 + 배당 내역 (me.html)
     GET /chart    -> 종목 검색 + 일봉 차트 (chart.html)
     GET /volume   -> 코스닥·러셀 2000 거래량 증가 종목 (volume.html, ?market=russell)
+    GET /monitor  -> 지수 히트맵(추종 ETF) + 시그널 알림 (monitor.html)
     GET /trader   -> 토스 자동매매 (trader.html). 엔진은 Spring·Java 서버에만 있어 이 서버의 /api/trader는 안내 오류
     GET /signals.js  -> 차트·거래량 화면이 함께 쓰는 보조지표·시그널 계산
     GET /sw.js       -> 브라우저 알림 서비스 워커 (안드로이드 크롬 등)
@@ -71,7 +72,7 @@ from heatmap import holdings_history, query_heatmap, query_holdings, query_quart
 from kb_client import KBApiError, KBClient
 
 HERE = Path(__file__).resolve().parent
-PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html", "/trader": "trader.html"}
+PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html", "/trader": "trader.html", "/monitor": "monitor.html"}
 SETTINGS_MAX_BYTES = 4096  # POST /api/settings 본문 크기 제한 (설정은 수십 바이트)
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 

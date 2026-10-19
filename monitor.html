@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시장 모니터</title>
+<!--
+  시장 모니터. dividends_web.py가 /monitor 로 제공합니다.
+  - 지수 히트맵: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000을 전일 대비 등락률 색으로. 5분마다 갱신.
+    KB 지수 시세 API가 없어 추종 ETF 일봉(/api/chart?recent=0)의 마지막 두 봉으로 계산합니다 (Trader.java INDEX와 같은 방식).
+  - 시그널 알림: 거래량 페이지와 같은 /api/alerts (코스닥·러셀 2000 모두). 1분마다 갱신.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --border: rgba(11,11,11,0.10); --hover: rgba(11,11,11,0.04);
+  --series-1: #2a78d6; --select: rgba(42,120,214,0.08); --bad: #d03b3b; --up: #e34948; --down: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+    --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --border: rgba(255,255,255,0.10); --hover: rgba(255,255,255,0.05);
+  --series-1: #3987e5; --select: rgba(57,135,229,0.14); --bad: #e66767; --up: #e66767; --down: #3987e5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
+.nav a:hover { background: var(--hover); color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
+.nav a.home { color: var(--muted); }
+button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.card + .card { margin-top: 12px; }
+.sub { color: var(--muted); font-size: 12px; margin: 0; }
+.head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.head h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.note { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+/* 지수 히트맵: 등락률이 클수록 진하게 (3%에서 가장 진함) */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+@media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile {
+  display: flex; flex-direction: column; gap: 2px; min-height: 120px; padding: 14px; border-radius: 10px;
+  color: var(--ink); text-decoration: none; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tone, var(--grid)) var(--mix, 0%), var(--surface));
+}
+.tile:hover, .tile:focus-visible { border-color: var(--series-1); outline: none; }
+.tile .name { font-weight: 650; font-size: 15px; }
+.tile .etf { color: var(--ink-2); font-size: 11px; }
+.tile .chg { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: auto; }
+.tile .px { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tile.err .chg { font-size: 13px; font-weight: 500; color: var(--bad); }
+/* 시그널 알림 목록 (volume.html과 같은 모양) */
+.code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.days { color: var(--muted); font-size: 11px; }
+.sig { display: inline-block; font-size: 11px; line-height: 17px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.sig.buy { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); background: color-mix(in srgb, var(--up) 8%, transparent); }
+.alerts { list-style: none; margin: 8px 0 0; padding: 0; }
+.alerts li a { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; padding: 5px 6px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.alerts li a:hover { background: var(--hover); }
+.alerts .when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 78px; }
+.alerts .mk { font-size: 11px; color: var(--ink-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
+.alerts .new { background: var(--select); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 2px 10px; font-size: 12px; }
+.seg button[aria-pressed="true"] { background: var(--select); color: var(--series-1); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="monitor" aria-current="page">모니터</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart">차트</a><a href="volume">거래량</a><a href="trader">자동매매</a></nav>
+      <h1>시장 모니터</h1>
+    </div>
+    <div style="display:flex;gap:8px"><button id="reload">다시 조회</button><button id="theme" aria-label="테마 전환">◐</button></div>
+  </header>
+
+  <section class="card">
+    <div class="head"><h2>지수 히트맵</h2><span class="sub" id="idx-status">불러오는 중…</span></div>
+    <div class="tiles" id="tiles"></div>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉의 마지막 봉과 그 전 봉 종가로 등락률을 계산합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다.</p>
+  </section>
+
+  <section class="card">
+    <div class="head"><h2>시그널 알림</h2>
+      <div class="seg" role="group" aria-label="시장" id="mk-filter"><button data-mk="" aria-pressed="true">전체</button><button data-mk="kosdaq" aria-pressed="false">코스닥</button><button data-mk="russell" aria-pressed="false">러셀 2000</button></div>
+      <span class="sub" id="alerts-status">불러오는 중…</span></div>
+    <ul class="alerts" id="alerts"></ul>
+  </section>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const NF = {};
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : (NF[d] ??= new Intl.NumberFormat("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d })).format(n);
+const ymd = d => String(d || "").replace(/^\d{4}-?(\d\d)-?(\d\d).*$/, (_, m, dd) => `${+m}/${+dd}`);
+
+// ---------------------------------------------------------------- 지수 히트맵
+// ponytail: 지수 대신 추종 ETF. 정확한 지수 값이 필요하면 KB 지수 시세 TR로 서버 API를 추가할 것
+const INDICES = [
+  { name: "코스피", market: "kr", code: "069500", etf: "KODEX 200" },
+  { name: "코스닥", market: "kr", code: "229200", etf: "KODEX 코스닥150" },
+  { name: "S&P 500", market: "us", code: "SPY", etf: "SPY" },
+  { name: "나스닥", market: "us", code: "QQQ", etf: "QQQ (나스닥 100)" },
+  { name: "다우", market: "us", code: "DIA", etf: "DIA" },
+  { name: "러셀 2000", market: "us", code: "IWM", etf: "IWM" },
+];
+
+async function getJson(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
+  if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+  return d;
+}
+
+function tile(ix, r) {
+  const href = `chart?market=${ix.market}&code=${encodeURIComponent(ix.code)}`;
+  const head = `<span class="name">${esc(ix.name)}</span><span class="etf">${esc(ix.etf)}</span>`;
+  if (r.status === "rejected") return `<a class="tile err" href="${href}">${head}<span class="chg">조회 실패: ${esc(r.reason.message)}</span></a>`;
+  const c = r.value.candles || [], last = c.at(-1), prev = c.at(-2);
+  const chg = last && prev?.c ? (last.c / prev.c - 1) * 100 : null;
+  const tone = chg > 0 ? "var(--up)" : chg < 0 ? "var(--down)" : "var(--grid)";
+  const mix = chg == null ? 0 : Math.min(Math.abs(chg) / 3, 1) * 55 + 8;
+  const dp = ix.market === "us" ? 2 : 0;
+  return `<a class="tile" href="${href}" style="--tone:${tone};--mix:${mix}%">${head}
+    <span class="chg">${chg == null ? "—" : `${chg > 0 ? "+" : ""}${fmt(chg, 2)}%`}</span>
+    <span class="px">${fmt(last?.c, dp)} · ${esc(ymd(last?.d))} 기준</span></a>`;
+}
+
+let idxSeq = 0;
+async function loadIndices() {
+  const seq = ++idxSeq;
+  $("#idx-status").textContent = "조회하는 중…";
+  const rs = await Promise.allSettled(INDICES.map(ix => getJson(`api/chart?market=${ix.market}&code=${ix.code}&recent=0`)));
+  if (seq !== idxSeq) return;
+  $("#tiles").innerHTML = INDICES.map((ix, i) => tile(ix, rs[i])).join("");
+  $("#idx-status").textContent = `${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 조회`;
+}
+
+// ---------------------------------------------------------------- 시그널 알림 (volume.html과 같은 /api/alerts, 브라우저 알림은 거래량 페이지에서)
+const AL = { last: -1, items: [], fresh: new Set(), mk: "" };
+const MK = { kosdaq: "코스닥", russell: "러셀 2000" };
+const alertDay = a => a.d ? ` ${+a.d.slice(4, 6)}/${+a.d.slice(6)}` : "";
+
+function renderAlerts() {
+  const items = AL.items.filter(a => !AL.mk || a.market === AL.mk);
+  $("#alerts").innerHTML = items.length ? items.map(a => `<li><a href="chart?${esc(a.chart)}" class="${AL.fresh.has(a.id) ? "new" : ""}" title="차트 열기">
+      <span class="when">${esc(a.at.slice(5).replace("-", "/"))}</span><span class="mk">${esc(MK[a.market] || a.market)}</span>
+      <b>${esc(a.name)}</b><span class="code">${esc(a.code)}</span><span class="sig buy">▲ ${esc(a.text)}${alertDay(a)}</span>
+      <span class="days">주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%</span></a></li>`).join("")
+    : `<li class="sub" style="padding:6px">아직 알림이 없습니다.</li>`;
+}
+
+async function pollAlerts() {
+  let d;
+  try { d = await getJson(`api/alerts${AL.last >= 0 ? `?since=${AL.last}` : ""}`); }
+  catch (err) { $("#alerts-status").textContent = `알림을 읽지 못했습니다: ${err.message}`; return; }
+  if (AL.last >= 0) d.alerts.forEach(a => AL.fresh.add(a.id));  // 첫 조회 뒤에 온 알림만 강조
+  AL.items = [...d.alerts, ...AL.items.filter(x => !d.alerts.some(a => a.id === x.id))].slice(0, 200);
+  AL.last = Math.max(AL.last, 0, ...d.alerts.map(a => a.id));
+  const mk = Object.values(d.markets).map(m => `${m.name} ${m.status}${m.checkedAt ? ` ${m.checkedAt.slice(11)}` : ""}`).join(" · ");
+  $("#alerts-status").textContent = `증가율 top ${d.top}의 새 상승 시그널 · 장중 ${d.every}분마다 · ${mk}`;
+  renderAlerts();
+}
+
+document.querySelectorAll("#mk-filter button").forEach(b => b.onclick = () => {
+  AL.mk = b.dataset.mk;
+  document.querySelectorAll("#mk-filter button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  renderAlerts();
+});
+$("#reload").onclick = () => { loadIndices(); pollAlerts(); };
+try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+$("#theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("div-theme", next); } catch {}
+};
+loadIndices();
+pollAlerts();
+setInterval(loadIndices, 5 * 60000);
+setInterval(pollAlerts, 60000);
+</script>
+</body>
+</html>
