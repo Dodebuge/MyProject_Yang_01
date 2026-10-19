@@ -591,6 +591,27 @@ class TraderTest {
     }
 
     @Test
+    void watchCheckMovesToNewUsCloseOnSameKospiDay() throws Exception {
+        toss.krDays.add("2026-10-20");
+        toss.candles.put("NVDA", List.of(Map.of("timestamp", "2026-10-19T16:00:00-04:00", "closePrice", "120"),
+                Map.of("timestamp", "2026-10-16T16:00:00-04:00", "closePrice", "110"),
+                Map.of("timestamp", "2026-10-15T16:00:00-04:00", "closePrice", "100")));
+        watch("NVDA");
+        now = ZonedDateTime.of(2026, 10, 20, 0, 30, 0, 0, SEOUL);  // 코스피는 10-20이지만 뉴욕 10-19 장중
+        trader.tick();
+        assertEquals("2026-10-16", watchCheck().get("usDay"), "끝나지 않은 10-19 봉은 빼고");
+        now = ZonedDateTime.of(2026, 10, 20, 6, 0, 0, 0, SEOUL);  // 10-19 미장 마감 후, 같은 코스피 날짜
+        trader.tick();
+        assertEquals("2026-10-19", watchCheck().get("usDay"), "미장이 끝나면 새 종가로");
+        assertEquals(120 / 110.0 * 100 - 100, (double) watchCheck().get("change"), 1e-9);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> watchCheck() throws Exception {
+        return (Map<String, Object>) ((List<Map<String, Object>>) trader.status().get("watch")).get(0).get("check");
+    }
+
+    @Test
     void eachEtfHasItsOwnTakeProfitAndStopLoss() throws Exception {
         pairConfig(true, true);
         trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of(

@@ -101,7 +101,7 @@ final class Trader {
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Double> lastPrice = new ConcurrentHashMap<>();   // "KR:005930" -> 현재가 (화면 손익 표시용)
     private final Map<String, Double> prevClose = new ConcurrentHashMap<>();   // "KR:2026-10-19" -> 지수 ETF 전일 종가 (하루 한 번 받음)
-    private final Map<String, Map<String, Object>> pairChecks = new ConcurrentHashMap<>();  // "NVDA:2026-10-19"(코스피 날짜) -> 직전 미장 종가 비교
+    private final Map<String, Map<String, Object>> pairChecks = new ConcurrentHashMap<>();  // "NVDA" -> 직전 미장 종가 비교 (미장 날짜·마감 여부가 바뀌면 다시)
     private volatile String pairPhase = "확인 전";
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
@@ -513,7 +513,7 @@ final class Trader {
         }
         ZonedDateTime cutoff = s.close.minusMinutes(CUTOFF_MINUTES);
         if ("KR".equals(m)) {
-            watchChecks(s.day);  // 화면 작은 히트맵용으로 장 시작 전에도 미장 종가 확인 (티커·날짜마다 한 번)
+            watchChecks();  // 화면 작은 히트맵용으로 장 시작 전에도 미장 종가 확인 (미장이 끝날 때마다 새로)
         }
         if (now.isBefore(s.open)) {
             setPhase(m, "장 시작 전 (정규장 " + s.open.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")) + " 시작, 한국 시간)");
@@ -644,10 +644,10 @@ final class Trader {
     }
 
     /** 등록한 미국 티커의 미장 종가 비교를 미리 받아 둠. 실패한 티커는 다음 확인에 다시 (매수 판단은 buyWatch) */
-    private void watchChecks(String krDay) throws SQLException {
+    private void watchChecks() throws SQLException {
         for (String signal : watchList()) {
             try {
-                pairCheck(signal, krDay);
+                pairCheck(signal);
             } catch (IOException | RuntimeException e) {
                 // 다음 확인에 다시
             }
@@ -676,7 +676,7 @@ final class Trader {
             for (String signal : tickers) {
                 Map<String, Object> chk;
                 try {
-                    chk = pairCheck(signal, s.day);  // 이미 확인한 티커는 기억한 값
+                    chk = pairCheck(signal);  // 이미 확인한 티커는 기억한 값
                 } catch (IOException e) {
                     text = "켜짐 · " + signal + " 미장 종가를 받지 못해 다시 시도 (" + e.getMessage() + ")";
                     break;
@@ -719,18 +719,19 @@ final class Trader {
     }
 
     /**
-     * 미국 종목의 직전 미장 종가 비교 {usDay, close, prev, change(%), up}. 코스피 날짜마다 한 번만 받아 기억.
+     * 미국 종목의 직전 미장 종가 비교 {usDay, close, prev, change(%), up}. 미장 날짜·마감 여부가 같으면 기억한 값.
+     * (예전엔 코스피 날짜마다 한 번이라, 한국 자정~미장 마감 사이에 받으면 전전일 종가가 다음 날 장 시작까지 남았음)
      * 일봉(최신순)에서 아직 끝나지 않은 오늘 미장 봉은 빼고, 남은 맨 앞 두 봉의 종가를 비교. 봉이 모자라면 null (다음 확인에 다시)
      */
     @SuppressWarnings("unchecked")
-    Map<String, Object> pairCheck(String signal, String krDay) throws IOException {
-        String key = signal + ":" + krDay;
-        Map<String, Object> got = pairChecks.get(key);
-        if (got != null) {
-            return got;
-        }
+    Map<String, Object> pairCheck(String signal) throws IOException {
         Session us = session("US");
         boolean closed = us.open != null && !now().isBefore(us.close);  // 오늘 미장이 끝났으면 오늘 봉도 확정
+        String key = us.day + (closed ? " 마감" : "");
+        Map<String, Object> got = pairChecks.get(signal);
+        if (got != null && key.equals(got.get("checked"))) {
+            return got;
+        }
         Map<String, String> q = param("symbol", signal);
         q.put("interval", "1d");
         q.put("count", "5");
@@ -758,7 +759,8 @@ final class Trader {
         got.put("prev", prev);
         got.put("change", (close / prev - 1) * 100);
         got.put("up", close > prev);
-        pairChecks.put(key, got);
+        got.put("checked", key);
+        pairChecks.put(signal, got);
         log("KR", "미장 연동 확인: " + signal + " " + got.get("usDay") + " 종가 " + close + " (전일 " + prev + ", " + pct(close / prev - 1) + ") → "
                 + (close > prev ? "상승" : close < prev ? "하락" : "보합"));
         return got;
@@ -1150,11 +1152,10 @@ final class Trader {
             }
             out.put("markets", ms);
             out.put("positions", positions);
-            // 미장 연동 미국 티커: 오늘(코스피 날짜) 미장 확인 결과와 함께
-            String krDay = todayKey("KR");
+            // 미장 연동 미국 티커: 마지막으로 확인한 미장 종가 비교와 함께
             List<Map<String, Object>> watch = rows("SELECT signal, added FROM trader_us_watch ORDER BY added, rowid");
             for (Map<String, Object> w : watch) {
-                w.put("check", pairChecks.get(w.get("signal") + ":" + krDay));
+                w.put("check", pairChecks.get(Values.str(w.get("signal"))));
             }
             out.put("watch", watch);
             out.put("pairPhase", api == null ? "토스 미설정" : leader ? pairPhase : "다른 서버가 주문 중이거나 확인 전");
