@@ -41,6 +41,7 @@ import java.util.function.Supplier;
  *   지수가 전일 대비 상승일 때만 새 매수: 국내는 코스닥, 미국은 러셀 2000 (토스엔 지수 시세가 없어 추종 ETF INDEX로 봄). 하락·보합이면 대기하다 오르면 매수
  *   - 미장 연동 (시장 모니터 화면, 따로 켜고 끔): 미국 종목 ↔ 코스피 종목 짝마다, 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면
  *     코스피 장 시작 후 PAIR_WINDOW_MINUTES분 안에 지정한 수량을 시장가 매수. 위의 최대 매수금액·종목 수·지수 조건과 따로 셈
+ *     짝의 미국 종목이 모두 전일 대비 하락이면 (켜 두었을 때) 지정한 인버스 종목을 같은 때 지정 수량 매수 (매도 규칙은 미장 연동과 같음)
  *   종목당 금액 = 하루 최대 매수금액 ÷ 최대 종목 수, 수량은 현재가로 나눈 정수(1주가 더 비싸면 건너뜀). 하루 매수 합계는 최대 매수금액을 넘지 않음.
  * 매도 (이 자동매매가 산 종목만, 다른 보유 종목은 건드리지 않음):
  *   - 평균 체결가 대비 +익절% 이상 → 시장가 매도, -손절% 이하 → 시장가 매도
@@ -183,6 +184,12 @@ final class Trader {
         Map<String, Object> pair = new LinkedHashMap<>();
         pair.put("enabled", false);    // 미장 연동 매수 (위 enabled와 따로)
         pair.put("closeSell", true);   // 미장 연동 종목도 장마감 10분 전 전량 매도. 끄면 보유하고 익절·손절만
+        Map<String, Object> inverse = new LinkedHashMap<>();  // 짝의 미국 종목이 모두 하락이면 살 인버스
+        inverse.put("enabled", false);
+        inverse.put("symbol", "114800");
+        inverse.put("name", "KODEX 인버스");
+        inverse.put("qty", 1);
+        pair.put("inverse", inverse);
         c.put("pair", pair);
         return c;
     }
@@ -262,6 +269,26 @@ final class Trader {
                 if (src.containsKey(k)) {
                     dst.put(k, Boolean.TRUE.equals(src.get(k)));
                 }
+            }
+            if (src.get("inverse") instanceof Map) {
+                Map<String, Object> in2 = (Map<String, Object>) src.get("inverse");
+                Map<String, Object> inv = new LinkedHashMap<>((Map<String, Object>) dst.get("inverse"));
+                if (in2.containsKey("enabled")) {
+                    inv.put("enabled", Boolean.TRUE.equals(in2.get("enabled")));
+                }
+                if (in2.containsKey("symbol")) {
+                    inv.put("symbol", symbol("KR", Values.str(in2.get("symbol"))));
+                    String n = Values.str(in2.get("name")).trim();
+                    inv.put("name", n.isEmpty() ? inv.get("symbol") : n.length() > 40 ? n.substring(0, 40) : n);
+                }
+                if (in2.containsKey("qty")) {
+                    double q = number(in2.get("qty"), "인버스 수량");
+                    if (q < 1 || q > 10_000 || q != Math.rint(q)) {
+                        throw new IllegalArgumentException("인버스 수량은 1~10000 사이 정수여야 합니다: " + in2.get("qty"));
+                    }
+                    inv.put("qty", (int) q);
+                }
+                dst.put("inverse", inv);
             }
         }
         try (Connection con = connect();
@@ -610,11 +637,49 @@ final class Trader {
                 long qty = Values.lng(p.get("qty"));
                 buy("KR", s.day, new String[]{symbol, Values.str(p.get("name")), PAIR}, qty, qty * price);
             }
+            String inv = buyInverse(s, pairs, (Map<String, Object>) pc.get("inverse"));
+            if (inv != null) {
+                text = inv;
+            }
         }
         if (!text.equals(pairPhase)) {
             pairPhase = text;
             log("KR", "미장 연동: " + text);
         }
+    }
+
+    /**
+     * 짝의 미국 종목이 모두 직전 미장 종가 기준 전일 대비 하락(보합은 하락 아님)이면 인버스 종목을 지정 수량 매수 (하루 한 번).
+     * 아직 확인하지 못한 미국 종목이 있으면 다음 확인에 다시. 돌려주는 값은 화면 상태 문구 (바꿀 것이 없으면 null)
+     */
+    private String buyInverse(Session s, List<Map<String, Object>> pairs, Map<String, Object> inv) throws SQLException, IOException {
+        String symbol = Values.str(inv.get("symbol"));
+        if (!Boolean.TRUE.equals(inv.get("enabled"))
+                || !rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
+            return null;  // 꺼짐 또는 오늘 이미 샀거나 시도함
+        }
+        for (Map<String, Object> p : pairs) {
+            Map<String, Object> chk;
+            try {
+                chk = pairCheck(Values.str(p.get("signal")), s.day);  // 이미 확인한 종목은 기억한 값
+            } catch (IOException e) {
+                chk = null;
+            }
+            if (chk == null) {
+                return "켜짐 · " + p.get("signal") + " 미장 종가를 아직 확인하지 못해 인버스 판단을 다시 시도";
+            }
+            if (!(Values.num(chk.get("change")) < 0)) {
+                return null;  // 하나라도 하락이 아니면 인버스는 사지 않음
+            }
+        }
+        Double price = prices("KR", symbol).get(symbol);
+        if (price == null || price <= 0) {
+            return "켜짐 · 인버스 " + inv.get("name") + "(" + symbol + ") 현재가를 받지 못해 다시 시도";
+        }
+        long qty = Values.lng(inv.get("qty"));
+        log("KR", "미장 연동: 짝의 미국 종목 " + pairs.size() + "개가 모두 하락 → 인버스 " + inv.get("name") + "(" + symbol + ") " + qty + "주 매수");
+        buy("KR", s.day, new String[]{symbol, Values.str(inv.get("name")), PAIR}, qty, qty * price);
+        return null;
     }
 
     /**

@@ -562,6 +562,67 @@ class TraderTest {
         assertEquals(List.of("BUY 005930 3", "BUY 000660 2"), toss.sides(), "미장 연동 매수는 최대 매수금액·종목 수에 세지 않음");
     }
 
+    private void inverse(boolean enabled, int qty) throws Exception {
+        trader.command(Map.of("action", "config", "config", Map.of("pair",
+                Map.of("inverse", Map.of("enabled", enabled, "symbol", "114800", "name", "KODEX 인버스", "qty", qty)))));
+    }
+
+    @Test
+    void buysInverseWhenAllUsSignalsFell() throws Exception {
+        pairConfig(true, true);
+        inverse(true, 7);
+        toss.price.put("114800", 5_000.0);
+        usCandles("NVDA", 99, 100);
+        usCandles("AMD", 140, 150);
+        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "000660", "qty", 3));
+        trader.command(Map.of("action", "pair", "signal", "AMD", "symbol", "005930", "qty", 5));
+        trader.tick();
+        trader.tick();
+        assertEquals(List.of("BUY 114800 7"), toss.sides(), "모두 하락: 짝 종목은 안 사고 인버스만");
+        assertEquals("미장 연동", positions().get(0).get("source"));
+        assertEquals("OPEN", positions().get(0).get("status"));
+    }
+
+    @Test
+    void noInverseUnlessEverySignalFell() throws Exception {
+        pairConfig(true, true);
+        inverse(true, 7);
+        toss.price.put("114800", 5_000.0);
+        toss.price.put("000660", 100_000.0);
+        usCandles("NVDA", 110, 100);  // 상승
+        usCandles("AMD", 140, 150);   // 하락
+        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "000660", "qty", 3));
+        trader.command(Map.of("action", "pair", "signal", "AMD", "symbol", "005930", "qty", 5));
+        trader.tick();
+        trader.tick();
+        assertEquals(List.of("BUY 000660 3"), toss.sides(), "하나라도 오르면 인버스는 안 삼");
+
+        trader = new Trader(toss, db, () -> now);  // 새 날처럼 확인 결과를 잊은 서버
+        toss.orders.clear();
+        toss.byClient.clear();
+        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + db);
+             java.sql.Statement st = c.createStatement()) {
+            st.execute("DELETE FROM trader_position");
+        }
+        usCandles("NVDA", 100, 100);  // 보합은 하락이 아님
+        trader.tick();
+        assertEquals(List.of(), toss.sides().stream().filter(x -> x.contains("114800")).collect(Collectors.toList()), "보합이 섞이면 인버스는 안 삼");
+
+        inverse(false, 7);
+        usCandles("NVDA", 90, 100);
+        trader = new Trader(toss, db, () -> now);
+        trader.tick();
+        assertTrue(toss.sides().stream().noneMatch(x -> x.contains("114800")), "인버스가 꺼져 있으면 안 삼");
+    }
+
+    @Test
+    void rejectsBadInverse() {
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
+                Map.of("pair", Map.of("inverse", Map.of("symbol", "11480", "qty", 1))))));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
+                Map.of("pair", Map.of("inverse", Map.of("qty", 0))))));
+    }
+
     @Test
     void rejectsBadPairs() {
         assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "5930", "qty", 1)));

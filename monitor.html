@@ -151,6 +151,13 @@ td .del2 { padding: 2px 8px; font-size: 12px; }
       <thead><tr><th>미국 종목 (신호)</th><th class="num">직전 미장 종가</th><th>→ 코스피 매수 종목</th><th class="num">수량</th><th>오늘</th><th></th></tr></thead>
       <tbody id="pairs"></tbody>
     </table></div>
+    <form class="pair-add" id="inv-form">
+      <label><input type="checkbox" id="inv-on" disabled> 미국 종목이 <b>모두</b> 전일 대비 하락이면 인버스</label>
+      <input id="inv-kr" list="pa-kr-list" placeholder="인버스 종목" aria-label="인버스 종목" autocomplete="off">
+      <input id="inv-qty" type="number" min="1" max="10000" step="1" aria-label="인버스 수량"> <span>주 매수</span>
+      <button id="inv-btn" disabled>저장</button>
+      <span class="sub" id="inv-state"></span>
+    </form>
     <form class="pair-add" id="pair-add">
       <input id="pa-signal" placeholder="미국 티커 (예: NVDA)" aria-label="미국 티커" autocomplete="off" required>
       <span aria-hidden="true">상승하면 →</span>
@@ -327,7 +334,7 @@ document.querySelectorAll("#period button").forEach(b => b.onclick = () => {
 // ---------------------------------------------------------------- 코스피 자동매매 · 미장 연동 (토스, Trader.java)
 // 짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면 코스피 장 시작 직후 지정 수량 시장가 매수. 엔진은 Spring·Java 서버에만 있음
 const PST = { BUYING: "매수 중", OPEN: "보유", SELLING: "매도 중", CLOSED: "청산", FAILED: "실패" };
-let PT = null;
+let PT = null, invDirty = false;
 async function traderApi(body) {
   const res = await fetch("api/trader", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
@@ -343,7 +350,14 @@ function renderPairs() {
   $("#pair-on").setAttribute("aria-pressed", pc.enabled);
   $("#pair-on").textContent = pc.enabled ? "켜짐 (실제 주문) · 끄기" : "켜기";
   $("#pair-close").checked = pc.closeSell;
-  for (const el of ["#pair-on", "#pair-close", "#pa-btn"]) $(el).disabled = !PT.configured;
+  for (const el of ["#pair-on", "#pair-close", "#pa-btn", "#inv-on", "#inv-btn"]) $(el).disabled = !PT.configured;
+  // 인버스: 고치는 중이면 10초 갱신이 입력을 덮지 않게
+  const inv = pc.inverse, invPos = mine.find(x => x.symbol === inv.symbol && x.day === kr.day);
+  if (!invDirty) { $("#inv-on").checked = inv.enabled; $("#inv-kr").value = `${inv.name} (${inv.symbol})`; $("#inv-qty").value = inv.qty; }
+  const checks = PT.pairs.map(p => p.check);
+  $("#inv-state").textContent = invPos ? `오늘 ${PST[invPos.status] || invPos.status}${invPos.qty ? ` ${fmt(invPos.qty)}주` : ""}`
+    : !PT.pairs.length ? "" : checks.some(k => !k) ? "장 시작 때 판단"
+    : checks.every(k => k.change < 0) ? (inv.enabled ? "오늘 모두 하락 · 매수 대기" : "오늘 모두 하락 (인버스 꺼짐)") : "오늘 모두 하락 아님 · 안 삼";
   $("#pair-status").textContent = `${PT.pairPhase} · 코스피 ${kr.phase}`;
   $("#pair-rule").textContent = `익절 +${c.takeProfit}% · 손절 -${c.stopLoss}% (자동매매 화면과 같은 값)`;
   $("#pairs").innerHTML = PT.pairs.length ? PT.pairs.map(p => {
@@ -361,7 +375,7 @@ function renderPairs() {
       <td class="num">${fmt(p.qty)}</td><td class="num">${won(p.avg)}</td><td class="num">${won(p.last)}</td>
       <td class="num ${cls(p.pnl)}">${p.pnl == null ? "—" : `${p.pnl > 0 ? "+" : ""}${fmt(p.pnl, 2)}%`}</td></tr>`).join("")}</tbody></table></div>` : "";
   $("#pair-note").textContent = `짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면, 코스피 장 시작 후 ${PT.pairWindowMinutes}분 안에 지정 수량을 토스 시장가로 매수합니다(같은 종목 하루 한 번). `
-    + `산 종목은 익절·손절에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
+    + `짝의 미국 종목이 모두 하락(보합은 하락 아님)한 날은 인버스를 켜 두었다면 지정한 인버스 종목을 같은 때 삽니다. 산 종목은 익절·손절에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
 }
 
 async function loadPairs(body) {
@@ -380,21 +394,32 @@ $("#pairs").onclick = e => {
 };
 // 코스피 종목: /api/search 결과를 datalist로 ("삼성전자 (005930)"처럼 고르거나 종목번호 6자리를 직접)
 let krFound = [], krSearching;
-$("#pa-kr").oninput = () => {
+const krPick = v => {  // 입력값 -> {symbol, name} 또는 null
+  const m = v.match(/\((\w{6})\)$/) || v.match(/^(\w{6})$/);
+  return m && { symbol: m[1], name: v.includes("(") ? v.replace(/\s*\(\w{6}\)$/, "") : krFound.find(s => s.code === m[1])?.name || m[1] };
+};
+$("#inv-form").oninput = () => { invDirty = true; };
+$("#inv-kr").oninput = $("#pa-kr").oninput = e => {
   clearTimeout(krSearching);
   krSearching = setTimeout(async () => {
-    const q = $("#pa-kr").value.trim();
+    const q = e.target.value.trim();
     if (!q || /\(\w{6}\)$/.test(q)) return;
     try { krFound = (await getJson(`api/search?q=${encodeURIComponent(q)}`)).results.filter(s => s.market === "kr").slice(0, 15); } catch { return; }
     $("#pa-kr-list").innerHTML = krFound.map(s => `<option value="${esc(s.name)} (${esc(s.code)})"></option>`).join("");
   }, 200);
 };
+$("#inv-form").onsubmit = async e => {
+  e.preventDefault();
+  const k = krPick($("#inv-kr").value.trim()), on = $("#inv-on").checked;
+  if (!k) return pairErr("인버스 종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
+  if (on && !PT.config.pair.inverse.enabled && !confirm(`짝의 미국 종목이 모두 하락한 날 ${k.name}(${k.symbol}) ${$("#inv-qty").value}주를 실제로 시장가 매수합니다.`)) return;
+  if (await loadPairs({ action: "config", config: { pair: { inverse: { enabled: on, symbol: k.symbol, name: k.name, qty: Number($("#inv-qty").value) } } } })) invDirty = false;
+};
 $("#pair-add").onsubmit = async e => {
   e.preventDefault();
-  const v = $("#pa-kr").value.trim(), m = v.match(/\((\w{6})\)$/) || v.match(/^(\w{6})$/);
-  if (!m) return pairErr("코스피 종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
-  const name = v.includes("(") ? v.replace(/\s*\(\w{6}\)$/, "") : krFound.find(s => s.code === m[1])?.name || m[1];
-  if (await loadPairs({ action: "pair", signal: $("#pa-signal").value.trim(), symbol: m[1], name, qty: Number($("#pa-qty").value) })) {
+  const k = krPick($("#pa-kr").value.trim());
+  if (!k) return pairErr("코스피 종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
+  if (await loadPairs({ action: "pair", signal: $("#pa-signal").value.trim(), symbol: k.symbol, name: k.name, qty: Number($("#pa-qty").value) })) {
     $("#pa-signal").value = ""; $("#pa-kr").value = ""; $("#pa-qty").value = 1;
   }
 };
