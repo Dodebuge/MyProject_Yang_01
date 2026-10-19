@@ -34,6 +34,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/alerts[?since=id]       코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
+ *   GET·POST /api/monitor            시장 모니터에 추가한 종목 (monitor_items.json, POST는 목록 통째로)
  *   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 "1"을 true로 변환).
  */
 @RestController
@@ -101,6 +102,19 @@ class ApiController {
             throw new IllegalArgumentException("설정 크기가 올바르지 않습니다");
         }
         return ok(chart.saveSettings(body));
+    }
+
+    @GetMapping("/monitor")
+    ResponseEntity<Map<String, Object>> monitor() throws IOException {
+        return ok(chart.monitorItems());
+    }
+
+    @PostMapping("/monitor")
+    ResponseEntity<Map<String, Object>> saveMonitor(@RequestBody String body) throws IOException {
+        if (body.length() > 16384) {  // 30종목이 수 KB
+            throw new IllegalArgumentException("요청 크기가 올바르지 않습니다");
+        }
+        return ok(chart.saveMonitorItems(body));
     }
 
     @GetMapping("/recent")

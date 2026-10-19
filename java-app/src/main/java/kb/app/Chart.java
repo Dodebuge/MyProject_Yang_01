@@ -127,6 +127,87 @@ final class Chart {
         return out;
     }
 
+    // ------------------------------------------------------------------ 모니터 종목 (chart.py monitor_items/save_monitor_items와 같은 파일·같은 규칙)
+    // 시장 모니터(/monitor)의 + 칸으로 추가한 종목 [{market, code, name, exchange, etf}]. POST는 목록 전체를 바꿉니다.
+
+    static final int MONITOR_MAX = 30;
+
+    /** 올바른 종목만, 중복 없이 MONITOR_MAX개까지. 이름·부제는 공백을 정리해 40자로 자름. */
+    static List<Map<String, Object>> validItems(JsonElement items) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (items == null || !items.isJsonArray()) {
+            return out;
+        }
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (JsonElement e : items.getAsJsonArray()) {
+            if (out.size() >= MONITOR_MAX) {
+                break;
+            }
+            if (!e.isJsonObject()) {
+                continue;
+            }
+            JsonObject x = e.getAsJsonObject();
+            String m = text(x, "market"), code = text(x, "code").toUpperCase(Locale.ROOT), ex = text(x, "exchange");
+            boolean ok = "kr".equals(m) && KR_CODE.matcher(code).matches() && ex.isEmpty()
+                    || "us".equals(m) && TICKER.matcher(code).matches() && (ex.isEmpty() || US_EXCHANGES.contains(ex));
+            if (!ok || !seen.add(m + ":" + code)) {
+                continue;
+            }
+            String name = clip(text(x, "name"));
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("market", m);
+            item.put("code", code);
+            item.put("name", name.isEmpty() ? code : name);
+            item.put("exchange", ex);
+            item.put("etf", clip(text(x, "etf")));
+            out.add(item);
+        }
+        return out;
+    }
+
+    private static String text(JsonObject x, String k) {
+        JsonElement v = x.get(k);
+        return v != null && v.isJsonPrimitive() ? v.getAsString() : "";
+    }
+
+    private static String clip(String s) {  // 공백(탭·줄바꿈 포함)을 한 칸으로, 40자까지
+        String t = s.trim().replaceAll("\\s+", " ");
+        return t.length() > 40 ? t.substring(0, 40) : t;
+    }
+
+    private Path monitorFile() {
+        return recentFile.resolveSibling("monitor_items.json");
+    }
+
+    /** GET /api/monitor : 저장된 모니터 종목. 파일이 없거나 깨졌으면 빈 목록. */
+    Map<String, Object> monitorItems() throws IOException {
+        JsonElement saved = null;
+        try {
+            saved = JsonParser.parseString(new String(Files.readAllBytes(monitorFile()), StandardCharsets.UTF_8));
+        } catch (NoSuchFileException | JsonParseException e) {
+            // 빈 목록
+        }
+        return Collections.singletonMap("items", validItems(saved));
+    }
+
+    /** POST /api/monitor {"items": [...]} : 검사해 통째로 저장하고 저장된 목록을 돌려줍니다. */
+    synchronized Map<String, Object> saveMonitorItems(String body) throws IOException {
+        JsonElement d;
+        try {
+            d = JsonParser.parseString(body);
+        } catch (JsonParseException e) {
+            throw new IllegalArgumentException("모니터 종목이 올바른 JSON이 아닙니다.");
+        }
+        if (d == null || !d.isJsonObject() || d.getAsJsonObject().get("items") == null || !d.getAsJsonObject().get("items").isJsonArray()) {
+            throw new IllegalArgumentException("모니터 종목은 {\"items\": [...]} 이어야 합니다.");
+        }
+        List<Map<String, Object>> items = validItems(d.getAsJsonObject().get("items"));
+        Path tmp = monitorFile().resolveSibling("monitor_items.json.tmp");
+        Files.write(tmp, (GSON.toJson(items) + "\n").getBytes(StandardCharsets.UTF_8));
+        Files.move(tmp, monitorFile(), StandardCopyOption.REPLACE_EXISTING);  // 반쯤 쓴 파일을 읽지 않게 통째로 교체
+        return Collections.singletonMap("items", items);
+    }
+
     /** GET /api/recent : 최근 검색 종목 (최신순, 최대 RECENT_MAX개). */
     Map<String, Object> recent() throws IOException {
         Map<String, Object> out = new LinkedHashMap<>();

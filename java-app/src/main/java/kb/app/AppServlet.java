@@ -42,6 +42,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/alerts[?since=id]         -> 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (Alerts, alerts.db)
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET /api/settings, POST /api/settings -> 차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
+ *   GET /api/monitor, POST /api/monitor  -> 시장 모니터에 추가한 종목 (monitor_items.json, POST는 목록 통째로)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *   (heatmap·quarters·holdings·dividends·recurring·transactions·chart·kosdaq-volume·russell-volume은 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
  *
@@ -79,6 +80,7 @@ public class AppServlet extends HttpServlet {
     private Trader trader;
     private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
+    private static final int MONITOR_MAX_BYTES = 16384;  // POST /api/monitor 본문 크기 제한 (30종목이 수 KB)
 
     private interface Api {
         Map<String, Object> handle(HttpServletRequest req) throws IOException;
@@ -159,6 +161,7 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/search", req -> chart.search(param(req, "q", "")));
         apis.put("/api/recent", req -> chart.recent());
         apis.put("/api/settings", req -> chart.settings());
+        apis.put("/api/monitor", req -> chart.monitorItems());
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
         apis.put("/api/kosdaq-volume", req -> volume.query(refresh(req)));
         apis.put("/api/kosdaq-intraday", req -> volume.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
@@ -192,15 +195,15 @@ public class AppServlet extends HttpServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         resp.setHeader("Cache-Control", "no-store");
         String path = req.getPathInfo();
-        if (!"/api/settings".equals(path) && !"/api/trader".equals(path)) {
+        if (!"/api/settings".equals(path) && !"/api/trader".equals(path) && !"/api/monitor".equals(path)) {
             resp.sendError(404);
             return;
         }
         int status = 200;
         Object payload;
-        if (req.getContentLength() <= 0 || req.getContentLength() > SETTINGS_MAX_BYTES) {
+        if (req.getContentLength() <= 0 || req.getContentLength() > ("/api/monitor".equals(path) ? MONITOR_MAX_BYTES : SETTINGS_MAX_BYTES)) {
             status = 400;
-            payload = error("설정 크기가 올바르지 않습니다");
+            payload = error("요청 크기가 올바르지 않습니다");
         } else {
             byte[] buf = new byte[req.getContentLength()];
             int n = 0;
@@ -210,7 +213,8 @@ public class AppServlet extends HttpServlet {
             }
             String text = new String(buf, 0, n, StandardCharsets.UTF_8);
             try {
-                payload = "/api/trader".equals(path) ? trader.command(GSON.fromJson(text, MAP_TYPE)) : chart.saveSettings(text);
+                payload = "/api/trader".equals(path) ? trader.command(GSON.fromJson(text, MAP_TYPE))
+                        : "/api/monitor".equals(path) ? chart.saveMonitorItems(text) : chart.saveSettings(text);
             } catch (IllegalArgumentException | com.google.gson.JsonParseException e) {
                 status = 400;
                 payload = error(e.getMessage());

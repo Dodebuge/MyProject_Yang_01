@@ -118,7 +118,7 @@ dialog input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid 
       <ul id="results"></ul>
       <form method="dialog" style="text-align:right"><button>닫기</button></form>
     </dialog>
-    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 이 브라우저에 저장됩니다.</p>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
   </section>
 
   <section class="card">
@@ -171,12 +171,29 @@ function before(c, shift) {
   shift(t);
   return c.findLast(x => dateOf(x.d) <= t) || null;
 }
-// 사용자가 + 칸으로 추가한 종목 [{name, market, code, exchange, etf}]. 이 브라우저에만 저장 (서버 API 없이)
-// ponytail: localStorage라 기기마다 따로. 여러 기기에서 같이 보려면 서버에 저장 API를 추가할 것
-const EXTRA_KEY = "monitor-extra";
+// 사용자가 + 칸으로 추가한 종목 [{name, market, code, exchange, etf}]. 서버(monitor_items.json)에 저장해 여러 기기에서 같이 봄
 let extra = [];
-try { extra = JSON.parse(localStorage.getItem(EXTRA_KEY)) || []; } catch {}
-const saveExtra = () => { try { localStorage.setItem(EXTRA_KEY, JSON.stringify(extra)); } catch {} };
+async function saveExtra() {
+  try {
+    const res = await fetch("api/monitor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: extra }) });
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    extra = d.items;
+    return true;
+  } catch (err) { $("#idx-status").textContent = `종목 목록을 서버에 저장하지 못했습니다: ${err.message}`; return false; }
+}
+// 서버 목록을 읽음. 예전에 이 브라우저(localStorage)에만 저장한 목록이 있으면 서버가 비어 있을 때 한 번 옮김
+async function loadExtra() {
+  try { extra = (await getJson("api/monitor")).items; } catch (err) { $("#idx-status").textContent = `종목 목록을 읽지 못했습니다: ${err.message}`; return; }
+  try {
+    const old = JSON.parse(localStorage.getItem("monitor-extra"));
+    if (old?.length && !extra.length) {
+      extra = old;
+      if (!await saveExtra()) return;  // 실패하면 다음에 다시 옮김
+    }
+    localStorage.removeItem("monitor-extra");
+  } catch {}
+}
 const keyOf = ix => `${ix.market}:${ix.code}`;
 const items = () => [...INDICES, ...extra];
 const IX = { period: "day", rs: {} };  // rs: keyOf -> Promise.allSettled 결과 하나
@@ -210,6 +227,8 @@ let idxSeq = 0;
 async function loadIndices() {
   const seq = ++idxSeq;
   $("#idx-status").textContent = "조회하는 중…";
+  await loadExtra();  // 다른 기기에서 추가·뺀 종목도 갱신 때 반영
+  if (seq !== idxSeq) return;
   renderIndices();
   await Promise.all(items().map(fetchOne));
   if (seq !== idxSeq) return;
@@ -220,7 +239,7 @@ async function loadIndices() {
 // + 칸: 차트 페이지와 같은 /api/search로 찾아 추가
 $("#tiles").onclick = e => {
   const del = e.target.closest(".del");
-  if (del) { extra = extra.filter(x => keyOf(x) !== del.dataset.k); saveExtra(); return renderIndices(); }
+  if (del) { extra = extra.filter(x => keyOf(x) !== del.dataset.k); saveExtra().then(renderIndices); return renderIndices(); }
   if (e.target.closest("#add")) { $("#q").value = ""; $("#results").innerHTML = ""; $("#adder").showModal(); $("#q").focus(); }
 };
 let found = [], searching;

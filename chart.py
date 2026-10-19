@@ -6,6 +6,7 @@
 최근 검색: 차트를 연 종목을 recent_searches.txt에 최신순으로 RECENT_MAX개까지 저장합니다.
      한 줄에 한 종목 "market<탭>code<탭>exchange<탭>name". 직접 고치거나 지워도 됩니다 (형식이 맞지 않는 줄은 무시).
 차트 설정: 기간과 이평선·볼린저밴드 체크 상태를 chart_settings.json에 저장합니다 (GET/POST /api/settings).
+모니터 종목: 시장 모니터(/monitor)에서 + 칸으로 추가한 종목을 monitor_items.json에 저장해 여러 기기에서 같이 봅니다 (GET/POST /api/monitor).
 """
 
 from __future__ import annotations
@@ -66,6 +67,49 @@ def save_settings(d: dict) -> dict:
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, SETTINGS_FILE)  # 반쯤 쓴 파일을 읽지 않게 통째로 교체
     return out
+
+
+# 모니터 종목: [{market, code, name, exchange, etf}]. POST는 목록 전체를 바꿉니다 (화면이 추가·빼기 뒤 통째로 보냄)
+MONITOR_FILE = Path(__file__).resolve().parent / "monitor_items.json"
+MONITOR_MAX = 30
+KR_CODE = re.compile(r"[0-9A-Z]{6}")
+
+
+def _valid_items(items) -> list[dict]:
+    """올바른 종목만, 중복 없이 MONITOR_MAX개까지. 이름·부제는 40자로 자름."""
+    out, seen = [], set()
+    for x in items if isinstance(items, list) else []:
+        if not isinstance(x, dict):
+            continue
+        m, code, ex = x.get("market"), str(x.get("code") or "").upper(), str(x.get("exchange") or "")
+        if not ((m == "kr" and KR_CODE.fullmatch(code) and not ex) or (m == "us" and TICKER.fullmatch(code) and ex in ("", *US_EXCHANGES))):
+            continue
+        if (m, code) in seen:
+            continue
+        seen.add((m, code))
+        name = " ".join(str(x.get("name") or "").split())[:40] or code
+        out.append({"market": m, "code": code, "name": name, "exchange": ex, "etf": " ".join(str(x.get("etf") or "").split())[:40]})
+    return out[:MONITOR_MAX]
+
+
+def monitor_items() -> dict:
+    """GET /api/monitor : 저장된 모니터 종목. 파일이 없거나 깨졌으면 빈 목록."""
+    try:
+        saved = json.loads(MONITOR_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        saved = []
+    return {"items": _valid_items(saved)}
+
+
+def save_monitor_items(d: dict) -> dict:
+    """POST /api/monitor {"items": [...]} : 검사해 통째로 저장하고 저장된 목록을 돌려줍니다."""
+    if not isinstance(d, dict) or not isinstance(d.get("items"), list):
+        raise ValueError('모니터 종목은 {"items": [...]} 이어야 합니다.')
+    items = _valid_items(d["items"])
+    tmp = MONITOR_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, MONITOR_FILE)  # 반쯤 쓴 파일을 읽지 않게 통째로 교체
+    return {"items": items}
 
 
 def recent() -> list[dict]:
@@ -216,4 +260,22 @@ if __name__ == "__main__":
     assert s == {**DEFAULT_SETTINGS, "bb": True, "period": "1Y", "ma5": False} == settings(), s
     SETTINGS_FILE.write_text("{broken", encoding="utf-8")
     assert settings() == DEFAULT_SETTINGS
+    # 모니터 종목: 없으면 빈 목록, 잘못된 종목·중복은 버림, 통째로 교체, 깨진 파일은 빈 목록
+    MONITOR_FILE = RECENT_FILE.parent / "monitor.json"
+    assert monitor_items() == {"items": []}
+    r = save_monitor_items({"items": [{"market": "us", "code": "nvda", "name": "NVDA", "exchange": "NAS", "etf": "미국 NAS"},
+                                      {"market": "us", "code": "NVDA", "exchange": "NAS"}, {"market": "kr", "code": "005930", "name": " 삼성\t전자 "},
+                                      {"market": "kr", "code": "../x"}, {"market": "us", "code": "AAPL", "exchange": "EVIL"}, "x"]})
+    assert r == monitor_items() == {"items": [{"market": "us", "code": "NVDA", "name": "NVDA", "exchange": "NAS", "etf": "미국 NAS"},
+                                              {"market": "kr", "code": "005930", "name": "삼성 전자", "exchange": "", "etf": ""}]}, r
+    assert len(save_monitor_items({"items": [{"market": "kr", "code": f"{i:06d}"} for i in range(40)]})["items"]) == MONITOR_MAX
+    assert save_monitor_items({"items": []}) == monitor_items() == {"items": []}
+    for bad in ([], {"items": "x"}):
+        try:
+            save_monitor_items(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    MONITOR_FILE.write_text("{broken", encoding="utf-8")
+    assert monitor_items() == {"items": []}
     print("ok")

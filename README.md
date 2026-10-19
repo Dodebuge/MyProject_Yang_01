@@ -16,7 +16,7 @@
 | `trader.html` + `java-app/.../Trader.java` | 토스 자동매매 (실제 주문, Spring·Java 서버 전용, `/trader`) |
 | `signals.js` | 보조지표(이평선·볼린저·RSI·MACD)와 기술적 시그널 계산. 차트·거래량 화면이 함께 씀 (`/signals.js`) |
 | `volume.py` / `russell.py` / `volume.html` | 코스닥·러셀 2000 거래량 증가 종목 (같은 서버의 `/volume`) |
-| `monitor.html` | 지수 히트맵(추종 ETF) + 시그널 알림 (같은 서버의 `/monitor`, 기존 `/api/chart`·`/api/alerts`만 씀) |
+| `monitor.html` | 지수 히트맵(추종 ETF) + 시그널 알림 (같은 서버의 `/monitor`, `/api/chart`·`/api/alerts`, 추가 종목은 `/api/monitor`) |
 | `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
 | `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
@@ -66,7 +66,7 @@ python dividends_web.py --port 8080 --no-open
 - `/heatmap` 섹터 히트맵 (아래 "섹터 히트맵" 참고)
 - `/chart` 종목 차트: 종목이름·종목번호·티커로 검색해 최근 약 1년 일봉(캔들·거래량)을 그립니다. `/chart?market=kr&code=005930`처럼 주소로 바로 열 수 있습니다.
 - `/volume` 코스닥·러셀 2000 거래량 증가: 아래 "코스닥 거래량 증가", "러셀 2000 거래량 증가" 참고
-- `/monitor` 시장 모니터: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000 등락률 히트맵(일간·주간·월간 대비 버튼, 기본 일간, + 칸으로 종목 추가·× 빼기는 브라우저 localStorage에 저장)(KB에 지수 시세가 없어 추종 ETF 069500·229200·SPY·QQQ·DIA·IWM 일봉으로 계산, 5분마다)과 코스닥·러셀 2000 시그널 알림(`/api/alerts`, 1분마다)
+- `/monitor` 시장 모니터: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000 등락률 히트맵(일간·주간·월간 대비 버튼, 기본 일간, + 칸으로 종목 추가·× 빼기는 서버 monitor_items.json에 저장(`GET·POST /api/monitor`)해 여러 기기에서 같이 봄)(KB에 지수 시세가 없어 추종 ETF 069500·229200·SPY·QQQ·DIA·IWM 일봉으로 계산, 5분마다)과 코스닥·러셀 2000 시그널 알림(`/api/alerts`, 1분마다)
 - `/me` 내정보: 보유 종목 현황(총자산·수익률·현금 비율, 총자산 대비 금액 비중 히트맵, 보유 종목 표)과 배당 내역
 
 ### 배당 내역 (내정보 아래쪽)
