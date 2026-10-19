@@ -472,10 +472,12 @@ class TraderTest {
         assertEquals("휴장", kr.get("phase"), "국내는 한국 날짜(10-20)로 물어 휴장");
     }
 
-    // ------------------------------------------------------------------ 미장 연동 (미국 종목 상승 -> 코스피 종목 n주)
+    // ------------------------------------------------------------------ 미장 연동 (미국 티커 모두 상승 -> KODEX 200, 모두 하락 -> KODEX 인버스)
 
     private void pairConfig(boolean enabled, boolean closeSell) throws Exception {
-        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("enabled", enabled, "closeSell", closeSell))));
+        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("enabled", enabled, "closeSell", closeSell,
+                "up", Map.of("symbol", "069500", "name", "KODEX 200", "qty", 3),
+                "inverse", Map.of("symbol", "114800", "name", "KODEX 인버스", "qty", 7)))));
     }
 
     /** 미국 종목 일봉 (최신순, 뉴욕 날짜): 10-16 금요일 종가 close, 10-15 목요일 종가 prev */
@@ -484,52 +486,88 @@ class TraderTest {
                 Map.of("timestamp", "2026-10-15T16:00:00-04:00", "closePrice", String.valueOf(prev))));
     }
 
+    private void watch(String... signals) throws Exception {
+        for (String s : signals) {
+            trader.command(Map.of("action", "watch", "signal", s));
+        }
+    }
+
     @Test
-    void pairBuysQtyAtOpenWhenUsCloseRose() throws Exception {
+    void allUpBuysKodex200AtOpenThenSellsAtClose() throws Exception {
         pairConfig(true, true);
-        usCandles("NVDA", 110, 100);  // 직전 미장(금) +10%
-        trader.command(Map.of("action", "pair", "signal", "nvda", "symbol", "005930", "name", "삼성전자", "qty", 3));
+        toss.price.put("069500", 40_000.0);
+        usCandles("NVDA", 110, 100);
+        usCandles("AMD", 151, 150);
+        watch("nvda", "AMD");
         trader.tick();  // 09:01, 일반 매수(enabled)는 꺼져 있어도 미장 연동은 따로
-        assertEquals(List.of("BUY 005930 3"), toss.sides());
+        assertEquals(List.of("BUY 069500 3"), toss.sides());
         trader.tick();
         assertEquals("미장 연동", positions().get(0).get("source"));
         assertEquals("OPEN", positions().get(0).get("status"));
         trader.tick();
         assertEquals(1, toss.orders.size(), "같은 날 다시 사지 않음");
         @SuppressWarnings("unchecked")
-        Map<String, Object> chk = (Map<String, Object>) ((List<Map<String, Object>>) trader.status().get("pairs")).get(0).get("check");
-        assertEquals("2026-10-16", chk.get("usDay"));
-        assertEquals(true, chk.get("up"));
+        List<Map<String, Object>> w = (List<Map<String, Object>>) trader.status().get("watch");
+        assertEquals(List.of("NVDA", "AMD"), w.stream().map(x -> x.get("signal")).collect(Collectors.toList()));
+        assertEquals("2026-10-16", ((Map<?, ?>) w.get(0).get("check")).get("usDay"));
         now = ZonedDateTime.of(2026, 10, 19, 15, 20, 0, 0, SEOUL);
         trader.tick();
         trader.tick();
-        assertEquals(List.of("BUY 005930 3", "SELL 005930 3"), toss.sides(), "장마감 전량 매도가 켜져 있으면 팔음");
+        assertEquals(List.of("BUY 069500 3", "SELL 069500 3"), toss.sides(), "장마감 전량 매도가 켜져 있으면 팔음");
         assertEquals("장마감", positions().get(0).get("reason"));
     }
 
     @Test
-    void pairSkipsWhenUsCloseDidNotRiseOrAfterWindow() throws Exception {
+    void allDownBuysInverse() throws Exception {
         pairConfig(true, true);
-        usCandles("NVDA", 100, 100);  // 보합
-        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 1));
+        toss.price.put("114800", 5_000.0);
+        usCandles("NVDA", 99, 100);
+        usCandles("AMD", 140, 150);
+        watch("NVDA", "AMD");
         trader.tick();
-        assertTrue(toss.sides().isEmpty(), "미장이 오르지 않았으면 사지 않음");
-        trader = new Trader(toss, db, () -> now);  // 확인 결과를 잊은 새 서버
-        usCandles("NVDA", 110, 100);
-        now = ZonedDateTime.of(2026, 10, 19, 9, 31, 0, 0, SEOUL);  // 장 시작 30분 뒤
-        trader.tick();
-        assertTrue(toss.sides().isEmpty(), "장 시작 후 30분이 지나면 사지 않음");
-        pairConfig(false, true);
-        now = ZonedDateTime.of(2026, 10, 19, 9, 5, 0, 0, SEOUL);
-        trader.tick();
-        assertTrue(toss.sides().isEmpty(), "꺼져 있으면 사지 않음");
+        assertEquals(List.of("BUY 114800 7"), toss.sides());
     }
 
     @Test
-    void pairHoldsOvernightWhenCloseSellOffButStillTakesProfit() throws Exception {
-        pairConfig(true, false);
+    void mixedOrFlatOrLateOrOffBuysNothing() throws Exception {
+        pairConfig(true, true);
+        toss.price.put("069500", 40_000.0);
+        toss.price.put("114800", 5_000.0);
         usCandles("NVDA", 110, 100);
-        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 3));
+        usCandles("AMD", 140, 150);
+        watch("NVDA", "AMD");
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "상승·하락이 섞이면 안 삼");
+        assertTrue(String.valueOf(trader.status().get("pairPhase")).contains("상승 1 · 하락 1"));
+
+        trader = new Trader(toss, db, () -> now);  // 확인 결과를 잊은 새 서버
+        usCandles("AMD", 150, 150);  // 보합은 상승이 아님
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "보합이 섞이면 안 삼");
+
+        trader = new Trader(toss, db, () -> now);
+        usCandles("AMD", 160, 150);  // 모두 상승이지만
+        now = ZonedDateTime.of(2026, 10, 19, 9, 31, 0, 0, SEOUL);  // 장 시작 30분 뒤
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "장 시작 후 30분이 지나면 안 삼");
+
+        now = ZonedDateTime.of(2026, 10, 19, 9, 5, 0, 0, SEOUL);
+        pairConfig(false, true);
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "꺼져 있으면 안 삼");
+        trader.command(Map.of("action", "unwatch", "signal", "AMD"));
+        trader.command(Map.of("action", "unwatch", "signal", "NVDA"));
+        pairConfig(true, true);
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "미국 티커가 없으면 안 삼");
+    }
+
+    @Test
+    void holdsOvernightWhenCloseSellOffButStillTakesProfit() throws Exception {
+        pairConfig(true, false);
+        toss.price.put("069500", 40_000.0);
+        usCandles("NVDA", 110, 100);
+        watch("NVDA");
         config(true, 1_000_000, 5, false);
         pick("000660");  // 일반 매수 종목은 그대로 장마감에 팖
         toss.price.put("000660", 100_000.0);
@@ -538,97 +576,42 @@ class TraderTest {
         now = ZonedDateTime.of(2026, 10, 19, 15, 20, 0, 0, SEOUL);
         trader.tick();
         trader.tick();
-        assertEquals(List.of("BUY 005930 3", "BUY 000660 2", "SELL 000660 2"), toss.sides(), "미장 연동 종목은 장마감에 팔지 않음");
+        assertEquals(List.of("BUY 069500 3", "BUY 000660 2", "SELL 000660 2"), toss.sides(), "미장 연동 종목은 장마감에 팔지 않음");
         toss.krDays.add("2026-10-20");
-        usCandles("NVDA", 100, 110);  // 다음 날은 미장 하락 -> 새로 사지 않음
+        usCandles("NVDA", 100, 110);  // 다음 날은 미장 하락 (티커 하나라 모두 하락 -> 인버스)
+        toss.price.put("114800", 5_000.0);
         now = ZonedDateTime.of(2026, 10, 20, 9, 1, 0, 0, SEOUL);
         trader.tick();
-        assertEquals(3, toss.orders.size(), "전날 산 미장 연동 종목은 '전날 미청산'으로 팔지 않고 보유");
-        toss.price.put("005930", 72_100.0);  // +3% 익절
+        assertEquals(List.of("BUY 069500 3", "BUY 000660 2", "SELL 000660 2", "BUY 114800 7"), toss.sides(),
+                "전날 산 KODEX 200은 '전날 미청산'으로 팔지 않고 보유");
+        toss.price.put("069500", 41_200.0);  // +3% 익절
         trader.tick();
         trader.tick();
-        assertEquals("SELL 005930 3", toss.sides().get(3), "보유 중에도 익절·손절은 함");
+        assertTrue(toss.sides().contains("SELL 069500 3"), "보유 중에도 익절·손절은 함");
     }
 
     @Test
     void pairBuysDoNotUseDailyBudget() throws Exception {
         pairConfig(true, true);
+        toss.price.put("069500", 40_000.0);
         usCandles("NVDA", 110, 100);
-        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 3));  // 21만 원어치
+        watch("NVDA");
         config(true, 140_000, 1, false);  // 하루 14만 원·1종목
         toss.price.put("000660", 70_000.0);
         pick("000660");
         trader.tick();
-        assertEquals(List.of("BUY 005930 3", "BUY 000660 2"), toss.sides(), "미장 연동 매수는 최대 매수금액·종목 수에 세지 않음");
-    }
-
-    private void inverse(boolean enabled, int qty) throws Exception {
-        trader.command(Map.of("action", "config", "config", Map.of("pair",
-                Map.of("inverse", Map.of("enabled", enabled, "symbol", "114800", "name", "KODEX 인버스", "qty", qty)))));
+        assertEquals(List.of("BUY 069500 3", "BUY 000660 2"), toss.sides(), "미장 연동 매수는 최대 매수금액·종목 수에 세지 않음");
     }
 
     @Test
-    void buysInverseWhenAllUsSignalsFell() throws Exception {
-        pairConfig(true, true);
-        inverse(true, 7);
-        toss.price.put("114800", 5_000.0);
-        usCandles("NVDA", 99, 100);
-        usCandles("AMD", 140, 150);
-        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "000660", "qty", 3));
-        trader.command(Map.of("action", "pair", "signal", "AMD", "symbol", "005930", "qty", 5));
-        trader.tick();
-        trader.tick();
-        assertEquals(List.of("BUY 114800 7"), toss.sides(), "모두 하락: 짝 종목은 안 사고 인버스만");
-        assertEquals("미장 연동", positions().get(0).get("source"));
-        assertEquals("OPEN", positions().get(0).get("status"));
-    }
-
-    @Test
-    void noInverseUnlessEverySignalFell() throws Exception {
-        pairConfig(true, true);
-        inverse(true, 7);
-        toss.price.put("114800", 5_000.0);
-        toss.price.put("000660", 100_000.0);
-        usCandles("NVDA", 110, 100);  // 상승
-        usCandles("AMD", 140, 150);   // 하락
-        trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "000660", "qty", 3));
-        trader.command(Map.of("action", "pair", "signal", "AMD", "symbol", "005930", "qty", 5));
-        trader.tick();
-        trader.tick();
-        assertEquals(List.of("BUY 000660 3"), toss.sides(), "하나라도 오르면 인버스는 안 삼");
-
-        trader = new Trader(toss, db, () -> now);  // 새 날처럼 확인 결과를 잊은 서버
-        toss.orders.clear();
-        toss.byClient.clear();
-        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + db);
-             java.sql.Statement st = c.createStatement()) {
-            st.execute("DELETE FROM trader_position");
-        }
-        usCandles("NVDA", 100, 100);  // 보합은 하락이 아님
-        trader.tick();
-        assertEquals(List.of(), toss.sides().stream().filter(x -> x.contains("114800")).collect(Collectors.toList()), "보합이 섞이면 인버스는 안 삼");
-
-        inverse(false, 7);
-        usCandles("NVDA", 90, 100);
-        trader = new Trader(toss, db, () -> now);
-        trader.tick();
-        assertTrue(toss.sides().stream().noneMatch(x -> x.contains("114800")), "인버스가 꺼져 있으면 안 삼");
-    }
-
-    @Test
-    void rejectsBadInverse() {
+    void rejectsBadWatchAndEtfSettings() {
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "watch", "signal", "1NV")));
         assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
-                Map.of("pair", Map.of("inverse", Map.of("symbol", "11480", "qty", 1))))));
+                Map.of("pair", Map.of("up", Map.of("symbol", "06950", "qty", 1))))));
         assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
                 Map.of("pair", Map.of("inverse", Map.of("qty", 0))))));
-    }
-
-    @Test
-    void rejectsBadPairs() {
-        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "5930", "qty", 1)));
-        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "1NV", "symbol", "005930", "qty", 1)));
-        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 0)));
-        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "pair", "signal", "NVDA", "symbol", "005930", "qty", 1.5)));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
+                Map.of("pair", Map.of("up", Map.of("qty", 1.5))))));
     }
 
     @Test

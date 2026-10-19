@@ -94,21 +94,35 @@ dialog input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid 
 .alerts .new { background: var(--select); }
 /* 코스피 자동매매 (미장 연동) */
 .err { border: 1px solid var(--bad); border-radius: 8px; padding: 8px 12px; color: var(--bad); margin: 10px 0 0; font-size: 13px; }
-.pair-ctl, .pair-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
+.pair-ctl, .pair-rule { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
 .pair-ctl label { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
 #pair-on[aria-pressed="true"] { background: var(--up); border-color: var(--up); color: #fff; font-weight: 600; }
-.pair-add input { font: inherit; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); color: var(--ink); }
-#pa-signal { width: 160px; text-transform: uppercase; }
-#pa-kr { width: 200px; }
-#pa-qty { width: 80px; }
-.pair-add span { color: var(--ink-2); font-size: 13px; }
+.pair-rule input, .mini input { font: inherit; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); color: var(--ink); }
+.pair-rule .kr { width: 210px; } .pair-rule .qty { width: 80px; }
+.pair-rule b { min-width: 72px; }
+.pair-rule span { color: var(--ink-2); font-size: 13px; }
+/* 미국 티커 작은 히트맵 */
+.mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; margin: 4px 0 8px; }
+.mini .w { position: relative; display: grid; }
+.mini .t { display: flex; flex-direction: column; gap: 1px; min-height: 66px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); color: var(--ink); text-decoration: none;
+  background: color-mix(in srgb, var(--tone, var(--grid)) var(--mix, 0%), var(--surface)); }
+.mini .t:hover, .mini .t:focus-visible { border-color: var(--series-1); outline: none; }
+.mini .t b { font-size: 13px; }
+.mini .t .c { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: auto; }
+.mini .t .days { font-size: 10px; }
+.mini .x { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 12px; line-height: 1;
+  color: var(--ink-2); background: var(--surface); }
+.mini .x:hover { color: var(--bad); }
+.mini form { display: flex; flex-direction: column; gap: 4px; justify-content: center; min-height: 66px; padding: 6px; border: 1px dashed var(--border); border-radius: 8px; }
+.mini form input { width: 100%; padding: 4px 8px; text-transform: uppercase; }
+.mini form button { padding: 2px 8px; font-size: 12px; }
 .table { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: left; padding: 6px; white-space: nowrap; }
 td { padding: 7px 6px; border-top: 1px solid var(--grid); }
 .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .up { color: var(--up); } .down { color: var(--down); }
-td .del2 { padding: 2px 8px; font-size: 12px; }
 #pair-held h3 { font-size: 13px; font-weight: 600; margin: 12px 0 0; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; padding: 2px 10px; font-size: 12px; }
@@ -147,24 +161,17 @@ td .del2 { padding: 2px 8px; font-size: 12px; }
       <label><input type="checkbox" id="pair-close" disabled> 장마감 10분 전 전량 매도</label>
       <span class="sub" id="pair-rule"></span>
     </div>
-    <div class="table"><table>
-      <thead><tr><th>미국 종목 (신호)</th><th class="num">직전 미장 종가</th><th>→ 코스피 매수 종목</th><th class="num">수량</th><th>오늘</th><th></th></tr></thead>
-      <tbody id="pairs"></tbody>
-    </table></div>
-    <form class="pair-add" id="inv-form">
-      <label><input type="checkbox" id="inv-on" disabled> 미국 종목이 <b>모두</b> 전일 대비 하락이면 인버스</label>
-      <input id="inv-kr" list="pa-kr-list" placeholder="인버스 종목" aria-label="인버스 종목" autocomplete="off">
-      <input id="inv-qty" type="number" min="1" max="10000" step="1" aria-label="인버스 수량"> <span>주 매수</span>
-      <button id="inv-btn" disabled>저장</button>
-      <span class="sub" id="inv-state"></span>
-    </form>
-    <form class="pair-add" id="pair-add">
-      <input id="pa-signal" placeholder="미국 티커 (예: NVDA)" aria-label="미국 티커" autocomplete="off" required>
-      <span aria-hidden="true">상승하면 →</span>
-      <input id="pa-kr" list="pa-kr-list" placeholder="코스피 종목 이름·번호" aria-label="코스피 종목" autocomplete="off" required>
-      <datalist id="pa-kr-list"></datalist>
-      <input id="pa-qty" type="number" min="1" max="10000" step="1" value="1" aria-label="수량"> <span>주</span>
-      <button id="pa-btn" disabled>짝 추가</button>
+    <div class="mini" id="mini" aria-label="미국 티커 직전 미장 등락"></div>
+    <p class="sub" id="mini-sum"></p>
+    <form id="etf-form">
+      <div class="pair-rule"><b class="up">모두 상승 →</b>
+        <input class="kr" id="up-kr" list="kr-list" aria-label="모두 상승이면 살 종목" autocomplete="off">
+        <input class="qty" id="up-qty" type="number" min="1" max="10000" step="1" aria-label="모두 상승 수량"> <span>주</span></div>
+      <div class="pair-rule"><b class="down">모두 하락 →</b>
+        <input class="kr" id="inv-kr" list="kr-list" aria-label="모두 하락이면 살 종목" autocomplete="off">
+        <input class="qty" id="inv-qty" type="number" min="1" max="10000" step="1" aria-label="모두 하락 수량"> <span>주</span>
+        <button id="etf-btn" disabled>저장</button></div>
+      <datalist id="kr-list"></datalist>
     </form>
     <div id="pair-held"></div>
     <p class="note" id="pair-note"></p>
@@ -332,9 +339,10 @@ document.querySelectorAll("#period button").forEach(b => b.onclick = () => {
 });
 
 // ---------------------------------------------------------------- 코스피 자동매매 · 미장 연동 (토스, Trader.java)
-// 짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면 코스피 장 시작 직후 지정 수량 시장가 매수. 엔진은 Spring·Java 서버에만 있음
+// 등록한 미국 티커가 직전 미장 종가 기준 모두 상승이면 KODEX 200, 모두 하락이면 KODEX 인버스를 코스피 장 시작 직후 매수.
+// 엔진은 Spring·Java 서버에만 있음 (Python 서버에서는 안내만)
 const PST = { BUYING: "매수 중", OPEN: "보유", SELLING: "매도 중", CLOSED: "청산", FAILED: "실패" };
-let PT = null, invDirty = false;
+let PT = null, etfDirty = false;
 async function traderApi(body) {
   const res = await fetch("api/trader", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const d = await res.json().catch(() => ({ error: `서버 응답이 JSON이 아닙니다 (HTTP ${res.status})` }));
@@ -345,37 +353,41 @@ const pairErr = msg => { $("#pair-err").hidden = !msg; $("#pair-err").textConten
 const won = n => n == null ? "—" : `${fmt(n)}원`;
 
 function renderPairs() {
-  const c = PT.config, pc = c.pair, kr = PT.markets.KR;
+  const c = PT.config, pc = c.pair, kr = PT.markets.KR, on = PT.configured;
   const mine = PT.positions.filter(p => p.market === "KR" && p.source === "미장 연동");
   $("#pair-on").setAttribute("aria-pressed", pc.enabled);
   $("#pair-on").textContent = pc.enabled ? "켜짐 (실제 주문) · 끄기" : "켜기";
   $("#pair-close").checked = pc.closeSell;
-  for (const el of ["#pair-on", "#pair-close", "#pa-btn", "#inv-on", "#inv-btn"]) $(el).disabled = !PT.configured;
-  // 인버스: 고치는 중이면 10초 갱신이 입력을 덮지 않게
-  const inv = pc.inverse, invPos = mine.find(x => x.symbol === inv.symbol && x.day === kr.day);
-  if (!invDirty) { $("#inv-on").checked = inv.enabled; $("#inv-kr").value = `${inv.name} (${inv.symbol})`; $("#inv-qty").value = inv.qty; }
-  const checks = PT.pairs.map(p => p.check);
-  $("#inv-state").textContent = invPos ? `오늘 ${PST[invPos.status] || invPos.status}${invPos.qty ? ` ${fmt(invPos.qty)}주` : ""}`
-    : !PT.pairs.length ? "" : checks.some(k => !k) ? "장 시작 때 판단"
-    : checks.every(k => k.change < 0) ? (inv.enabled ? "오늘 모두 하락 · 매수 대기" : "오늘 모두 하락 (인버스 꺼짐)") : "오늘 모두 하락 아님 · 안 삼";
+  for (const el of ["#pair-on", "#pair-close", "#etf-btn"]) $(el).disabled = !on;
   $("#pair-status").textContent = `${PT.pairPhase} · 코스피 ${kr.phase}`;
   $("#pair-rule").textContent = `익절 +${c.takeProfit}% · 손절 -${c.stopLoss}% (자동매매 화면과 같은 값)`;
-  $("#pairs").innerHTML = PT.pairs.length ? PT.pairs.map(p => {
-    const k = p.check, today = mine.find(x => x.symbol === p.symbol && x.day === kr.day);
-    const usd = k ? `${fmt(k.close, 2)} <span class="${k.up ? "up" : "down"}">${k.change > 0 ? "+" : ""}${fmt(k.change, 2)}%</span> <span class="days">${md(k.usDay)}</span>` : `<span class="days">장 시작 때 확인</span>`;
-    const st = today ? `${PST[today.status] || today.status}${today.qty ? ` ${fmt(today.qty)}주` : ""}${today.note ? ` · ${esc(today.note)}` : ""}`
-      : k ? (k.up ? "매수 대기" : "미장 상승 아님 · 안 삼") : "—";
-    return `<tr><td><b>${esc(p.signal)}</b></td><td class="num">${usd}</td><td><b>${esc(p.name)}</b><span class="code">${esc(p.symbol)}</span></td>
-      <td class="num">${fmt(p.qty)}주</td><td>${st}</td><td class="num"><button class="del2" data-unpair="${esc(p.symbol)}" ${PT.configured ? "" : "disabled"}>삭제</button></td></tr>`;
-  }).join("") : `<tr><td colspan="6" class="sub">아직 짝이 없습니다. 아래에서 추가하세요.</td></tr>`;
+  // 작은 히트맵: 직전 미장 종가 기준 전일 대비 (3%에서 가장 진함)
+  $("#mini").innerHTML = PT.watch.map(w => {
+    const k = w.check, chg = k?.change;
+    const tone = chg > 0 ? "var(--up)" : chg < 0 ? "var(--down)" : "var(--grid)";
+    const mix = chg == null ? 0 : Math.min(Math.abs(chg) / 3, 1) * 55 + 8;
+    return `<div class="w"><a class="t" href="chart?market=us&code=${encodeURIComponent(w.signal)}" style="--tone:${tone};--mix:${mix}%" title="${k ? `${k.usDay} 종가 ${fmt(k.close, 2)} (전일 ${fmt(k.prev, 2)})` : "아직 확인 전"}">
+      <b>${esc(w.signal)}</b><span class="c">${k ? `${chg > 0 ? "+" : ""}${fmt(chg, 2)}%` : "…"}</span><span class="days">${k ? `${md(k.usDay)} 종가` : "확인 전"}</span></a>
+      ${on ? `<button class="x" data-unwatch="${esc(w.signal)}" aria-label="${esc(w.signal)} 빼기" title="빼기">×</button>` : ""}</div>`;
+  }).join("") + (on ? `<form id="watch-add"><input id="watch-in" placeholder="+ 미국 티커" aria-label="미국 티커 추가" autocomplete="off" maxlength="10"><button>추가</button></form>` : "");
+  const ks = PT.watch.map(w => w.check), up = ks.filter(k => k?.change > 0).length, down = ks.filter(k => k?.change < 0).length;
+  const todayBuy = mine.find(x => x.day === kr.day && [pc.up.symbol, pc.inverse.symbol].includes(x.symbol));
+  $("#mini-sum").textContent = !PT.watch.length ? "미국 티커를 추가하세요. 모두 상승이면 위쪽, 모두 하락이면 아래쪽 종목을 삽니다."
+    : `상승 ${up} · 하락 ${down}${ks.some(k => !k) ? ` · 확인 전 ${ks.filter(k => !k).length}` : ""} → `
+      + (ks.some(k => !k) ? "판단 전" : up === ks.length ? `모두 상승: ${pc.up.name}` : down === ks.length ? `모두 하락: ${pc.inverse.name}` : "섞여 있어 오늘은 안 삼")
+      + (todayBuy ? ` · 오늘 ${todayBuy.name} ${PST[todayBuy.status] || todayBuy.status}${todayBuy.qty ? ` ${fmt(todayBuy.qty)}주` : ""}` : "");
+  if (!etfDirty) {  // 고치는 중이면 10초 갱신이 입력을 덮지 않게
+    $("#up-kr").value = `${pc.up.name} (${pc.up.symbol})`; $("#up-qty").value = pc.up.qty;
+    $("#inv-kr").value = `${pc.inverse.name} (${pc.inverse.symbol})`; $("#inv-qty").value = pc.inverse.qty;
+  }
   const held = mine.filter(p => ["BUYING", "OPEN", "SELLING"].includes(p.status));
   $("#pair-held").innerHTML = held.length ? `<h3>미장 연동으로 산 종목</h3><div class="table"><table>
     <thead><tr><th>종목</th><th>매수일</th><th>상태</th><th class="num">수량</th><th class="num">평균가</th><th class="num">현재가</th><th class="num">손익</th></tr></thead>
     <tbody>${held.map(p => `<tr><td><b>${esc(p.name)}</b><span class="code">${esc(p.symbol)}</span></td><td>${md(p.day)}</td><td>${PST[p.status] || p.status}</td>
       <td class="num">${fmt(p.qty)}</td><td class="num">${won(p.avg)}</td><td class="num">${won(p.last)}</td>
       <td class="num ${cls(p.pnl)}">${p.pnl == null ? "—" : `${p.pnl > 0 ? "+" : ""}${fmt(p.pnl, 2)}%`}</td></tr>`).join("")}</tbody></table></div>` : "";
-  $("#pair-note").textContent = `짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면, 코스피 장 시작 후 ${PT.pairWindowMinutes}분 안에 지정 수량을 토스 시장가로 매수합니다(같은 종목 하루 한 번). `
-    + `짝의 미국 종목이 모두 하락(보합은 하락 아님)한 날은 인버스를 켜 두었다면 지정한 인버스 종목을 같은 때 삽니다. 산 종목은 익절·손절에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
+  $("#pair-note").textContent = `등록한 미국 티커가 직전 미장 종가 기준 전일 대비 모두 상승이면 '모두 상승' 종목, 모두 하락이면 '모두 하락' 종목을 코스피 장 시작 후 ${PT.pairWindowMinutes}분 안에 토스 시장가로 삽니다(하루 한 번). `
+    + `섞이거나 보합이 있으면 사지 않습니다. 산 종목은 익절·손절에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
 }
 
 async function loadPairs(body) {
@@ -383,45 +395,45 @@ async function loadPairs(body) {
   catch (err) { pairErr(err.message); if (!PT) $("#pair-status").textContent = "자동매매 엔진을 쓸 수 없음"; return false; }
 }
 $("#pair-on").onclick = () => {
-  const on = !PT.config.pair.enabled;
-  if (on && !confirm("미장 연동 자동매매를 켭니다. 토스 계좌로 실제 주문이 나갑니다.\n\n짝(미국 종목 → 코스피 종목·수량)과 익절·손절 %를 확인했나요?")) return;
+  const on = !PT.config.pair.enabled, pc = PT.config.pair;
+  if (on && !confirm(`미장 연동 자동매매를 켭니다. 토스 계좌로 실제 주문이 나갑니다.\n\n미국 티커 모두 상승 → ${pc.up.name} ${pc.up.qty}주\n모두 하락 → ${pc.inverse.name} ${pc.inverse.qty}주\n\n익절·손절 %도 확인했나요?`)) return;
   loadPairs({ action: "config", config: { pair: { enabled: on } } });
 };
 $("#pair-close").onchange = () => loadPairs({ action: "config", config: { pair: { closeSell: $("#pair-close").checked } } });
-$("#pairs").onclick = e => {
-  const b = e.target.closest("[data-unpair]");
-  if (b && confirm(`${b.dataset.unpair} 짝을 지웁니다. (이미 산 종목은 그대로 익절·손절)`)) loadPairs({ action: "unpair", symbol: b.dataset.unpair });
+// 작은 히트맵: × 빼기, 마지막 칸에서 티커 추가 (다시 그려지므로 위임)
+$("#mini").onclick = e => {
+  const x = e.target.closest("[data-unwatch]");
+  if (x) loadPairs({ action: "unwatch", signal: x.dataset.unwatch });
 };
-// 코스피 종목: /api/search 결과를 datalist로 ("삼성전자 (005930)"처럼 고르거나 종목번호 6자리를 직접)
+$("#mini").onsubmit = async e => {
+  e.preventDefault();
+  const v = $("#watch-in").value.trim();
+  if (v) await loadPairs({ action: "watch", signal: v });
+};
+// 모두 상승·하락 종목: /api/search 결과를 datalist로 ("KODEX 200 (069500)"처럼 고르거나 종목번호 6자리를 직접)
 let krFound = [], krSearching;
 const krPick = v => {  // 입력값 -> {symbol, name} 또는 null
   const m = v.match(/\((\w{6})\)$/) || v.match(/^(\w{6})$/);
   return m && { symbol: m[1], name: v.includes("(") ? v.replace(/\s*\(\w{6}\)$/, "") : krFound.find(s => s.code === m[1])?.name || m[1] };
 };
-$("#inv-form").oninput = () => { invDirty = true; };
-$("#inv-kr").oninput = $("#pa-kr").oninput = e => {
+$("#etf-form").oninput = e => {
+  etfDirty = true;
+  if (!e.target.classList.contains("kr")) return;
   clearTimeout(krSearching);
   krSearching = setTimeout(async () => {
     const q = e.target.value.trim();
     if (!q || /\(\w{6}\)$/.test(q)) return;
     try { krFound = (await getJson(`api/search?q=${encodeURIComponent(q)}`)).results.filter(s => s.market === "kr").slice(0, 15); } catch { return; }
-    $("#pa-kr-list").innerHTML = krFound.map(s => `<option value="${esc(s.name)} (${esc(s.code)})"></option>`).join("");
+    $("#kr-list").innerHTML = krFound.map(s => `<option value="${esc(s.name)} (${esc(s.code)})"></option>`).join("");
   }, 200);
 };
-$("#inv-form").onsubmit = async e => {
+$("#etf-form").onsubmit = async e => {
   e.preventDefault();
-  const k = krPick($("#inv-kr").value.trim()), on = $("#inv-on").checked;
-  if (!k) return pairErr("인버스 종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
-  if (on && !PT.config.pair.inverse.enabled && !confirm(`짝의 미국 종목이 모두 하락한 날 ${k.name}(${k.symbol}) ${$("#inv-qty").value}주를 실제로 시장가 매수합니다.`)) return;
-  if (await loadPairs({ action: "config", config: { pair: { inverse: { enabled: on, symbol: k.symbol, name: k.name, qty: Number($("#inv-qty").value) } } } })) invDirty = false;
-};
-$("#pair-add").onsubmit = async e => {
-  e.preventDefault();
-  const k = krPick($("#pa-kr").value.trim());
-  if (!k) return pairErr("코스피 종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
-  if (await loadPairs({ action: "pair", signal: $("#pa-signal").value.trim(), symbol: k.symbol, name: k.name, qty: Number($("#pa-qty").value) })) {
-    $("#pa-signal").value = ""; $("#pa-kr").value = ""; $("#pa-qty").value = 1;
-  }
+  const up = krPick($("#up-kr").value.trim()), inv = krPick($("#inv-kr").value.trim());
+  if (!up || !inv) return pairErr("종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
+  if (await loadPairs({ action: "config", config: { pair: {
+    up: { symbol: up.symbol, name: up.name, qty: Number($("#up-qty").value) },
+    inverse: { symbol: inv.symbol, name: inv.name, qty: Number($("#inv-qty").value) } } } })) etfDirty = false;
 };
 
 // ---------------------------------------------------------------- 시그널 알림 (volume.html과 같은 /api/alerts, 브라우저 알림은 거래량 페이지에서)

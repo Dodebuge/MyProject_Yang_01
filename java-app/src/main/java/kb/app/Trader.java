@@ -39,9 +39,9 @@ import java.util.function.Supplier;
  *   - 내가 고른 종목: 매일 한 번 시장가 매수
  *   - 시그널 알림 종목(시장별로 켤 수 있음): 코스닥 → 국내, 러셀 2000 → 미국. 알림이 뜬 날 한 번 시장가 매수
  *   지수가 전일 대비 상승일 때만 새 매수: 국내는 코스닥, 미국은 러셀 2000 (토스엔 지수 시세가 없어 추종 ETF INDEX로 봄). 하락·보합이면 대기하다 오르면 매수
- *   - 미장 연동 (시장 모니터 화면, 따로 켜고 끔): 미국 종목 ↔ 코스피 종목 짝마다, 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면
- *     코스피 장 시작 후 PAIR_WINDOW_MINUTES분 안에 지정한 수량을 시장가 매수. 위의 최대 매수금액·종목 수·지수 조건과 따로 셈
- *     짝의 미국 종목이 모두 전일 대비 하락이면 (켜 두었을 때) 지정한 인버스 종목을 같은 때 지정 수량 매수 (매도 규칙은 미장 연동과 같음)
+ *   - 미장 연동 (시장 모니터 화면, 따로 켜고 끔): 등록한 미국 티커가 직전 미장 종가 기준 전일 대비 모두 상승이면 KODEX 200,
+ *     모두 하락이면 KODEX 인버스(종목·수량은 설정)를 코스피 장 시작 후 PAIR_WINDOW_MINUTES분 안에 시장가 매수. 섞이거나 보합이 있으면 안 삼.
+ *     위의 최대 매수금액·종목 수·지수 조건과 따로 셈
  *   종목당 금액 = 하루 최대 매수금액 ÷ 최대 종목 수, 수량은 현재가로 나눈 정수(1주가 더 비싸면 건너뜀). 하루 매수 합계는 최대 매수금액을 넘지 않음.
  * 매도 (이 자동매매가 산 종목만, 다른 보유 종목은 건드리지 않음):
  *   - 평균 체결가 대비 +익절% 이상 → 시장가 매도, -손절% 이하 → 시장가 매도
@@ -91,9 +91,8 @@ final class Trader {
             + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, bought TEXT, UNIQUE (market, day, symbol));"
             + "CREATE TABLE IF NOT EXISTS trader_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, market TEXT NOT NULL, text TEXT NOT NULL);"
             + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL);"
-            // 미장 연동 짝: 미국 종목(signal)이 오르면 코스피 종목(symbol)을 qty주 매수. 같은 코스피 종목은 짝 하나
-            + "CREATE TABLE IF NOT EXISTS trader_pair (symbol TEXT PRIMARY KEY, name TEXT NOT NULL, signal TEXT NOT NULL, qty INTEGER NOT NULL,"
-            + " added TEXT NOT NULL)";
+            // 미장 연동 미국 티커: 모두 상승·하락인지 볼 종목
+            + "CREATE TABLE IF NOT EXISTS trader_us_watch (signal TEXT PRIMARY KEY, added TEXT NOT NULL)";
 
     private final Api api;
     private final Path db;
@@ -184,14 +183,18 @@ final class Trader {
         Map<String, Object> pair = new LinkedHashMap<>();
         pair.put("enabled", false);    // 미장 연동 매수 (위 enabled와 따로)
         pair.put("closeSell", true);   // 미장 연동 종목도 장마감 10분 전 전량 매도. 끄면 보유하고 익절·손절만
-        Map<String, Object> inverse = new LinkedHashMap<>();  // 짝의 미국 종목이 모두 하락이면 살 인버스
-        inverse.put("enabled", false);
-        inverse.put("symbol", "114800");
-        inverse.put("name", "KODEX 인버스");
-        inverse.put("qty", 1);
-        pair.put("inverse", inverse);
+        pair.put("up", etf("069500", "KODEX 200"));          // 미국 티커가 모두 상승이면 살 종목
+        pair.put("inverse", etf("114800", "KODEX 인버스"));  // 모두 하락이면 살 종목
         c.put("pair", pair);
         return c;
+    }
+
+    private static Map<String, Object> etf(String symbol, String name) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("symbol", symbol);
+        m.put("name", name);
+        m.put("qty", 1);
+        return m;
     }
 
     private static Map<String, Object> market(double budget, int maxStocks, boolean auto) {
@@ -270,25 +273,26 @@ final class Trader {
                     dst.put(k, Boolean.TRUE.equals(src.get(k)));
                 }
             }
-            if (src.get("inverse") instanceof Map) {
-                Map<String, Object> in2 = (Map<String, Object>) src.get("inverse");
-                Map<String, Object> inv = new LinkedHashMap<>((Map<String, Object>) dst.get("inverse"));
-                if (in2.containsKey("enabled")) {
-                    inv.put("enabled", Boolean.TRUE.equals(in2.get("enabled")));
+            for (String k : new String[]{"up", "inverse"}) {
+                if (!(src.get(k) instanceof Map)) {
+                    continue;
                 }
+                Map<String, Object> in2 = (Map<String, Object>) src.get(k);
+                Map<String, Object> e = new LinkedHashMap<>((Map<String, Object>) dst.get(k));
+                String what = "up".equals(k) ? "모두 상승 종목" : "모두 하락 종목";
                 if (in2.containsKey("symbol")) {
-                    inv.put("symbol", symbol("KR", Values.str(in2.get("symbol"))));
+                    e.put("symbol", symbol("KR", Values.str(in2.get("symbol"))));
                     String n = Values.str(in2.get("name")).trim();
-                    inv.put("name", n.isEmpty() ? inv.get("symbol") : n.length() > 40 ? n.substring(0, 40) : n);
+                    e.put("name", n.isEmpty() ? e.get("symbol") : n.length() > 40 ? n.substring(0, 40) : n);
                 }
                 if (in2.containsKey("qty")) {
-                    double q = number(in2.get("qty"), "인버스 수량");
+                    double q = number(in2.get("qty"), what + " 수량");
                     if (q < 1 || q > 10_000 || q != Math.rint(q)) {
-                        throw new IllegalArgumentException("인버스 수량은 1~10000 사이 정수여야 합니다: " + in2.get("qty"));
+                        throw new IllegalArgumentException(what + " 수량은 1~10000 사이 정수여야 합니다: " + in2.get("qty"));
                     }
-                    inv.put("qty", (int) q);
+                    e.put("qty", (int) q);
                 }
-                dst.put("inverse", inv);
+                dst.put(k, e);
             }
         }
         try (Connection con = connect();
@@ -310,7 +314,7 @@ final class Trader {
 
     // ------------------------------------------------------------------ 화면 명령
 
-    /** POST /api/trader {"action": "config"|"pick"|"unpick"|"pair"|"unpair"|"sellAll", ...} -> status() */
+    /** POST /api/trader {"action": "config"|"pick"|"unpick"|"watch"|"unwatch"|"sellAll", ...} -> status() */
     @SuppressWarnings("unchecked")
     Map<String, Object> command(Map<String, Object> body) throws IOException {
         if (api == null) {
@@ -347,33 +351,24 @@ final class Trader {
                     }
                     log(m, "매수 대상 삭제: " + body.get("symbol"));
                     break;
-                case "pair": {  // 미장 연동 짝 추가·수정: {signal: 미국 티커, symbol: 코스피 종목번호, name, qty}
+                case "watch": {  // 미장 연동 미국 티커 추가: {signal}
                     String signal = symbol("US", Values.str(body.get("signal")));
-                    String kr = symbol("KR", Values.str(body.get("symbol")));
-                    double qty = number(body.get("qty"), "수량");
-                    if (qty < 1 || qty > 10_000 || qty != Math.rint(qty)) {
-                        throw new IllegalArgumentException("수량은 1~10000 사이 정수여야 합니다: " + body.get("qty"));
-                    }
-                    String krName = Values.str(body.get("name")).trim();
                     try (Connection con = connect();
-                         PreparedStatement ps = con.prepareStatement("INSERT OR REPLACE INTO trader_pair (symbol, name, signal, qty, added) VALUES (?, ?, ?, ?, ?)")) {
-                        ps.setString(1, kr);
-                        ps.setString(2, krName.isEmpty() ? kr : krName);
-                        ps.setString(3, signal);
-                        ps.setLong(4, (long) qty);
-                        ps.setString(5, now().format(AT));
+                         PreparedStatement ps = con.prepareStatement("INSERT OR IGNORE INTO trader_us_watch (signal, added) VALUES (?, ?)")) {
+                        ps.setString(1, signal);
+                        ps.setString(2, now().format(AT));
                         ps.executeUpdate();
                     }
-                    log("KR", "미장 연동 추가: " + signal + " 상승 → " + krName + "(" + kr + ") " + (long) qty + "주");
+                    log("KR", "미장 연동 미국 티커 추가: " + signal);
                     break;
                 }
-                case "unpair":
+                case "unwatch":
                     try (Connection con = connect();
-                         PreparedStatement ps = con.prepareStatement("DELETE FROM trader_pair WHERE symbol = ?")) {
-                        ps.setString(1, Values.str(body.get("symbol")).trim().toUpperCase());
+                         PreparedStatement ps = con.prepareStatement("DELETE FROM trader_us_watch WHERE signal = ?")) {
+                        ps.setString(1, Values.str(body.get("signal")).trim().toUpperCase());
                         ps.executeUpdate();
                     }
-                    log("KR", "미장 연동 삭제: " + body.get("symbol"));
+                    log("KR", "미장 연동 미국 티커 삭제: " + body.get("signal"));
                     break;
                 case "sellAll":
                     market(m);
@@ -475,6 +470,9 @@ final class Trader {
             return;
         }
         ZonedDateTime cutoff = s.close.minusMinutes(CUTOFF_MINUTES);
+        if ("KR".equals(m)) {
+            watchChecks(s.day);  // 화면 작은 히트맵용으로 장 시작 전에도 미장 종가 확인 (티커·날짜마다 한 번)
+        }
         if (now.isBefore(s.open)) {
             setPhase(m, "장 시작 전 (정규장 " + s.open.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")) + " 시작, 한국 시간)");
             return;
@@ -533,7 +531,7 @@ final class Trader {
             }
         }
         if ("KR".equals(m)) {
-            buyPairs(s, now, pc);
+            buyWatch(s, now, pc);
         }
         if (!Boolean.TRUE.equals(cfg.get("enabled"))) {
             return;
@@ -594,92 +592,87 @@ final class Trader {
         setPhase(m, waiting);
     }
 
+    private List<String> watchList() throws SQLException {
+        List<String> out = new ArrayList<>();
+        for (Map<String, Object> r : rows("SELECT signal FROM trader_us_watch ORDER BY added, rowid")) {
+            out.add(Values.str(r.get("signal")));
+        }
+        return out;
+    }
+
+    /** 등록한 미국 티커의 미장 종가 비교를 미리 받아 둠. 실패한 티커는 다음 확인에 다시 (매수 판단은 buyWatch) */
+    private void watchChecks(String krDay) throws SQLException {
+        for (String signal : watchList()) {
+            try {
+                pairCheck(signal, krDay);
+            } catch (IOException | RuntimeException e) {
+                // 다음 확인에 다시
+            }
+        }
+    }
+
     /**
-     * 미장 연동 매수 (코스피, 장 시작 후 PAIR_WINDOW_MINUTES분 안): 짝마다 미국 종목이 직전 미장 종가 기준 전일 대비 상승이면 qty주 시장가 매수.
-     * 같은 코스피 종목은 하루 한 번 (trader_position UNIQUE). 미장 확인은 짝·날짜마다 한 번만 받아 둠.
+     * 미장 연동 매수 (코스피, 장 시작 후 PAIR_WINDOW_MINUTES분 안): 등록한 미국 티커가 직전 미장 종가 기준 전일 대비
+     * 모두 상승이면 pair.up(KODEX 200), 모두 하락이면 pair.inverse(KODEX 인버스)를 지정 수량 시장가 매수. 섞이거나 보합이 있으면 안 삼.
+     * 아직 확인하지 못한 티커가 있으면 판단을 미룸. 같은 종목은 하루 한 번 (trader_position UNIQUE).
      */
-    private void buyPairs(Session s, ZonedDateTime now, Map<String, Object> pc) throws SQLException, IOException {
-        List<Map<String, Object>> pairs = rows("SELECT symbol, name, signal, qty FROM trader_pair ORDER BY added, rowid");
+    @SuppressWarnings("unchecked")
+    private void buyWatch(Session s, ZonedDateTime now, Map<String, Object> pc) throws SQLException, IOException {
+        List<String> tickers = watchList();
         String text;
         if (!Boolean.TRUE.equals(pc.get("enabled"))) {
             text = "꺼짐 (새 매수 없음, 보유분 익절·손절" + (Boolean.TRUE.equals(pc.get("closeSell")) ? "·장마감 매도)" : "만)");
-        } else if (pairs.isEmpty()) {
-            text = "켜짐 · 짝이 없음";
+        } else if (tickers.isEmpty()) {
+            text = "켜짐 · 미국 티커가 없음";
         } else if (!now.isBefore(s.open.plusMinutes(PAIR_WINDOW_MINUTES))) {
             text = "켜짐 · 오늘 매수 시간(장 시작 후 " + PAIR_WINDOW_MINUTES + "분) 지남";
         } else {
-            text = "켜짐 · 오늘 짝 " + pairs.size() + "개 확인함";
-            for (Map<String, Object> p : pairs) {
-                String symbol = Values.str(p.get("symbol"));
-                String signal = Values.str(p.get("signal"));
-                if (!rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
-                    continue;  // 오늘 이미 샀거나 시도함
-                }
+            text = null;
+            int up = 0;
+            int down = 0;
+            for (String signal : tickers) {
                 Map<String, Object> chk;
                 try {
-                    chk = pairCheck(signal, s.day);
+                    chk = pairCheck(signal, s.day);  // 이미 확인한 티커는 기억한 값
                 } catch (IOException e) {
                     text = "켜짐 · " + signal + " 미장 종가를 받지 못해 다시 시도 (" + e.getMessage() + ")";
-                    continue;
+                    break;
                 }
                 if (chk == null) {
                     text = "켜짐 · " + signal + " 미장 종가가 부족해 다시 시도";
-                    continue;
+                    break;
                 }
-                if (!Boolean.TRUE.equals(chk.get("up"))) {
-                    continue;  // 하락·보합: 오늘은 사지 않음 (확인 결과는 기록에 한 번 남김)
-                }
-                Double price = prices("KR", symbol).get(symbol);
-                if (price == null || price <= 0) {
-                    text = "켜짐 · " + p.get("name") + "(" + symbol + ") 현재가를 받지 못해 다시 시도";
-                    continue;
-                }
-                long qty = Values.lng(p.get("qty"));
-                buy("KR", s.day, new String[]{symbol, Values.str(p.get("name")), PAIR}, qty, qty * price);
+                double c = Values.num(chk.get("change"));
+                up += c > 0 ? 1 : 0;
+                down += c < 0 ? 1 : 0;
             }
-            String inv = buyInverse(s, pairs, (Map<String, Object>) pc.get("inverse"));
-            if (inv != null) {
-                text = inv;
+            if (text == null) {
+                String k = up == tickers.size() ? "up" : down == tickers.size() ? "inverse" : null;
+                if (k == null) {
+                    text = "켜짐 · 미국 티커 " + tickers.size() + "개 중 상승 " + up + " · 하락 " + down + " → 모두 같은 방향이 아니라 오늘은 안 삼";
+                } else {
+                    Map<String, Object> e = (Map<String, Object>) pc.get(k);
+                    String symbol = Values.str(e.get("symbol"));
+                    String label = "켜짐 · 미국 티커 " + tickers.size() + "개 모두 " + ("up".equals(k) ? "상승" : "하락") + " → " + e.get("name") + "(" + symbol + ")";
+                    if (!rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
+                        text = label + " 오늘 매수함";
+                    } else {
+                        Double price = prices("KR", symbol).get(symbol);
+                        if (price == null || price <= 0) {
+                            text = label + " 현재가를 받지 못해 다시 시도";
+                        } else {
+                            long qty = Values.lng(e.get("qty"));
+                            buy("KR", s.day, new String[]{symbol, Values.str(e.get("name")), PAIR}, qty, qty * price);
+                            text = label + " 매수함";
+                        }
+                    }
+                }
             }
         }
         if (!text.equals(pairPhase)) {
             pairPhase = text;
             log("KR", "미장 연동: " + text);
         }
-    }
-
-    /**
-     * 짝의 미국 종목이 모두 직전 미장 종가 기준 전일 대비 하락(보합은 하락 아님)이면 인버스 종목을 지정 수량 매수 (하루 한 번).
-     * 아직 확인하지 못한 미국 종목이 있으면 다음 확인에 다시. 돌려주는 값은 화면 상태 문구 (바꿀 것이 없으면 null)
-     */
-    private String buyInverse(Session s, List<Map<String, Object>> pairs, Map<String, Object> inv) throws SQLException, IOException {
-        String symbol = Values.str(inv.get("symbol"));
-        if (!Boolean.TRUE.equals(inv.get("enabled"))
-                || !rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
-            return null;  // 꺼짐 또는 오늘 이미 샀거나 시도함
-        }
-        for (Map<String, Object> p : pairs) {
-            Map<String, Object> chk;
-            try {
-                chk = pairCheck(Values.str(p.get("signal")), s.day);  // 이미 확인한 종목은 기억한 값
-            } catch (IOException e) {
-                chk = null;
-            }
-            if (chk == null) {
-                return "켜짐 · " + p.get("signal") + " 미장 종가를 아직 확인하지 못해 인버스 판단을 다시 시도";
-            }
-            if (!(Values.num(chk.get("change")) < 0)) {
-                return null;  // 하나라도 하락이 아니면 인버스는 사지 않음
-            }
-        }
-        Double price = prices("KR", symbol).get(symbol);
-        if (price == null || price <= 0) {
-            return "켜짐 · 인버스 " + inv.get("name") + "(" + symbol + ") 현재가를 받지 못해 다시 시도";
-        }
-        long qty = Values.lng(inv.get("qty"));
-        log("KR", "미장 연동: 짝의 미국 종목 " + pairs.size() + "개가 모두 하락 → 인버스 " + inv.get("name") + "(" + symbol + ") " + qty + "주 매수");
-        buy("KR", s.day, new String[]{symbol, Values.str(inv.get("name")), PAIR}, qty, qty * price);
-        return null;
     }
 
     /**
@@ -724,7 +717,7 @@ final class Trader {
         got.put("up", close > prev);
         pairChecks.put(key, got);
         log("KR", "미장 연동 확인: " + signal + " " + got.get("usDay") + " 종가 " + close + " (전일 " + prev + ", " + pct(close / prev - 1) + ") → "
-                + (close > prev ? "상승, 짝 종목 매수" : "상승 아님, 오늘은 사지 않음"));
+                + (close > prev ? "상승" : close < prev ? "하락" : "보합"));
         return got;
     }
 
@@ -1114,13 +1107,13 @@ final class Trader {
             }
             out.put("markets", ms);
             out.put("positions", positions);
-            // 미장 연동 짝: 오늘(코스피 날짜) 미장 확인 결과와 함께
+            // 미장 연동 미국 티커: 오늘(코스피 날짜) 미장 확인 결과와 함께
             String krDay = todayKey("KR");
-            List<Map<String, Object>> pairs = rows("SELECT symbol, name, signal, qty, added FROM trader_pair ORDER BY added, rowid");
-            for (Map<String, Object> p : pairs) {
-                p.put("check", pairChecks.get(p.get("signal") + ":" + krDay));
+            List<Map<String, Object>> watch = rows("SELECT signal, added FROM trader_us_watch ORDER BY added, rowid");
+            for (Map<String, Object> w : watch) {
+                w.put("check", pairChecks.get(w.get("signal") + ":" + krDay));
             }
-            out.put("pairs", pairs);
+            out.put("watch", watch);
             out.put("pairPhase", api == null ? "토스 미설정" : leader ? pairPhase : "다른 서버가 주문 중이거나 확인 전");
             out.put("pairWindowMinutes", PAIR_WINDOW_MINUTES);
             // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
