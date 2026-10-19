@@ -17,6 +17,13 @@ export KB_DATA_DIR="${KB_DATA_DIR:-$(cd .. && pwd)}"
 JAR=target/kb-openapi-spring.jar
 APP=target/app   # 푼 jar(kb-openapi-spring.jar + lib/)와 CDS 아카이브(app.jsa)
 
+# IDE(VS Code Java·Eclipse)가 Kotlin 없이 Eclipse 컴파일러로 만든 class가 target/classes에 섞였으면
+# ('Unresolved compilation problem'), Maven이 그것을 최신으로 보고 jar에 넣으므로 처음부터 다시 빌드합니다.
+# pom.xml의 ide 프로필로 IDE는 이제 target-ide/에 빌드하지만, 그 전에 생긴 파일을 치우려고 남겨 둡니다.
+if grep -rqs "Unresolved compilation" target/classes; then
+  echo "target/classes에 IDE가 Kotlin 없이 만든 class가 있어 다시 빌드합니다." >&2
+  rm -rf target
+fi
 if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
   ./mvnw -q -B -DskipTests package
 fi

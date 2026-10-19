@@ -18,6 +18,10 @@ KB_DATA_DIR=/opt/kb_openapi_sample java -jar target/kb-openapi-spring.jar   # ht
 Maven(`kotlin-maven-plugin`)으로만 컴파일됩니다. Java만 컴파일하는 IDE 설정(Eclipse·VS Code Java, 또는 Maven 프로젝트로 열지 않은 IntelliJ)에서
 `KbApplication`을 바로 실행하면 `java.lang.Error: Unresolved compilation problem ... KbApplication.main`이 납니다.
 `run.cmd`/`run.sh`/`mvnw`로 실행하거나, IntelliJ에서는 `spring-app/pom.xml`을 Maven 프로젝트로 열어(Kotlin 자동 지원) 실행하세요.
+VS Code에서 디버깅하려면 `run.sh`를 `JAVA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=localhost:5005"`로 띄우고
+`"request": "attach"`(port 5005)로 붙으면 Kotlin까지 Maven으로 빌드된 앱을 main부터 디버깅할 수 있습니다.
+IDE가 가져올 때(m2e)는 pom의 `ide` 프로필이 켜져 IDE 빌드 결과를 `target-ide/`에 따로 둡니다. 같은 `target/classes`를 쓰면
+IDE가 만든 'Unresolved compilation' class를 Maven이 jar에 넣어 `run.sh`까지 같은 오류가 났습니다(`run.sh`는 그런 class가 보이면 처음부터 다시 빌드).
 
 `run.sh`는 시작 시간을 줄이려고 세 가지를 합니다 (이 PC 측정: 빌드 포함 약 5.2초 → 1.3초).
 

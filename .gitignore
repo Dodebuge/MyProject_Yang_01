@@ -4,6 +4,8 @@ etf_snapshot.json
 deploy/tomcat-proxy/kb.war
 java-app/target/
 spring-app/target/
+java-app/target-ide/
+spring-app/target-ide/
 kb.db
 kb.db-*
 kosdaq.db
