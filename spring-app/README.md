@@ -14,6 +14,11 @@ cd spring-app && ./mvnw -q -DskipTests package
 KB_DATA_DIR=/opt/kb_openapi_sample java -jar target/kb-openapi-spring.jar   # http://서버IP:8080/
 ```
 
+**IDE에서 실행할 때**: `java-app`의 일부 클래스(`Values`, `Volume`, `Russell`, `LastResponse`, `KBApiException`)는 Kotlin(`.kt`)이라
+Maven(`kotlin-maven-plugin`)으로만 컴파일됩니다. Java만 컴파일하는 IDE 설정(Eclipse·VS Code Java, 또는 Maven 프로젝트로 열지 않은 IntelliJ)에서
+`KbApplication`을 바로 실행하면 `java.lang.Error: Unresolved compilation problem ... KbApplication.main`이 납니다.
+`run.cmd`/`run.sh`/`mvnw`로 실행하거나, IntelliJ에서는 `spring-app/pom.xml`을 Maven 프로젝트로 열어(Kotlin 자동 지원) 실행하세요.
+
 `run.sh`는 시작 시간을 줄이려고 세 가지를 합니다 (이 PC 측정: 빌드 포함 약 5.2초 → 1.3초).
 
 1. `pom.xml`, `src/`, `../java-app/src/`, 화면 HTML, `../docs/`가 jar보다 새로울 때만 Maven 빌드
