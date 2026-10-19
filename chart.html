@@ -49,7 +49,7 @@ body {
 .wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
 header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; margin-bottom: 16px; }
 h1 { font-size: 20px; margin: 0; font-weight: 650; }
-.nav { display: flex; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
+.nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px -10px; font-size: 14px; }
 .nav a { color: var(--ink-2); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
 .nav a:hover { background: var(--hover); color: var(--ink); }
 .nav a[aria-current="page"] { color: var(--ink); font-weight: 650; background: var(--hover); }
@@ -130,7 +130,7 @@ input { cursor: text; }
 <div class="wrap">
   <header class="top">
     <div>
-      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart" aria-current="page">차트</a><a href="volume">거래량</a><a href="trader">자동매매</a></nav>
+      <nav class="nav"><a href="./" class="home">KB OpenAPI</a><a href="monitor">모니터</a><a href="heatmap">히트맵</a><a href="me">내정보</a><a href="chart" aria-current="page">차트</a><a href="volume">거래량</a><a href="trader">자동매매</a></nav>
       <h1>종목 차트</h1>
     </div>
     <button id="theme" aria-label="테마 전환">◐</button>
