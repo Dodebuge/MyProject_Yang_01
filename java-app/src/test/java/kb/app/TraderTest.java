@@ -591,9 +591,10 @@ class TraderTest {
     }
 
     @Test
-    void pairUsesItsOwnTakeProfitAndStopLoss() throws Exception {
+    void eachEtfHasItsOwnTakeProfitAndStopLoss() throws Exception {
         pairConfig(true, true);
-        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("takeProfit", 5.0, "stopLoss", 4.0))));
+        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of(
+                "up", Map.of("takeProfit", 5.0, "stopLoss", 4.0), "inverse", Map.of("takeProfit", 1.0, "stopLoss", 1.0)))));
         config(true, 1_000_000, 5, false);  // 일반 익절 3% · 손절 2%
         pick("000660");
         toss.price.put("000660", 100_000.0);
@@ -602,20 +603,38 @@ class TraderTest {
         watch("NVDA");
         trader.tick();
         trader.tick();
-        toss.price.put("069500", 41_200.0);   // +3%: 일반이면 익절이지만 미장 연동은 5%
+        toss.price.put("069500", 41_200.0);   // +3%: 일반이면 익절이지만 KODEX 200은 5%
         toss.price.put("000660", 103_000.0);  // +3%: 일반 익절
         trader.tick();
         trader.tick();
         assertEquals(List.of("BUY 069500 3", "BUY 000660 2", "SELL 000660 2"), toss.sides());
-        toss.price.put("069500", 38_800.0);   // -3%: 일반이면 손절이지만 미장 연동은 4%
+        toss.price.put("069500", 38_800.0);   // -3%: 일반이면 손절이지만 KODEX 200은 4%
         trader.tick();
         assertEquals(3, toss.orders.size());
         toss.price.put("069500", 42_000.0);   // +5% 익절
         trader.tick();
         trader.tick();
         assertEquals("SELL 069500 3", toss.sides().get(3));
-        assertTrue(String.valueOf(positions().stream().filter(x -> "069500".equals(x.get("symbol"))).findFirst().get().get("reason")).startsWith("익절"));
-        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("stopLoss", 0)))));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pair = (Map<String, Object>) trader.config().get("pair");
+        assertEquals(1.0, ((Map<?, ?>) pair.get("inverse")).get("takeProfit"), "인버스는 따로");
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config",
+                Map.of("pair", Map.of("inverse", Map.of("stopLoss", 0))))));
+    }
+
+    @Test
+    void oldSharedPairPercentsCarryOverToBothEtfs() throws Exception {
+        trader.config();  // 테이블 만들기
+        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + db);
+             java.sql.Statement st = c.createStatement()) {  // 앞 버전이 저장한 모양: 공통 % + 종목 칸에 % 없음
+            st.execute("INSERT OR REPLACE INTO trader_config (k, v) VALUES ('config', '{\"pair\": {\"enabled\": false, \"takeProfit\": 6.0,"
+                    + " \"stopLoss\": 1.5, \"up\": {\"symbol\": \"069500\", \"name\": \"KODEX 200\", \"qty\": 2}}}')");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pair = (Map<String, Object>) trader.config().get("pair");
+        assertEquals(Map.of("symbol", "069500", "name", "KODEX 200", "qty", 2L, "takeProfit", 6.0, "stopLoss", 1.5), pair.get("up"));
+        assertEquals(6.0, ((Map<?, ?>) pair.get("inverse")).get("takeProfit"));
+        assertFalse(pair.containsKey("takeProfit"), "공통 %는 종목 칸으로 옮기고 없앰");
     }
 
     @Test
