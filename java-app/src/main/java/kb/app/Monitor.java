@@ -54,8 +54,16 @@ final class Monitor {
             index("다우", "us", "DIA", "AMX", "DIA"),
             index("러셀 2000", "us", "IWM", "AMX", "IWM"));
 
+    // 채권 ETF 칸 (monitor.py BONDS와 같음): KB·토스에 금리 TR이 없는 만기는 ETF 가격으로 대신 (금리와 반대로 움직임).
+    // 미국채는 그 만기 지표물 하나만 담는 F/m 단일 만기 ETF (UFIV·UTEN·UTHY)
+    static final List<Map<String, Object>> BONDS = List.of(
+            index("국고채 30년", "kr", "439870", "", "KODEX 국고채30년액티브"),
+            index("미국채 5년", "us", "UFIV", "NAS", "UFIV"),
+            index("미국채 10년", "us", "UTEN", "NAS", "UTEN"),
+            index("미국채 30년", "us", "UTHY", "NAS", "UTHY"));
+
     // 금리·원유 칸 (KB TR 값 그대로, monitor.py MACRO와 같음). 토스 API는 주식·ETF 시세만 있어 원유 선물·국채 금리는 KB에서 받음.
-    // 국고채 30년·미국채 금리는 KB·토스 모두 TR이 없어 빠짐 (ETF 가격으로 대신하려면 INDICES처럼 칸을 추가)
+    // 국고채 30년·미국채 금리는 KB·토스 모두 TR이 없어 위 BONDS(ETF 가격)로 대신
     // {key, 이름, TR, 값 필드, 전일 대비 필드, 단위}
     static final String[][] MACRO = {
             {"macro:wti", "WTI 원유 (근월물)", "IVSA0070", "now_prc", "up_dwn_r_p2", "$"},
@@ -105,10 +113,11 @@ final class Monitor {
         this(chart, dbFile, (m, c, x) -> chart.chart(m, c, x, false), client::call);
     }
 
-    /** GET /api/monitor : 지수 칸과 사용자가 추가한 종목. */
+    /** GET /api/monitor : 지수 칸, 채권 ETF 칸, 사용자가 추가한 종목. */
     Map<String, Object> listing() throws IOException {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("indices", INDICES);
+        out.put("bonds", BONDS);
         out.putAll(chart.monitorItems());
         return out;
     }
@@ -198,6 +207,7 @@ final class Monitor {
     @SuppressWarnings("unchecked")
     synchronized Map<String, Object> refresh() throws IOException {
         List<Map<String, Object>> items = new ArrayList<>(INDICES);
+        items.addAll(BONDS);
         items.addAll((List<Map<String, Object>>) chart.monitorItems().get("items"));
         List<Map<String, Object>> got = new ArrayList<>();
         ExecutorService pool = Executors.newFixedThreadPool(8);

@@ -33,8 +33,17 @@ INDICES = [
     {"name": "러셀 2000", "market": "us", "code": "IWM", "exchange": "AMX", "etf": "IWM"},
 ]
 
+# 채권 ETF 칸: KB·토스에 금리 TR이 없는 만기는 ETF 가격으로 대신 (금리와 반대로 움직임).
+# 미국채는 그 만기 지표물 하나만 담는 F/m 단일 만기 ETF (UFIV·UTEN·UTHY)
+BONDS = [
+    {"name": "국고채 30년", "market": "kr", "code": "439870", "exchange": "", "etf": "KODEX 국고채30년액티브"},
+    {"name": "미국채 5년", "market": "us", "code": "UFIV", "exchange": "NAS", "etf": "UFIV"},
+    {"name": "미국채 10년", "market": "us", "code": "UTEN", "exchange": "NAS", "etf": "UTEN"},
+    {"name": "미국채 30년", "market": "us", "code": "UTHY", "exchange": "NAS", "etf": "UTHY"},
+]
+
 # 금리·원유 칸 (KB TR 값 그대로). 토스 API는 주식·ETF 시세만 있어 원유 선물·국채 금리는 KB에서 받음.
-# 국고채 30년·미국채 금리는 KB·토스 모두 TR이 없어 빠짐 (ETF 가격으로 대신하려면 INDICES처럼 칸을 추가)
+# 국고채 30년·미국채 금리는 KB·토스 모두 TR이 없어 위 BONDS(ETF 가격)로 대신
 MACRO = [
     # (key, 이름, TR, 값 필드, 전일 대비 필드, 단위)
     ("macro:wti", "WTI 원유 (근월물)", "IVSA0070", "now_prc", "up_dwn_r_p2", "$"),
@@ -52,8 +61,8 @@ _wake = threading.Event()
 
 
 def listing() -> dict:
-    """GET /api/monitor : 지수 칸과 사용자가 추가한 종목."""
-    return {"indices": INDICES, **chart.monitor_items()}
+    """GET /api/monitor : 지수 칸, 채권 ETF 칸, 사용자가 추가한 종목."""
+    return {"indices": INDICES, "bonds": BONDS, **chart.monitor_items()}
 
 
 def _one(client: KBClient, ix: dict) -> dict:
@@ -99,7 +108,7 @@ def macro(client: KBClient) -> dict[str, dict]:
 
 def refresh(client: KBClient) -> dict:
     """지수·추가 종목 일봉을 KB에서 받아 저장하고, 저장된 전체를 돌려줍니다. 목록에서 빠진 종목은 지웁니다."""
-    items = INDICES + chart.monitor_items()["items"]
+    items = INDICES + BONDS + chart.monitor_items()["items"]
     with ThreadPoolExecutor(8) as pool:
         got = list(pool.map(lambda ix: _one(client, ix), items))
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -172,11 +181,11 @@ if __name__ == "__main__":
         return {"candles": [{"d": f"2026{i:04d}", "c": i, "o": 0} for i in range(50)]}
     chart.chart = fake_chart
     q = refresh(FakeKB())["quotes"]
-    assert set(q) == {f"{ix['market']}:{ix['code']}" for ix in INDICES} | {"us:NVDA"} | {k for k, *_ in MACRO}, q.keys()
+    assert set(q) == {f"{ix['market']}:{ix['code']}" for ix in INDICES + BONDS} | {"us:NVDA"} | {k for k, *_ in MACRO}, q.keys()
     assert q["macro:wti"]["value"] == 101.41 and "error" in q["macro:kr10y"]
     assert q["us:QQQ"]["error"] == "조회 실패" and "candles" not in q["us:QQQ"]
     assert len(q["us:SPY"]["candles"]) == KEEP_CANDLES and q["us:SPY"]["candles"][-1] == {"d": "20260049", "c": 49}
     chart.save_monitor_items({"items": []})
     assert "us:NVDA" not in refresh(FakeKB())["quotes"]  # 목록에서 뺀 종목은 지움
-    assert listing()["indices"] == INDICES and listing()["items"] == []
+    assert listing()["indices"] == INDICES and listing()["bonds"] == BONDS and listing()["items"] == []
     print("ok")

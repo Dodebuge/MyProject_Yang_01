@@ -59,6 +59,10 @@ button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); bord
 .macro .m b { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .macro .m .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .macro .m .c { font-size: 12px; font-variant-numeric: tabular-nums; }
+.macro a.m { color: var(--ink); text-decoration: none; }
+.macro a.m:hover, .macro a.m:focus-visible { border-color: var(--series-1); outline: none; }
+.tag { display: inline-block; font-size: 10px; font-weight: 700; line-height: 14px; padding: 0 4px; border-radius: 4px; vertical-align: 1px;
+  color: var(--series-1); border: 1px solid color-mix(in srgb, var(--series-1) 45%, transparent); }
 .macro .m.err .v { font-size: 12px; font-weight: 500; color: var(--bad); }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -158,7 +162,7 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
       <div class="seg" role="group" aria-label="비교 기간" id="period"><button data-p="day" aria-pressed="true">일간 대비</button><button data-p="week" aria-pressed="false">주간 대비</button><button data-p="month" aria-pressed="false">월간 대비</button></div>
       <span class="sub" id="idx-status">불러오는 중…</span></div>
     <div class="tiles" id="tiles"></div>
-    <h3 class="macro-h">금리·원유 <span class="sub">KB · 서버가 5분마다 저장 · 오르면 빨강</span></h3>
+    <h3 class="macro-h">금리·원유·채권 <span class="sub">KB · 서버가 5분마다 저장 · 오르면 빨강 · <span class="tag">ETF</span> 칸은 금리가 아니라 채권 ETF 가격 (금리와 반대로 움직임)</span></h3>
     <div class="macro" id="macro"></div>
     <dialog id="adder" aria-label="종목 추가">
       <h2>모니터에 종목 추가</h2>
@@ -166,7 +170,7 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
       <ul id="results"></ul>
       <form method="dialog" style="text-align:right"><button>닫기</button></form>
     </dialog>
-    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 금리·원유는 일간(전일 대비)만 있고, 국고채 30년·미국채 금리는 KB·토스 API에 없어 빠져 있습니다. 실제 지수와 조금 다를 수 있습니다. 서버가 5분마다 받아 저장한 시세를 바로 보여 주고('다시 조회'는 지금 KB에서 다시 받음), 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 금리·원유·채권은 일간(전일 대비)만 있습니다. 국고채 30년·미국채 5·10·30년은 KB·토스 API에 금리가 없어 채권 ETF 가격(ETF 표시, 미국채는 그 만기 지표물만 담는 UFIV·UTEN·UTHY)으로 대신합니다. 실제 지수와 조금 다를 수 있습니다. 서버가 5분마다 받아 저장한 시세를 바로 보여 주고('다시 조회'는 지금 KB에서 다시 받음), 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
   </section>
 
   <section class="card" id="pair-card">
@@ -218,7 +222,7 @@ const ymd = d => String(d || "").replace(/^\d{4}-?(\d\d)-?(\d\d).*$/, (_, m, dd)
 
 // ---------------------------------------------------------------- 지수 히트맵
 // 지수 칸(추종 ETF)은 서버(monitor.py INDICES)가 /api/monitor로 알려 줌
-let INDICES = [];
+let INDICES = [], BONDS = [];  // BONDS: 금리 TR이 없는 만기를 대신하는 채권 ETF (monitor.py BONDS)
 
 async function getJson(url) {
   const res = await fetch(url, { cache: "no-store" });
@@ -258,7 +262,7 @@ async function saveExtra() {
 }
 // 서버 목록을 읽음. 예전에 이 브라우저(localStorage)에만 저장한 목록이 있으면 서버가 비어 있을 때 한 번 옮김
 async function loadExtra() {
-  try { ({ indices: INDICES, items: extra } = await getJson("api/monitor")); } catch (err) { $("#idx-status").textContent = `종목 목록을 읽지 못했습니다: ${err.message}`; return; }
+  try { ({ indices: INDICES, bonds: BONDS = [], items: extra } = await getJson("api/monitor")); } catch (err) { $("#idx-status").textContent = `종목 목록을 읽지 못했습니다: ${err.message}`; return; }
   try {
     const old = JSON.parse(localStorage.getItem("monitor-extra"));
     if (old?.length && !extra.length) {
@@ -274,7 +278,7 @@ const IX = { period: "day", rs: {} };  // rs: keyOf -> {status: "fulfilled", val
 
 function tile(ix, r) {
   const href = `chart?market=${ix.market}&code=${encodeURIComponent(ix.code)}${ix.exchange ? `&exchange=${ix.exchange}` : ""}`;
-  const head = `<span class="name">${esc(ix.name)}</span><span class="etf">${esc(ix.etf)}</span>`;
+  const head = `<span class="name">${esc(ix.name)}</span><span class="etf">${INDICES.includes(ix) ? `<span class="tag">ETF</span> ` : ""}${esc(ix.etf)}</span>`;
   if (!r) return `<a class="tile" href="${href}">${head}<span class="chg">…</span></a>`;
   if (r.status === "rejected") return `<a class="tile err" href="${href}">${head}<span class="chg">조회 실패: ${esc(r.reason.message)}</span></a>`;
   const p = PERIODS[IX.period], c = r.value.candles || [], last = c.at(-1), base = p.base(c);
@@ -300,9 +304,23 @@ const fetchOne = ix => Promise.allSettled([getJson(`api/chart?${new URLSearchPar
 // 서버가 5분마다 kb.db에 저장한 시세를 바로 그림 (KB 조회 없음). refresh면 서버가 지금 KB에서 다시 받아 저장
 // 아직 저장되지 않은 종목(방금 추가 등)만 /api/chart로 직접 받음
 // 금리·원유 (monitor.py MACRO): 원유 change는 %, 금리 change는 %p. 색은 원유 3%·금리 0.1%p에서 가장 진함
+// 채권 ETF (BONDS): 최근 두 봉 종가로 전일 대비 %. 색은 1.5%에서 가장 진함 (가격이라 금리와 반대)
+function bondTile(b) {
+  const q = saved_[keyOf(b)], href = `chart?market=${b.market}&code=${encodeURIComponent(b.code)}${b.exchange ? `&exchange=${b.exchange}` : ""}`;
+  const head = `<b>${esc(b.name)} <span class="tag">ETF</span></b>`;
+  if (!q) return `<a class="m" href="${href}">${head}<span class="v">…</span></a>`;
+  if (q.error) return `<a class="m err" href="${href}">${head}<span class="v">받지 못함: ${esc(q.error)}</span></a>`;
+  const c = q.candles || [], last = c.at(-1), prev = c.at(-2), chg = last && prev?.c ? (last.c / prev.c - 1) * 100 : null;
+  const tone = chg > 0 ? "var(--up)" : chg < 0 ? "var(--down)" : "var(--grid)", mix = chg == null ? 0 : Math.min(Math.abs(chg) / 1.5, 1) * 45 + 6;
+  return `<a class="m" href="${href}" style="--tone:${tone};--mix:${mix}%" title="${esc(b.etf)} 가격 · 금리와 반대로 움직임 (가격이 오르면 금리는 내림)">${head}
+    <span class="v">${last ? (b.market === "us" ? `$${fmt(last.c, 2)}` : `${fmt(last.c)}원`) : "—"}</span>
+    <span class="c ${cls(chg)}">${esc(b.etf)} ${chg == null ? "" : `${chg > 0 ? "+" : ""}${fmt(chg, 2)}%`} <span class="days">${esc(ymd(last?.d))}</span></span></a>`;
+}
+let saved_ = {};
 function renderMacro(saved) {
+  saved_ = saved;
   const ms = Object.entries(saved).filter(([k]) => k.startsWith("macro:"));
-  $("#macro").innerHTML = ms.length ? ms.map(([, q]) => {
+  $("#macro").innerHTML = ms.length || BONDS.length ? ms.map(([, q]) => {
     if (q.error) return `<div class="m err"><b>${esc(q.name)}</b><span class="v">받지 못함: ${esc(q.error)}</span></div>`;
     const pctp = q.unit === "%", c = q.change, full = pctp ? 0.1 : 3;
     const tone = c > 0 ? "var(--up)" : c < 0 ? "var(--down)" : "var(--grid)", mix = c == null ? 0 : Math.min(Math.abs(c) / full, 1) * 45 + 6;
@@ -310,7 +328,7 @@ function renderMacro(saved) {
     const chg = c == null ? "" : `${c > 0 ? "+" : ""}${fmt(c, pctp ? 3 : 2)}${pctp ? "%p" : "%"}`;
     return `<div class="m" style="--tone:${tone};--mix:${mix}%" title="${esc(q.fetchedAt || "")} 저장"><b>${esc(q.name)}</b><span class="v">${val}</span>
       <span class="c ${cls(c)}">${chg} <span class="days">${esc(ymd(q.date))}</span></span></div>`;
-  }).join("") : `<div class="sub">서버가 아직 저장하지 않았습니다.</div>`;
+  }).join("") + BONDS.map(bondTile).join("") : `<div class="sub">서버가 아직 저장하지 않았습니다.</div>`;
 }
 
 let idxSeq = 0;

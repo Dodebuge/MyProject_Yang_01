@@ -48,7 +48,9 @@ class MonitorTest {
 
         Map<String, Object> q = (Map<String, Object>) monitor.refresh().get("quotes");
         Set<String> want = new HashSet<>();
-        for (Map<String, Object> ix : Monitor.INDICES) {
+        List<Map<String, Object>> fixed = new ArrayList<>(Monitor.INDICES);
+        fixed.addAll(Monitor.BONDS);
+        for (Map<String, Object> ix : fixed) {
             want.add(ix.get("market") + ":" + ix.get("code"));
         }
         want.add("us:NVDA");
@@ -69,6 +71,7 @@ class MonitorTest {
         chart.saveMonitorItems("{\"items\": []}");
         assertFalse(((Map<String, Object>) monitor.refresh().get("quotes")).containsKey("us:NVDA"));  // 목록에서 뺀 종목은 지움
         assertEquals(Monitor.INDICES, monitor.listing().get("indices"));
+        assertEquals(Monitor.BONDS, monitor.listing().get("bonds"));
         assertEquals(List.of(), monitor.listing().get("items"));
     }
 }
