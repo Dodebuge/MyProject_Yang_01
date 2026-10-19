@@ -591,6 +591,34 @@ class TraderTest {
     }
 
     @Test
+    void pairUsesItsOwnTakeProfitAndStopLoss() throws Exception {
+        pairConfig(true, true);
+        trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("takeProfit", 5.0, "stopLoss", 4.0))));
+        config(true, 1_000_000, 5, false);  // 일반 익절 3% · 손절 2%
+        pick("000660");
+        toss.price.put("000660", 100_000.0);
+        toss.price.put("069500", 40_000.0);
+        usCandles("NVDA", 110, 100);
+        watch("NVDA");
+        trader.tick();
+        trader.tick();
+        toss.price.put("069500", 41_200.0);   // +3%: 일반이면 익절이지만 미장 연동은 5%
+        toss.price.put("000660", 103_000.0);  // +3%: 일반 익절
+        trader.tick();
+        trader.tick();
+        assertEquals(List.of("BUY 069500 3", "BUY 000660 2", "SELL 000660 2"), toss.sides());
+        toss.price.put("069500", 38_800.0);   // -3%: 일반이면 손절이지만 미장 연동은 4%
+        trader.tick();
+        assertEquals(3, toss.orders.size());
+        toss.price.put("069500", 42_000.0);   // +5% 익절
+        trader.tick();
+        trader.tick();
+        assertEquals("SELL 069500 3", toss.sides().get(3));
+        assertTrue(String.valueOf(positions().stream().filter(x -> "069500".equals(x.get("symbol"))).findFirst().get().get("reason")).startsWith("익절"));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config", Map.of("pair", Map.of("stopLoss", 0)))));
+    }
+
+    @Test
     void pairBuysDoNotUseDailyBudget() throws Exception {
         pairConfig(true, true);
         toss.price.put("069500", 40_000.0);

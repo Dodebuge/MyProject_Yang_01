@@ -101,6 +101,8 @@ dialog input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid 
 .pair-rule .kr { width: 210px; } .pair-rule .qty { width: 80px; }
 .pair-rule b { min-width: 72px; }
 .pair-rule span { color: var(--ink-2); font-size: 13px; }
+.pair-rule .px { font-variant-numeric: tabular-nums; }
+.pair-rule .px b { color: var(--ink); }
 /* 미국 티커 작은 히트맵 */
 .mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; margin: 4px 0 8px; }
 .mini .w { position: relative; display: grid; }
@@ -159,18 +161,23 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
     <div class="pair-ctl">
       <button id="pair-on" aria-pressed="false" disabled>켜기</button>
       <label><input type="checkbox" id="pair-close" disabled> 장마감 10분 전 전량 매도</label>
-      <span class="sub" id="pair-rule"></span>
     </div>
     <div class="mini" id="mini" aria-label="미국 티커 직전 미장 등락"></div>
     <p class="sub" id="mini-sum"></p>
     <form id="etf-form">
       <div class="pair-rule"><b class="up">모두 상승 →</b>
         <input class="kr" id="up-kr" list="kr-list" aria-label="모두 상승이면 살 종목" autocomplete="off">
-        <input class="qty" id="up-qty" type="number" min="1" max="10000" step="1" aria-label="모두 상승 수량"> <span>주</span></div>
+        <input class="qty" id="up-qty" type="number" min="1" max="10000" step="1" aria-label="모두 상승 수량"> <span>주</span>
+        <span class="px" id="up-px"></span></div>
       <div class="pair-rule"><b class="down">모두 하락 →</b>
         <input class="kr" id="inv-kr" list="kr-list" aria-label="모두 하락이면 살 종목" autocomplete="off">
         <input class="qty" id="inv-qty" type="number" min="1" max="10000" step="1" aria-label="모두 하락 수량"> <span>주</span>
-        <button id="etf-btn" disabled>저장</button></div>
+        <span class="px" id="inv-px"></span></div>
+      <div class="pair-rule"><b>매도</b>
+        <span>익절 +</span><input class="qty" id="ptp" type="number" min="0.1" max="100" step="0.1" aria-label="미장 연동 익절 %"><span>%</span>
+        <span>손절 -</span><input class="qty" id="psl" type="number" min="0.1" max="100" step="0.1" aria-label="미장 연동 손절 %"><span>%</span>
+        <button id="etf-btn" disabled>저장</button>
+        <span class="sub">자동매매 화면의 익절·손절과 따로</span></div>
       <datalist id="kr-list"></datalist>
     </form>
     <div id="pair-held"></div>
@@ -360,7 +367,8 @@ function renderPairs() {
   $("#pair-close").checked = pc.closeSell;
   for (const el of ["#pair-on", "#pair-close", "#etf-btn"]) $(el).disabled = !on;
   $("#pair-status").textContent = `${PT.pairPhase} · 코스피 ${kr.phase}`;
-  $("#pair-rule").textContent = `익절 +${c.takeProfit}% · 손절 -${c.stopLoss}% (자동매매 화면과 같은 값)`;
+  etfClose(pc.up.symbol, $("#up-px"));
+  etfClose(pc.inverse.symbol, $("#inv-px"));
   // 작은 히트맵: 직전 미장 종가 기준 전일 대비 (3%에서 가장 진함)
   $("#mini").innerHTML = PT.watch.map(w => {
     const k = w.check, chg = k?.change;
@@ -379,6 +387,7 @@ function renderPairs() {
   if (!etfDirty) {  // 고치는 중이면 10초 갱신이 입력을 덮지 않게
     $("#up-kr").value = `${pc.up.name} (${pc.up.symbol})`; $("#up-qty").value = pc.up.qty;
     $("#inv-kr").value = `${pc.inverse.name} (${pc.inverse.symbol})`; $("#inv-qty").value = pc.inverse.qty;
+    $("#ptp").value = pc.takeProfit; $("#psl").value = pc.stopLoss;
   }
   const held = mine.filter(p => ["BUYING", "OPEN", "SELLING"].includes(p.status));
   $("#pair-held").innerHTML = held.length ? `<h3>미장 연동으로 산 종목</h3><div class="table"><table>
@@ -387,7 +396,27 @@ function renderPairs() {
       <td class="num">${fmt(p.qty)}</td><td class="num">${won(p.avg)}</td><td class="num">${won(p.last)}</td>
       <td class="num ${cls(p.pnl)}">${p.pnl == null ? "—" : `${p.pnl > 0 ? "+" : ""}${fmt(p.pnl, 2)}%`}</td></tr>`).join("")}</tbody></table></div>` : "";
   $("#pair-note").textContent = `등록한 미국 티커가 직전 미장 종가 기준 전일 대비 모두 상승이면 '모두 상승' 종목, 모두 하락이면 '모두 하락' 종목을 코스피 장 시작 후 ${PT.pairWindowMinutes}분 안에 토스 시장가로 삽니다(하루 한 번). `
-    + `섞이거나 보합이 있으면 사지 않습니다. 산 종목은 익절·손절에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
+    + `섞이거나 보합이 있으면 사지 않습니다. 산 종목은 여기서 정한 익절·손절 %(자동매매 화면과 따로)에 팔고, '장마감 10분 전 전량 매도'를 끄면 장마감에 팔지 않고 보유합니다. 자동매매 화면의 하루 최대 매수금액·종목 수와는 따로 셉니다.`;
+}
+
+// KODEX 종가: KB 일봉(/api/chart) 마지막 봉. 오늘 장중(15:30 전)이면 현재가. 종목마다 5분 기억
+const ETFPX = {};
+async function etfClose(sym, el) {
+  const hit = ETFPX[sym];
+  if (hit && Date.now() - hit.at < 300000) { el.innerHTML = hit.html; return; }
+  ETFPX[sym] = { at: Date.now(), html: hit?.html || "종가 불러오는 중…" };  // 10초 갱신이 겹쳐 다시 부르지 않게
+  el.innerHTML = ETFPX[sym].html;
+  let html;
+  try {
+    const c = (await getJson(`api/chart?market=kr&code=${encodeURIComponent(sym)}&recent=0`)).candles, last = c.at(-1), prev = c.at(-2);
+    const now = new Date(), today = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).replaceAll("-", "");
+    const live = String(last.d).replaceAll("-", "") === today && now.toLocaleTimeString("en-GB", { timeZone: "Asia/Seoul", hour12: false }).slice(0, 5) < "15:30";
+    const chg = prev?.c ? (last.c / prev.c - 1) * 100 : null;
+    html = `${ymd(last.d)} ${live ? "현재가" : "종가"} <b>${fmt(last.c)}원</b>${chg == null ? "" : ` <span class="${cls(chg)}">${chg > 0 ? "+" : ""}${fmt(chg, 2)}%</span>`}`;
+  } catch (err) { html = `종가를 받지 못함: ${esc(err.message)}`; ETFPX[sym].at = 0; }
+  ETFPX[sym].html = html;
+  if (sym === PT?.config.pair.up.symbol) $("#up-px").innerHTML = html;
+  if (sym === PT?.config.pair.inverse.symbol) $("#inv-px").innerHTML = html;
 }
 
 async function loadPairs(body) {
@@ -396,7 +425,7 @@ async function loadPairs(body) {
 }
 $("#pair-on").onclick = () => {
   const on = !PT.config.pair.enabled, pc = PT.config.pair;
-  if (on && !confirm(`미장 연동 자동매매를 켭니다. 토스 계좌로 실제 주문이 나갑니다.\n\n미국 티커 모두 상승 → ${pc.up.name} ${pc.up.qty}주\n모두 하락 → ${pc.inverse.name} ${pc.inverse.qty}주\n\n익절·손절 %도 확인했나요?`)) return;
+  if (on && !confirm(`미장 연동 자동매매를 켭니다. 토스 계좌로 실제 주문이 나갑니다.\n\n미국 티커 모두 상승 → ${pc.up.name} ${pc.up.qty}주\n모두 하락 → ${pc.inverse.name} ${pc.inverse.qty}주\n익절 +${pc.takeProfit}% · 손절 -${pc.stopLoss}%`)) return;
   loadPairs({ action: "config", config: { pair: { enabled: on } } });
 };
 $("#pair-close").onchange = () => loadPairs({ action: "config", config: { pair: { closeSell: $("#pair-close").checked } } });
@@ -432,6 +461,7 @@ $("#etf-form").onsubmit = async e => {
   const up = krPick($("#up-kr").value.trim()), inv = krPick($("#inv-kr").value.trim());
   if (!up || !inv) return pairErr("종목을 목록에서 고르거나 종목번호 6자리를 넣으세요.");
   if (await loadPairs({ action: "config", config: { pair: {
+    takeProfit: Number($("#ptp").value), stopLoss: Number($("#psl").value),
     up: { symbol: up.symbol, name: up.name, qty: Number($("#up-qty").value) },
     inverse: { symbol: inv.symbol, name: inv.name, qty: Number($("#inv-qty").value) } } } })) etfDirty = false;
 };

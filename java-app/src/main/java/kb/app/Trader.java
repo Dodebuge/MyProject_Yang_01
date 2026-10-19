@@ -183,6 +183,8 @@ final class Trader {
         Map<String, Object> pair = new LinkedHashMap<>();
         pair.put("enabled", false);    // 미장 연동 매수 (위 enabled와 따로)
         pair.put("closeSell", true);   // 미장 연동 종목도 장마감 10분 전 전량 매도. 끄면 보유하고 익절·손절만
+        pair.put("takeProfit", 3.0);   // 미장 연동 종목의 익절·손절 % (위 takeProfit·stopLoss와 따로)
+        pair.put("stopLoss", 2.0);
         pair.put("up", etf("069500", "KODEX 200"));          // 미국 티커가 모두 상승이면 살 종목
         pair.put("inverse", etf("114800", "KODEX 인버스"));  // 모두 하락이면 살 종목
         c.put("pair", pair);
@@ -232,15 +234,7 @@ final class Trader {
         if (in.containsKey("enabled")) {
             c.put("enabled", Boolean.TRUE.equals(in.get("enabled")));
         }
-        for (String k : new String[]{"takeProfit", "stopLoss"}) {
-            if (in.containsKey(k)) {
-                double v = number(in.get(k), k);
-                if (v < 0.1 || v > 100) {
-                    throw new IllegalArgumentException((k.equals("takeProfit") ? "익절" : "손절") + " %는 0.1~100 사이여야 합니다: " + v);
-                }
-                c.put(k, v);
-            }
-        }
+        putPercents(in, c);
         for (String m : MARKETS) {
             if (!(in.get(m) instanceof Map)) {
                 continue;
@@ -273,6 +267,7 @@ final class Trader {
                     dst.put(k, Boolean.TRUE.equals(src.get(k)));
                 }
             }
+            putPercents(src, dst);
             for (String k : new String[]{"up", "inverse"}) {
                 if (!(src.get(k) instanceof Map)) {
                     continue;
@@ -302,6 +297,19 @@ final class Trader {
         }
         log("ALL", "설정 저장: " + (Boolean.TRUE.equals(c.get("enabled")) ? "켜짐" : "꺼짐") + " · 익절 " + c.get("takeProfit")
                 + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US") + " · 미장 연동 " + c.get("pair"));
+    }
+
+    /** 익절·손절 %: 0.1~100 */
+    private static void putPercents(Map<String, Object> src, Map<String, Object> dst) {
+        for (String k : new String[]{"takeProfit", "stopLoss"}) {
+            if (src.containsKey(k)) {
+                double v = number(src.get(k), k);
+                if (v < 0.1 || v > 100) {
+                    throw new IllegalArgumentException((k.equals("takeProfit") ? "익절" : "손절") + " %는 0.1~100 사이여야 합니다: " + v);
+                }
+                dst.put(k, v);
+            }
+        }
     }
 
     private static double number(Object v, String name) {
@@ -509,9 +517,11 @@ final class Trader {
             }
             return;
         }
-        // 익절·손절 (전날 못 판 종목은 바로 매도)
+        // 익절·손절 (전날 못 판 종목은 바로 매도). 미장 연동 종목은 미장 연동 %로
         double tp = Values.num(cfg.get("takeProfit")) / 100;
         double sl = Values.num(cfg.get("stopLoss")) / 100;
+        double pairTp = Values.num(pc.get("takeProfit")) / 100;
+        double pairSl = Values.num(pc.get("stopLoss")) / 100;
         Map<String, Double> prices = prices(m, open.stream().map(p -> Values.str(p.get("symbol"))).toArray(String[]::new));
         for (Map<String, Object> p : open) {
             if (!s.day.equals(p.get("day")) && !(holdPairs && PAIR.equals(p.get("source")))) {  // 보유로 둔 미장 연동 종목은 익절·손절만
@@ -524,9 +534,10 @@ final class Trader {
                 continue;
             }
             double r = price / avg - 1;
-            if (r >= tp) {
+            boolean pair = PAIR.equals(p.get("source"));
+            if (r >= (pair ? pairTp : tp)) {
                 sell(m, p, "익절 " + pct(r));
-            } else if (r <= -sl) {
+            } else if (r <= -(pair ? pairSl : sl)) {
                 sell(m, p, "손절 " + pct(r));
             }
         }
