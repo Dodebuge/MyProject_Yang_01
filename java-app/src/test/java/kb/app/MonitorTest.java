@@ -38,6 +38,12 @@ class MonitorTest {
                 cs.add(k);
             }
             return Map.of("candles", cs);
+        }, (tr, body) -> {  // 금리·원유 TR
+            if ("IVSA0070".equals(tr)) {
+                return Map.of("out4", List.of(Map.of("symbl_cd", "CME@ES", "now_prc", "7700"),
+                        Map.of("symbl_cd", "NYM@CL", "now_prc", " 101.41", "up_dwn_r_p2", "  3.51", "dt_tm", "20261016")));
+            }
+            throw new IOException("KB 끊김");  // IVA10370 실패: 국고채 칸만 오류
         });
 
         Map<String, Object> q = (Map<String, Object>) monitor.refresh().get("quotes");
@@ -46,7 +52,13 @@ class MonitorTest {
             want.add(ix.get("market") + ":" + ix.get("code"));
         }
         want.add("us:NVDA");
+        want.addAll(List.of("macro:wti", "macro:kr5y", "macro:kr10y"));
         assertEquals(want, q.keySet());
+        Map<String, Object> wti = (Map<String, Object>) q.get("macro:wti");
+        assertEquals(101.41, wti.get("value"));
+        assertEquals(3.51, wti.get("change"));
+        assertEquals("20261016", wti.get("date"));
+        assertEquals("KB 끊김", ((Map<String, Object>) q.get("macro:kr10y")).get("error"));
         Map<String, Object> qqq = (Map<String, Object>) q.get("us:QQQ");
         assertEquals("조회 실패", qqq.get("error"));
         assertFalse(qqq.containsKey("candles"));

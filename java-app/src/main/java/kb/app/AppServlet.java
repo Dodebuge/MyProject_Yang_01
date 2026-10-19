@@ -136,7 +136,7 @@ public class AppServlet extends HttpServlet {
         dividends = new Dividends(client, store);
         last = new LastResponse(dataDir.resolve("last_api"));
         chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
-        monitor = new Monitor(chart, dataDir.resolve("kb.db"));
+        monitor = new Monitor(chart, dataDir.resolve("kb.db"), client);
         monitor.start();  // 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용)
         volume = new Volume(client, dataDir.resolve("kosdaq.db"));
         volume.ticks.start();  // 장중 10분마다 코스닥 거래량 기록

@@ -52,6 +52,14 @@ button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); bord
 .head h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .note { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
 /* 지수 히트맵: 등락률이 클수록 진하게 (3%에서 가장 진함) */
+.macro-h { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+.macro { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.macro .m { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tone, var(--grid)) var(--mix, 0%), var(--surface)); }
+.macro .m b { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.macro .m .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.macro .m .c { font-size: 12px; font-variant-numeric: tabular-nums; }
+.macro .m.err .v { font-size: 12px; font-weight: 500; color: var(--bad); }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tile {
@@ -150,13 +158,15 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
       <div class="seg" role="group" aria-label="비교 기간" id="period"><button data-p="day" aria-pressed="true">일간 대비</button><button data-p="week" aria-pressed="false">주간 대비</button><button data-p="month" aria-pressed="false">월간 대비</button></div>
       <span class="sub" id="idx-status">불러오는 중…</span></div>
     <div class="tiles" id="tiles"></div>
+    <h3 class="macro-h">금리·원유 <span class="sub">KB · 서버가 5분마다 저장 · 오르면 빨강</span></h3>
+    <div class="macro" id="macro"></div>
     <dialog id="adder" aria-label="종목 추가">
       <h2>모니터에 종목 추가</h2>
       <input id="q" type="search" placeholder="종목 이름·번호·미국 티커" autocomplete="off" aria-label="종목 검색">
       <ul id="results"></ul>
       <form method="dialog" style="text-align:right"><button>닫기</button></form>
     </dialog>
-    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 서버가 5분마다 받아 저장한 시세를 바로 보여 주고('다시 조회'는 지금 KB에서 다시 받음), 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 금리·원유는 일간(전일 대비)만 있고, 국고채 30년·미국채 금리는 KB·토스 API에 없어 빠져 있습니다. 실제 지수와 조금 다를 수 있습니다. 서버가 5분마다 받아 저장한 시세를 바로 보여 주고('다시 조회'는 지금 KB에서 다시 받음), 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
   </section>
 
   <section class="card" id="pair-card">
@@ -289,6 +299,20 @@ const fetchOne = ix => Promise.allSettled([getJson(`api/chart?${new URLSearchPar
 
 // 서버가 5분마다 kb.db에 저장한 시세를 바로 그림 (KB 조회 없음). refresh면 서버가 지금 KB에서 다시 받아 저장
 // 아직 저장되지 않은 종목(방금 추가 등)만 /api/chart로 직접 받음
+// 금리·원유 (monitor.py MACRO): 원유 change는 %, 금리 change는 %p. 색은 원유 3%·금리 0.1%p에서 가장 진함
+function renderMacro(saved) {
+  const ms = Object.entries(saved).filter(([k]) => k.startsWith("macro:"));
+  $("#macro").innerHTML = ms.length ? ms.map(([, q]) => {
+    if (q.error) return `<div class="m err"><b>${esc(q.name)}</b><span class="v">받지 못함: ${esc(q.error)}</span></div>`;
+    const pctp = q.unit === "%", c = q.change, full = pctp ? 0.1 : 3;
+    const tone = c > 0 ? "var(--up)" : c < 0 ? "var(--down)" : "var(--grid)", mix = c == null ? 0 : Math.min(Math.abs(c) / full, 1) * 45 + 6;
+    const val = pctp ? `${fmt(q.value, 3)}%` : `$${fmt(q.value, 2)}`;
+    const chg = c == null ? "" : `${c > 0 ? "+" : ""}${fmt(c, pctp ? 3 : 2)}${pctp ? "%p" : "%"}`;
+    return `<div class="m" style="--tone:${tone};--mix:${mix}%" title="${esc(q.fetchedAt || "")} 저장"><b>${esc(q.name)}</b><span class="v">${val}</span>
+      <span class="c ${cls(c)}">${chg} <span class="days">${esc(ymd(q.date))}</span></span></div>`;
+  }).join("") : `<div class="sub">서버가 아직 저장하지 않았습니다.</div>`;
+}
+
 let idxSeq = 0;
 async function loadIndices(refresh = false) {
   const seq = ++idxSeq;
@@ -299,6 +323,7 @@ async function loadIndices(refresh = false) {
   let saved = {};
   try { saved = (await getJson(`api/monitor-quotes${refresh ? "?refresh=1" : ""}`)).quotes; } catch { /* 저장된 시세 없이 직접 조회 */ }
   if (seq !== idxSeq) return;
+  renderMacro(saved);
   for (const [k, q] of Object.entries(saved)) {
     IX.rs[k] = q.error ? { status: "rejected", reason: new Error(q.error) } : { status: "fulfilled", value: q };
   }

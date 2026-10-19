@@ -89,8 +89,8 @@ public class KbApplication {
 
     /** 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용). */
     @Bean(destroyMethod = "stop")
-    Monitor monitor(Chart chart, @Value("${kb.data-dir}") Path dataDir) {
-        Monitor m = new Monitor(chart, dataDir.resolve("kb.db"));
+    Monitor monitor(Chart chart, KBClient client, @Value("${kb.data-dir}") Path dataDir) {
+        Monitor m = new Monitor(chart, dataDir.resolve("kb.db"), client);
         m.start();
         return m;
     }

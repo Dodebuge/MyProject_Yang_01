@@ -54,6 +54,15 @@ final class Monitor {
             index("다우", "us", "DIA", "AMX", "DIA"),
             index("러셀 2000", "us", "IWM", "AMX", "IWM"));
 
+    // 금리·원유 칸 (KB TR 값 그대로, monitor.py MACRO와 같음). 토스 API는 주식·ETF 시세만 있어 원유 선물·국채 금리는 KB에서 받음.
+    // 국고채 30년·미국채 금리는 KB·토스 모두 TR이 없어 빠짐 (ETF 가격으로 대신하려면 INDICES처럼 칸을 추가)
+    // {key, 이름, TR, 값 필드, 전일 대비 필드, 단위}
+    static final String[][] MACRO = {
+            {"macro:wti", "WTI 원유 (근월물)", "IVSA0070", "now_prc", "up_dwn_r_p2", "$"},
+            {"macro:kr5y", "국고채 5년", "IVA10370", "ntnbnd_yr5_thng_yld_p5", "ntnbnd_yr5_thng_yld_cmpr_p5", "%"},
+            {"macro:kr10y", "국고채 10년", "IVA10370", "ntnbnd_yr10_thng_yld_p5", "ntnbnd_yr10_thng_yld_cmpr_p5", "%"},
+    };
+
     private static Map<String, Object> index(String name, String market, String code, String exchange, String etf) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", name);
@@ -69,14 +78,21 @@ final class Monitor {
         Map<String, Object> chart(String market, String code, String exchange) throws IOException;
     }
 
+    /** KB TR 호출 (운영은 KBClient.call, 테스트는 가짜). 금리·원유용 */
+    interface Tr {
+        Map<String, Object> call(String tr, Map<String, ?> body) throws IOException;
+    }
+
     private final Chart chart;
     private final Quote quote;
+    private final Tr tr;
     private final String url;
     private ScheduledExecutorService timer;
 
-    Monitor(Chart chart, Path dbFile, Quote quote) {
+    Monitor(Chart chart, Path dbFile, Quote quote, Tr tr) {
         this.chart = chart;
         this.quote = quote;
+        this.tr = tr;
         this.url = "jdbc:sqlite:" + dbFile.toAbsolutePath();
         try {
             Class.forName("org.sqlite.JDBC");  // Tomcat은 WEB-INF/lib의 JDBC 드라이버를 자동 등록하지 않을 수 있음
@@ -85,8 +101,8 @@ final class Monitor {
         }
     }
 
-    Monitor(Chart chart, Path dbFile) {
-        this(chart, dbFile, (m, c, x) -> chart.chart(m, c, x, false));
+    Monitor(Chart chart, Path dbFile, KBClient client) {
+        this(chart, dbFile, (m, c, x) -> chart.chart(m, c, x, false), client::call);
     }
 
     /** GET /api/monitor : 지수 칸과 사용자가 추가한 종목. */
@@ -117,6 +133,67 @@ final class Monitor {
         return p;
     }
 
+    private static Double num(Object v) {
+        try {
+            return Double.parseDouble(Values.str(v).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 금리·원유: TR마다 한 번씩 불러 MACRO 칸으로 {name, value, change, unit, date} (실패는 {name, error}).
+     * 원유 change는 전일 대비 %, 금리 change는 전일 대비 %p. 한 TR이 실패해도 다른 칸은 저장.
+     */
+    Map<String, Map<String, Object>> macro() {
+        Map<String, Object> bodies = new LinkedHashMap<>();  // TR -> 응답 Map 또는 오류 문자열
+        for (String[] m : MACRO) {
+            if (!bodies.containsKey(m[2])) {
+                try {
+                    bodies.put(m[2], tr.call(m[2], new LinkedHashMap<>()));
+                } catch (IOException | RuntimeException e) {
+                    bodies.put(m[2], e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                }
+            }
+        }
+        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        for (String[] m : MACRO) {
+            Map<String, Object> v = new LinkedHashMap<>();
+            v.put("name", m[1]);
+            Object body = bodies.get(m[2]);
+            if (!(body instanceof Map)) {
+                v.put("error", body);
+                out.put(m[0], v);
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> b = (Map<String, Object>) body;
+            Map<String, Object> row = b;
+            String date = Values.str(b.get("dt2")).trim().isEmpty() ? Values.str(b.get("dt")).trim() : Values.str(b.get("dt2")).trim();
+            if ("IVSA0070".equals(m[2])) {  // 해외선물·지수 목록에서 WTI 근월물 (NYM@CL)
+                row = null;
+                for (Map<String, Object> r : KBClient.records(b, "out4")) {
+                    if ("NYM@CL".equals(Values.str(r.get("symbl_cd")).trim())) {
+                        row = r;
+                    }
+                }
+                String dt = row == null ? "" : Values.str(row.get("dt_tm")).trim();
+                date = dt.length() > 8 ? dt.substring(0, 8) : dt;
+            }
+            Double value = row == null ? null : num(row.get(m[3]));
+            if (value == null) {
+                v.put("error", m[2] + " 응답에 " + m[1] + " 값이 없습니다");
+            } else {
+                v.put("value", value);
+                v.put("change", num(row.get(m[4])));
+                v.put("unit", m[5]);
+                v.put("date", date);
+            }
+            out.put(m[0], v);
+        }
+        return out;
+    }
+
     /** 지수·추가 종목 일봉을 KB에서 받아 저장하고, 저장된 전체를 돌려줍니다. 목록에서 빠진 종목은 지웁니다. */
     @SuppressWarnings("unchecked")
     synchronized Map<String, Object> refresh() throws IOException {
@@ -139,6 +216,7 @@ final class Monitor {
         }
         String now = LocalDateTime.now(SEOUL).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         List<String> keys = new ArrayList<>();
+        Map<String, Map<String, Object>> macro = macro();
         try (Connection c = open()) {
             c.setAutoCommit(false);
             try (PreparedStatement ps = c.prepareStatement("INSERT INTO monitor_quotes (key, fetched_at, payload) VALUES (?, ?, ?)"
@@ -149,6 +227,13 @@ final class Monitor {
                     ps.setString(1, key);
                     ps.setString(2, now);
                     ps.setString(3, GSON.toJson(got.get(i)));
+                    ps.addBatch();
+                }
+                for (Map.Entry<String, Map<String, Object>> e : macro.entrySet()) {
+                    keys.add(e.getKey());
+                    ps.setString(1, e.getKey());
+                    ps.setString(2, now);
+                    ps.setString(3, GSON.toJson(e.getValue()));
                     ps.addBatch();
                 }
                 ps.executeBatch();
