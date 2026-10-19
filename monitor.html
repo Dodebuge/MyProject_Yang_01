@@ -92,9 +92,11 @@ button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); bord
   </header>
 
   <section class="card">
-    <div class="head"><h2>지수 히트맵</h2><span class="sub" id="idx-status">불러오는 중…</span></div>
+    <div class="head"><h2>지수 히트맵</h2>
+      <div class="seg" role="group" aria-label="비교 기간" id="period"><button data-p="day" aria-pressed="true">일간 대비</button><button data-p="week" aria-pressed="false">주간 대비</button><button data-p="month" aria-pressed="false">월간 대비</button></div>
+      <span class="sub" id="idx-status">불러오는 중…</span></div>
     <div class="tiles" id="tiles"></div>
-    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉의 마지막 봉과 그 전 봉 종가로 등락률을 계산합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다.</p>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다.</p>
   </section>
 
   <section class="card">
@@ -129,19 +131,41 @@ async function getJson(url) {
   return d;
 }
 
+// 비교 기간: 일간 = 직전 봉, 주간·월간 = 마지막 봉 날짜에서 7일·1달 전 이전의 마지막 봉 (휴장이면 그 전 거래일)
+// full: 가장 진한 색이 되는 등락률(%). 기간이 길수록 크게 움직여 기준도 크게
+const PERIODS = {
+  day: { label: "일간", full: 3, base: c => c.at(-2) },
+  week: { label: "주간", full: 6, base: c => before(c, d => d.setDate(d.getDate() - 7)) },
+  month: { label: "월간", full: 10, base: c => before(c, d => {  // 3/31 -> 2/28 (말일을 넘기지 않게)
+    const day = d.getDate();
+    d.setDate(1); d.setMonth(d.getMonth() - 1);
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+  }) },
+};
+const dateOf = s => { const m = String(s).match(/^(\d{4})-?(\d\d)-?(\d\d)/); return m && new Date(+m[1], m[2] - 1, +m[3]); };
+function before(c, shift) {
+  const t = dateOf(c.at(-1)?.d);
+  if (!t) return null;
+  shift(t);
+  return c.findLast(x => dateOf(x.d) <= t) || null;
+}
+const IX = { period: "day", rs: null };
+
 function tile(ix, r) {
   const href = `chart?market=${ix.market}&code=${encodeURIComponent(ix.code)}`;
   const head = `<span class="name">${esc(ix.name)}</span><span class="etf">${esc(ix.etf)}</span>`;
   if (r.status === "rejected") return `<a class="tile err" href="${href}">${head}<span class="chg">조회 실패: ${esc(r.reason.message)}</span></a>`;
-  const c = r.value.candles || [], last = c.at(-1), prev = c.at(-2);
-  const chg = last && prev?.c ? (last.c / prev.c - 1) * 100 : null;
+  const p = PERIODS[IX.period], c = r.value.candles || [], last = c.at(-1), base = p.base(c);
+  const chg = last && base?.c ? (last.c / base.c - 1) * 100 : null;
   const tone = chg > 0 ? "var(--up)" : chg < 0 ? "var(--down)" : "var(--grid)";
-  const mix = chg == null ? 0 : Math.min(Math.abs(chg) / 3, 1) * 55 + 8;
+  const mix = chg == null ? 0 : Math.min(Math.abs(chg) / p.full, 1) * 55 + 8;
   const dp = ix.market === "us" ? 2 : 0;
   return `<a class="tile" href="${href}" style="--tone:${tone};--mix:${mix}%">${head}
     <span class="chg">${chg == null ? "—" : `${chg > 0 ? "+" : ""}${fmt(chg, 2)}%`}</span>
-    <span class="px">${fmt(last?.c, dp)} · ${esc(ymd(last?.d))} 기준</span></a>`;
+    <span class="px">${fmt(last?.c, dp)} · ${esc(ymd(last?.d))} 기준${base ? ` (${esc(ymd(base.d))} ${fmt(base.c, dp)} 대비)` : ""}</span></a>`;
 }
+
+const renderIndices = () => { if (IX.rs) $("#tiles").innerHTML = INDICES.map((ix, i) => tile(ix, IX.rs[i])).join(""); };
 
 let idxSeq = 0;
 async function loadIndices() {
@@ -149,9 +173,16 @@ async function loadIndices() {
   $("#idx-status").textContent = "조회하는 중…";
   const rs = await Promise.allSettled(INDICES.map(ix => getJson(`api/chart?market=${ix.market}&code=${ix.code}&recent=0`)));
   if (seq !== idxSeq) return;
-  $("#tiles").innerHTML = INDICES.map((ix, i) => tile(ix, rs[i])).join("");
+  IX.rs = rs;
+  renderIndices();
   $("#idx-status").textContent = `${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 조회`;
 }
+// 기간 버튼은 받아 둔 일봉으로 다시 계산만 함 (KB 조회 없음)
+document.querySelectorAll("#period button").forEach(b => b.onclick = () => {
+  IX.period = b.dataset.p;
+  document.querySelectorAll("#period button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  renderIndices();
+});
 
 // ---------------------------------------------------------------- 시그널 알림 (volume.html과 같은 /api/alerts, 브라우저 알림은 거래량 페이지에서)
 const AL = { last: -1, items: [], fresh: new Set(), mk: "" };
