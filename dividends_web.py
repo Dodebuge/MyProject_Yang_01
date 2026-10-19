@@ -29,7 +29,8 @@ API:
     GET /api/recent                -> {"items": [{"market", "code", "exchange", "name"}]}  최근 검색 종목 (recent_searches.txt, 최대 10개)
     GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd"}  차트 설정 (chart_settings.json)
     POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
-    GET /api/monitor               -> {"items": [{"market", "code", "name", "exchange", "etf"}]}  시장 모니터에 추가한 종목 (monitor_items.json)
+    GET /api/monitor               -> {"indices": [...], "items": [{"market", "code", "name", "exchange", "etf"}]}  지수 칸 + 시장 모니터에 추가한 종목 (monitor_items.json)
+    GET /api/monitor-quotes[?refresh=1] -> {"quotes": {"kr:069500": {"fetchedAt", "candles": [{"d", "c"}]} 또는 {"fetchedAt", "error"}}}  5분마다 kb.db에 저장한 시세 (refresh=1이면 지금 KB에서 다시 받아 저장)
     POST /api/monitor {"items": [...]} -> 목록을 통째로 저장하고 저장된 목록을 돌려줌 (잘못된 종목·중복은 버림, 최대 30개)
     GET /api/holdings             -> {"fetchedAt", "stocks": [...], "cash": {"krw", "fx_krw", "today", "toss"}}  KB 잔고 TR + 토스 /holdings
     GET /api/holdings-history      -> {"days": [{"date", "stock", "cash", "total", "kb", "toss", "kbStock", "tossStock"}]}  날짜별 총자산 (kb.db에 저장된 보유 현황, KB 조회 없음)
@@ -65,6 +66,7 @@ from urllib.parse import parse_qs, urlparse
 
 import alerts
 import chart
+import monitor
 import russell
 import snapshots
 import volume
@@ -137,6 +139,13 @@ def _refresh(q: dict) -> bool:
     return _flag(q, "refresh")
 
 
+def _save_monitor(d: dict) -> dict:
+    """POST /api/monitor : 목록을 저장하고 시세 저장 스레드를 깨워 새 종목을 곧바로 받게 함."""
+    out = chart.save_monitor_items(d)
+    monitor.changed()
+    return out
+
+
 def _trader_only_java() -> dict:
     """토스 자동매매는 실제 주문 로직을 한 곳에만 두려고 Spring·Java 서버(Trader.java)에서만 동작합니다."""
     raise ValueError("토스 자동매매는 Spring·Java 서버에서만 동작합니다 (spring-app/run.sh). 실제 주문 로직을 한 곳(Trader.java)에만 둡니다.")
@@ -167,7 +176,9 @@ def make_handler(client: KBClient):
             elif url.path == "/api/settings":
                 self._api(lambda q: chart.settings(), {})
             elif url.path == "/api/monitor":
-                self._api(lambda q: chart.monitor_items(), {})
+                self._api(lambda q: monitor.listing(), {})
+            elif url.path == "/api/monitor-quotes":
+                self._api(lambda q: monitor.refresh(client) if _refresh(q) else monitor.quotes(), parse_qs(url.query))
             elif url.path == "/api/recent":
                 self._api(lambda q: {"items": chart.recent()}, {})
             elif url.path == "/api/kosdaq-volume":
@@ -195,7 +206,7 @@ def make_handler(client: KBClient):
             path = urlparse(self.path).path
             if path == "/api/trader":
                 return self._api(lambda q: _trader_only_java(), {})
-            save = {"/api/settings": (chart.save_settings, SETTINGS_MAX_BYTES), "/api/monitor": (chart.save_monitor_items, MONITOR_MAX_BYTES)}.get(path)
+            save = {"/api/settings": (chart.save_settings, SETTINGS_MAX_BYTES), "/api/monitor": (_save_monitor, MONITOR_MAX_BYTES)}.get(path)
             if not save:
                 return self.send_error(404)
             size = int(self.headers.get("Content-Length") or 0)
@@ -251,6 +262,7 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
     snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
     volume.KOSDAQ.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
+    monitor.start(client)  # 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용)
     alerts.start(client)  # 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
     russell.RUSSELL.start(client)  # 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell.db, russell2000.csv가 있을 때)
     # HTTPS: .env(또는 환경변수)에 SSL_CERT·SSL_KEY(PEM, 상대 경로는 이 폴더 기준)가 있으면 https로 엽니다 (deploy/make-cert.sh).

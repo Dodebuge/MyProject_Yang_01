@@ -6,8 +6,8 @@
 <title>시장 모니터</title>
 <!--
   시장 모니터. dividends_web.py가 /monitor 로 제공합니다.
-  - 지수 히트맵: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000을 전일 대비 등락률 색으로. 5분마다 갱신.
-    KB 지수 시세 API가 없어 추종 ETF 일봉(/api/chart?recent=0)의 마지막 두 봉으로 계산합니다 (Trader.java INDEX와 같은 방식).
+  - 지수 히트맵: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000(+ 추가 종목)을 등락률 색으로.
+    KB 지수 시세 API가 없어 추종 ETF 일봉으로 계산합니다. 서버(monitor.py)가 5분마다 kb.db에 저장한 시세(/api/monitor-quotes)를 바로 그림.
   - 시그널 알림: 거래량 페이지와 같은 /api/alerts (코스닥·러셀 2000 모두). 1분마다 갱신.
 -->
 <style>
@@ -118,7 +118,7 @@ dialog input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid 
       <ul id="results"></ul>
       <form method="dialog" style="text-align:right"><button>닫기</button></form>
     </dialog>
-    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 5분마다 갱신, 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
+    <p class="note">KB OpenAPI에 지수 시세가 없어 추종 ETF 일봉 종가로 등락률을 계산합니다. 일간은 직전 거래일, 주간·월간은 7일·1달 전(휴장이면 그 전 거래일) 종가와 비교합니다. 실제 지수와 조금 다를 수 있습니다. 서버가 5분마다 받아 저장한 시세를 바로 보여 주고('다시 조회'는 지금 KB에서 다시 받음), 누르면 차트가 열립니다. + 칸으로 종목을 추가할 수 있고 서버에 저장돼 다른 기기에서도 보입니다.</p>
   </section>
 
   <section class="card">
@@ -133,18 +133,12 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const NF = {};
 const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : (NF[d] ??= new Intl.NumberFormat("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d })).format(n);
+const md = s => `${+s.slice(5, 7)}/${+s.slice(8, 10)}`;  // "2026-10-19 ..." -> "10/19"
 const ymd = d => String(d || "").replace(/^\d{4}-?(\d\d)-?(\d\d).*$/, (_, m, dd) => `${+m}/${+dd}`);
 
 // ---------------------------------------------------------------- 지수 히트맵
-// ponytail: 지수 대신 추종 ETF. 정확한 지수 값이 필요하면 KB 지수 시세 TR로 서버 API를 추가할 것
-const INDICES = [
-  { name: "코스피", market: "kr", code: "069500", etf: "KODEX 200" },
-  { name: "코스닥", market: "kr", code: "229200", etf: "KODEX 코스닥150" },
-  { name: "S&P 500", market: "us", code: "SPY", etf: "SPY" },
-  { name: "나스닥", market: "us", code: "QQQ", etf: "QQQ (나스닥 100)" },
-  { name: "다우", market: "us", code: "DIA", etf: "DIA" },
-  { name: "러셀 2000", market: "us", code: "IWM", etf: "IWM" },
-];
+// 지수 칸(추종 ETF)은 서버(monitor.py INDICES)가 /api/monitor로 알려 줌
+let INDICES = [];
 
 async function getJson(url) {
   const res = await fetch(url, { cache: "no-store" });
@@ -184,7 +178,7 @@ async function saveExtra() {
 }
 // 서버 목록을 읽음. 예전에 이 브라우저(localStorage)에만 저장한 목록이 있으면 서버가 비어 있을 때 한 번 옮김
 async function loadExtra() {
-  try { extra = (await getJson("api/monitor")).items; } catch (err) { $("#idx-status").textContent = `종목 목록을 읽지 못했습니다: ${err.message}`; return; }
+  try { ({ indices: INDICES, items: extra } = await getJson("api/monitor")); } catch (err) { $("#idx-status").textContent = `종목 목록을 읽지 못했습니다: ${err.message}`; return; }
   try {
     const old = JSON.parse(localStorage.getItem("monitor-extra"));
     if (old?.length && !extra.length) {
@@ -196,7 +190,7 @@ async function loadExtra() {
 }
 const keyOf = ix => `${ix.market}:${ix.code}`;
 const items = () => [...INDICES, ...extra];
-const IX = { period: "day", rs: {} };  // rs: keyOf -> Promise.allSettled 결과 하나
+const IX = { period: "day", rs: {} };  // rs: keyOf -> {status: "fulfilled", value: {candles}} 또는 {status: "rejected", reason}
 
 function tile(ix, r) {
   const href = `chart?market=${ix.market}&code=${encodeURIComponent(ix.code)}${ix.exchange ? `&exchange=${ix.exchange}` : ""}`;
@@ -223,17 +217,30 @@ const renderIndices = () => {
 const fetchOne = ix => Promise.allSettled([getJson(`api/chart?${new URLSearchParams({ market: ix.market, code: ix.code, exchange: ix.exchange || "", recent: 0 })}`)])
   .then(([r]) => { IX.rs[keyOf(ix)] = r; });
 
+// 서버가 5분마다 kb.db에 저장한 시세를 바로 그림 (KB 조회 없음). refresh면 서버가 지금 KB에서 다시 받아 저장
+// 아직 저장되지 않은 종목(방금 추가 등)만 /api/chart로 직접 받음
 let idxSeq = 0;
-async function loadIndices() {
+async function loadIndices(refresh = false) {
   const seq = ++idxSeq;
-  $("#idx-status").textContent = "조회하는 중…";
+  $("#idx-status").textContent = refresh ? "KB에서 다시 조회하는 중…" : "불러오는 중…";
   await loadExtra();  // 다른 기기에서 추가·뺀 종목도 갱신 때 반영
   if (seq !== idxSeq) return;
   renderIndices();
-  await Promise.all(items().map(fetchOne));
+  let saved = {};
+  try { saved = (await getJson(`api/monitor-quotes${refresh ? "?refresh=1" : ""}`)).quotes; } catch { /* 저장된 시세 없이 직접 조회 */ }
+  if (seq !== idxSeq) return;
+  for (const [k, q] of Object.entries(saved)) {
+    IX.rs[k] = q.error ? { status: "rejected", reason: new Error(q.error) } : { status: "fulfilled", value: q };
+  }
+  renderIndices();
+  const at = Object.values(saved).map(q => q.fetchedAt).sort().at(-1);
+  $("#idx-status").textContent = at ? `${md(at)} ${at.slice(11, 16)} 저장된 시세 · 서버가 5분마다 갱신` : "저장된 시세가 없어 직접 조회하는 중…";
+  const missing = items().filter(ix => !saved[keyOf(ix)]);
+  if (!missing.length) return;
+  await Promise.all(missing.map(fetchOne));
   if (seq !== idxSeq) return;
   renderIndices();
-  $("#idx-status").textContent = `${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 조회`;
+  if (!at) $("#idx-status").textContent = `${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 조회`;
 }
 
 // + 칸: 차트 페이지와 같은 /api/search로 찾아 추가
@@ -305,7 +312,7 @@ document.querySelectorAll("#mk-filter button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#mk-filter button").forEach(x => x.setAttribute("aria-pressed", x === b));
   renderAlerts();
 });
-$("#reload").onclick = () => { loadIndices(); pollAlerts(); };
+$("#reload").onclick = () => { loadIndices(true); pollAlerts(); };
 try { const t = localStorage.getItem("div-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
 $("#theme").onclick = () => {
   const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -315,7 +322,7 @@ $("#theme").onclick = () => {
 };
 loadIndices();
 pollAlerts();
-setInterval(loadIndices, 5 * 60000);
+setInterval(() => loadIndices(), 5 * 60000);  // 저장된 시세만 다시 읽음 (서버가 5분마다 갱신)
 setInterval(pollAlerts, 60000);
 </script>
 </body>
