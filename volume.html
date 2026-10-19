@@ -141,7 +141,9 @@ tbody tr:hover { background: var(--hover); }
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+// 자릿수별 포맷터를 한 번만 만듦 (toLocaleString은 호출마다 새로 만들어 수천 행이면 수백 ms)
+const NF = {};
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : (NF[d] ??= new Intl.NumberFormat("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d })).format(n);
 const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1e8, 0) + "억" : n >= 1e4 ? fmt(n / 1e4, 0) + "만" : fmt(n);
 const cls = n => n > 0 ? "up" : n < 0 ? "down" : "";
 const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n, d)}%`;
@@ -327,7 +329,10 @@ function setView(view, market = V.market) {
   load(false);
 }
 
-$("#min").oninput = $("#q").oninput = $("#spac").onchange = $("#rise").onchange = render;
+// 타자 중에는 멈춘 뒤 한 번만 다시 그림
+let typing;
+$("#min").oninput = $("#q").oninput = () => { clearTimeout(typing); typing = setTimeout(render, 150); };
+$("#spac").onchange = $("#rise").onchange = render;
 $("#basis").onchange = () => { V.sort.intraday = $("#basis").value; V.desc = true; render(); };
 $("#date").onchange = () => { $("#at").value = ""; load(false); };
 $("#at").onchange = () => load(false);
