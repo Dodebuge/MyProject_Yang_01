@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "코스닥 매수 시뮬레이션 요청 흐름",
+    "output": "docs/kosdaq-sim.sequence.html",
+    "viewBox": [
+      1060,
+      600
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "kb",
+      "type": "external",
+      "label": "KB OpenAPI",
+      "sublabel": "IVU10210 · IVS11560"
+    },
+    {
+      "id": "rec",
+      "type": "backend",
+      "label": "장중 기록 스레드",
+      "sublabel": "Ticks.start · 5분마다"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "kosdaq.db",
+      "sublabel": "kosdaq_tick (SQLite)"
+    },
+    {
+      "id": "sim",
+      "type": "backend",
+      "label": "Ticks.simulate",
+      "sublabel": "volume.py · Ticks.java"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "웹 서버",
+      "sublabel": "/api/kosdaq-sim"
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "monitor.html",
+      "sublabel": "매수 시뮬레이션 카드"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 268,
+      "label": "기록 (평일 09:00~15:40)"
+    },
+    {
+      "from": 276,
+      "to": 390,
+      "label": "요청"
+    },
+    {
+      "from": 396,
+      "to": 452,
+      "label": "날짜·시각마다 계산"
+    },
+    {
+      "from": 458,
+      "to": 514,
+      "label": "응답"
+    }
+  ],
+  "messages": [
+    {
+      "from": "rec",
+      "to": "kb",
+      "y": 170,
+      "label": "IVU10210 코스닥 전 종목 시세",
+      "variant": "emphasis"
+    },
+    {
+      "from": "kb",
+      "to": "rec",
+      "y": 198,
+      "label": "현재가 · 등락률 · 누적 거래량",
+      "variant": "return"
+    },
+    {
+      "from": "rec",
+      "to": "kb",
+      "y": 226,
+      "label": "IVS11560 오늘 일봉 (휴장 확인)",
+      "variant": "dashed"
+    },
+    {
+      "from": "rec",
+      "to": "db",
+      "y": 254,
+      "label": "INSERT at·payload, 14일 지난 기록 삭제",
+      "variant": "emphasis"
+    },
+    {
+      "from": "browser",
+      "to": "api",
+      "y": 292,
+      "label": "GET ?min&hold&tp&sl&until&cost&spac",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "sim",
+      "y": 320,
+      "label": "simulate(min, amount, …, hold)",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sim",
+      "to": "db",
+      "y": 348,
+      "label": "SELECT at ORDER BY at",
+      "variant": "default"
+    },
+    {
+      "from": "db",
+      "to": "sim",
+      "y": 376,
+      "label": "기록 시각 → 날짜별 묶음",
+      "variant": "return"
+    },
+    {
+      "from": "sim",
+      "to": "db",
+      "y": 410,
+      "label": "전일·당일 payload (하루치 캐시)",
+      "variant": "default"
+    },
+    {
+      "from": "db",
+      "to": "sim",
+      "y": 438,
+      "label": "[종목, 이름, 현재가, 등락률, 거래량, 대금]",
+      "variant": "return",
+      "note": "첫 기록 = 시가 · 세 조건 hold분 연속 → 매수 · 익절/손절/마지막 기록 → 매도"
+    },
+    {
+      "from": "sim",
+      "to": "api",
+      "y": 472,
+      "label": "total · days · trades",
+      "variant": "return"
+    },
+    {
+      "from": "api",
+      "to": "browser",
+      "y": 500,
+      "label": "200 JSON (잘못된 값은 400)",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "rec",
+      "from": 164,
+      "to": 260,
+      "type": "backend"
+    },
+    {
+      "participant": "kb",
+      "from": 164,
+      "to": 232,
+      "type": "external"
+    },
+    {
+      "participant": "api",
+      "from": 286,
+      "to": 506,
+      "type": "backend"
+    },
+    {
+      "participant": "sim",
+      "from": 314,
+      "to": 478,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 342,
+      "to": 444,
+      "type": "database"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "매수 규칙",
+      "items": [
+        "전일 같은 시각보다 누적 거래량 min% 이상",
+        "현재가 > 당일 시가 (그날 첫 기록 가격)",
+        "전일 대비 상승 (+29.5% 이상 제외)",
+        "세 조건이 hold분(기본 30) 연속이면 종목당 amount원"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "매도와 손익",
+      "items": [
+        "이후 기록에서 익절 tp% · 손절 sl%",
+        "아니면 그날 마지막 기록(15:40 종가)",
+        "판 금액에서 비용 cost%(기본 0.23)를 뺌",
+        "날짜별·전체 수익률 = 손익 ÷ 매수 합계"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "한계",
+      "items": [
+        "5분 간격 현재가로 계산하는 근사",
+        "KB 조회 없이 저장된 기록만 읽음",
+        "첫 기록일은 비교할 전일이 없어 빠짐"
+      ]
+    }
+  ]
+}
