@@ -37,6 +37,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
  *   GET /api/kosdaq-volume              -> 코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday[?date=&at=] -> 장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
+ *   GET /api/kosdaq-sim?min=&amount=&tp=&sl=&until=&cost=&spac= -> 같은 기록으로 거래량 증가 + 상승 종목 매수·매도 시뮬레이션
  *   GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다
  *   GET /api/trader, POST /api/trader  -> 토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader, trader.db)
  *   GET /api/alerts[?since=id]         -> 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (Alerts, alerts.db)
@@ -173,6 +174,9 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
         apis.put("/api/kosdaq-volume", req -> volume.query(refresh(req)));
         apis.put("/api/kosdaq-intraday", req -> volume.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
+        apis.put("/api/kosdaq-sim", req -> volume.ticks.simulate(Double.parseDouble(param(req, "min", "100")), Double.parseDouble(param(req, "amount", "300000")),
+                Double.parseDouble(param(req, "tp", "0")), Double.parseDouble(param(req, "sl", "0")), param(req, "until", "15:00"),
+                Double.parseDouble(param(req, "cost", "0.23")), !"0".equals(param(req, "spac", "1"))));
         apis.put("/api/trader", req -> trader.status());
         apis.put("/api/alerts", req -> alerts.recent(Long.parseLong(param(req, "since", "0"))));
         apis.put("/api/russell-volume", req -> russell.query(refresh(req)));

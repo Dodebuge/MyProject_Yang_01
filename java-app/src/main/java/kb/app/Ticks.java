@@ -222,6 +222,154 @@ public final class Ticks {
         }
     }
 
+    /**
+     * GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 minRatio% 이상 + 주가 상승' 종목을 amount원씩 사고 판 결과
+     * (volume.py Ticks.simulate와 같은 규칙·JSON). 매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 처음 만족한 종목을 그 시각 현재가로 하루 한 번.
+     * 매도: 이후 기록에서 익절 tp%·손절 sl%(0이면 안 함)에 닿으면 그 시각 현재가, 아니면 그날 마지막 기록. cost%는 매도 금액에서 뺌.
+     * 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺌. spac이면 스팩 제외.
+     */
+    Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac) throws IOException {
+        if (amount <= 0 || until.length() != 5 || until.charAt(2) != ':') {
+            throw new IllegalArgumentException("매수 금액·시각이 올바르지 않습니다");
+        }
+        List<Map<String, Object>> trades = new ArrayList<>();
+        List<String> days;
+        try (Connection c = connect()) {
+            Map<String, List<String>> slots = new LinkedHashMap<>();
+            try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery("SELECT at FROM " + table + " ORDER BY at")) {
+                while (rs.next()) {
+                    String a = rs.getString(1);
+                    slots.computeIfAbsent(a.substring(0, 10), k -> new ArrayList<>()).add(a.substring(11));
+                }
+            }
+            days = new ArrayList<>(slots.keySet());
+            Map<String, Map<Object, List<Object>>> cache = new HashMap<>();  // 하루 앞까지만 들고 있음 (14일 전부 올리면 수백 MB)
+            for (int di = 1; di < days.size(); di++) {
+                String p = days.get(di - 1);
+                String d = days.get(di);
+                cache.keySet().removeIf(k -> k.substring(0, 10).compareTo(p) < 0);
+                List<String> today = slots.get(d);
+                Map<Object, Map<String, Object>> held = new LinkedHashMap<>();
+                java.util.Set<Object> bought = new java.util.HashSet<>();
+                for (int i = 0; i < today.size(); i++) {
+                    String t = today.get(i);
+                    Map<Object, List<Object>> now = byCode(c, cache, d + "T" + t);
+                    for (java.util.Iterator<Map.Entry<Object, Map<String, Object>>> it = held.entrySet().iterator(); it.hasNext(); ) {
+                        Map.Entry<Object, Map<String, Object>> e = it.next();
+                        double px = now.containsKey(e.getKey()) ? num(now.get(e.getKey()).get(2)) : 0;
+                        double buy = (double) e.getValue().get("buyPrice");
+                        String hit = tp > 0 && px >= buy * (1 + tp / 100) ? "익절" : sl > 0 && px > 0 && px <= buy * (1 - sl / 100) ? "손절" : null;
+                        if (hit != null) {
+                            e.getValue().put("sellAt", t);
+                            e.getValue().put("sellPrice", px);
+                            e.getValue().put("reason", hit);
+                            it.remove();
+                        }
+                    }
+                    String before = null;
+                    for (String s : slots.get(p)) {
+                        if (s.compareTo(t) <= 0) {
+                            before = s;
+                        }
+                    }
+                    if (t.compareTo(until) > 0 || i == today.size() - 1 || before == null) {
+                        continue;
+                    }
+                    Map<Object, List<Object>> prev = byCode(c, cache, p + "T" + before);
+                    for (List<Object> r : now.values()) {
+                        double px = num(r.get(2));
+                        double pv = prev.containsKey(r.get(0)) ? num(prev.get(r.get(0)).get(4)) : 0;
+                        double ch = num(r.get(3));
+                        if (bought.contains(r.get(0)) || pv <= 0 || px <= 0 || !(ch > 0 && ch < 29.5) || spac && Values.str(r.get(1)).contains("스팩")
+                                || (num(r.get(4)) / pv - 1) * 100 < minRatio || amount < px) {
+                            continue;
+                        }
+                        bought.add(r.get(0));
+                        Map<String, Object> tr = new LinkedHashMap<>();
+                        tr.put("date", d);
+                        tr.put("code", r.get(0));
+                        tr.put("name", r.get(1));
+                        tr.put("buyAt", t);
+                        tr.put("buyPrice", px);
+                        tr.put("qty", (long) Math.floor(amount / px));
+                        tr.put("ratio", Math.round((num(r.get(4)) / pv - 1) * 1000) / 10.0);
+                        tr.put("change", ch);
+                        tr.put("prevAt", p + " " + before);
+                        held.put(r.get(0), tr);
+                        trades.add(tr);
+                    }
+                }
+                String lastAt = today.get(today.size() - 1);
+                Map<Object, List<Object>> last = byCode(c, cache, d + "T" + lastAt);
+                for (Map.Entry<Object, Map<String, Object>> e : held.entrySet()) {  // 익절·손절 없으면 그날 마지막 기록에 팜 (값이 없으면 산 값)
+                    e.getValue().put("sellAt", lastAt);
+                    e.getValue().put("sellPrice", last.containsKey(e.getKey()) ? num(last.get(e.getKey()).get(2)) : e.getValue().get("buyPrice"));
+                    e.getValue().put("reason", "마지막 기록");
+                }
+            }
+        } catch (SQLException e) {
+            throw new IOException(db.getFileName() + " 저장소 오류: " + e.getMessage(), e);
+        }
+        for (Map<String, Object> tr : trades) {
+            long qty = (long) tr.get("qty");
+            long invested = Math.round(qty * (double) tr.get("buyPrice"));
+            long pnl = Math.round(qty * (double) tr.get("sellPrice") * (1 - cost / 100) - invested);
+            tr.put("invested", invested);
+            tr.put("pnl", pnl);
+            tr.put("ret", Math.round((double) pnl / invested * 10000) / 100.0);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("from", days.size() > 1 ? days.get(1) : null);
+        out.put("to", days.size() > 1 ? days.get(days.size() - 1) : null);
+        out.put("total", summary(trades));
+        List<Map<String, Object>> perDay = new ArrayList<>();
+        for (String d : days.subList(Math.min(1, days.size()), days.size())) {
+            List<Map<String, Object>> ts = new ArrayList<>();
+            trades.stream().filter(x -> d.equals(x.get("date"))).forEach(ts::add);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("date", d);
+            m.putAll(summary(ts));
+            perDay.add(m);
+        }
+        out.put("days", perDay);
+        out.put("trades", trades);
+        return out;
+    }
+
+    private static Map<String, Object> summary(List<Map<String, Object>> ts) {
+        long inv = 0;
+        long pnl = 0;
+        long wins = 0;
+        for (Map<String, Object> t : ts) {
+            inv += (long) t.get("invested");
+            pnl += (long) t.get("pnl");
+            wins += (long) t.get("pnl") > 0 ? 1 : 0;
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("trades", ts.size());
+        m.put("wins", wins);
+        m.put("invested", inv);
+        m.put("pnl", pnl);
+        m.put("ret", inv > 0 ? (Object) (Math.round((double) pnl / inv * 10000) / 100.0) : null);
+        return m;
+    }
+
+    private Map<Object, List<Object>> byCode(Connection c, Map<String, Map<Object, List<Object>>> cache, String at) throws SQLException {
+        Map<Object, List<Object>> m = cache.get(at);
+        if (m == null) {
+            m = new LinkedHashMap<>();
+            for (List<Object> r : load(c, at)) {
+                m.put(r.get(0), r);
+            }
+            cache.put(at, m);
+        }
+        return m;
+    }
+
+    private static double num(Object v) {
+        return v == null || "".equals(v) ? 0 : Values.num(v);
+    }
+
     /** 그 현지 시각의 UTC 오프셋(분). 화면이 한국 시간을 함께 보여 줄 때 씁니다 (뉴욕은 서머타임에 따라 -240/-300). */
     private int offset(LocalDateTime local) {
         return local.atZone(zone).getOffset().getTotalSeconds() / 60;

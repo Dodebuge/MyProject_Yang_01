@@ -89,4 +89,35 @@ class VolumeTest {
         assertNull(v.intraday("2026-10-08", "").get("prev"));
         assertEquals(540, r.get("utcOffset"));
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void simulatesBuyOnVolumeAndRiseThenSells() throws Exception {
+        Ticks v = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("sim").resolve("kosdaq.db")).ticks;
+        String[] codes = {"A", "B", "C", "D스팩", "E"};
+        Object[][][] at = {  // 시각, 종목별 {현재가, 등락률, 누적 거래량} (volume.py 자체 점검과 같음)
+                {{"2026-10-15T09:00"}, {1, 0, 100}, {1, 0, 100}, {1, 0, 100}, {1, 0, 100}, {1, 0, 100}},
+                {{"2026-10-15T10:00"}, {1, 0, 200}, {1, 0, 200}, {1, 0, 200}, {1, 0, 200}, {1, 0, 200}},
+                {{"2026-10-15T15:40"}, {1, 0, 300}, {1, 0, 300}, {1, 0, 300}, {1, 0, 300}, {1, 0, 300}},
+                {{"2026-10-16T09:00"}, {1000, 1.0, 150}, {1000, -1.0, 100}, {2000, 1.0, 100}, {1000, 1.0, 900}, {1000, 1.0, 100}},
+                {{"2026-10-16T10:00"}, {1100, 11.0, 300}, {1000, -1.0, 900}, {2000, 2.0, 400}, {1000, 1.0, 900}, {1000, 1.0, 200}},
+                {{"2026-10-16T15:40"}, {900, 1.0, 400}, {1000, -1.0, 900}, {1900, 2.0, 500}, {1000, 1.0, 900}, {1000, 1.0, 900}}};
+        for (Object[][] t : at) {
+            List<List<Object>> rows = new ArrayList<>();
+            for (int i = 0; i < codes.length; i++) {
+                rows.add(Arrays.<Object>asList(codes[i], codes[i], t[i + 1][0], t[i + 1][1], t[i + 1][2], 0));
+            }
+            v.save((String) t[0][0], rows);
+        }
+        Map<String, Object> r = v.simulate(40, 300_000, 5, 0, "15:00", 0, true);
+        List<String> got = new ArrayList<>();
+        for (Map<String, Object> x : (List<Map<String, Object>>) r.get("trades")) {
+            got.add(x.get("code") + " " + x.get("buyAt") + " " + x.get("qty") + " " + x.get("sellAt") + " " + x.get("sellPrice") + " " + x.get("reason") + " " + x.get("pnl"));
+        }
+        assertEquals(List.of("A 09:00 300 10:00 1100.0 익절 30000", "C 10:00 150 15:40 1900.0 마지막 기록 -15000"), got);
+        Map<String, Object> total = (Map<String, Object>) r.get("total");
+        assertEquals(List.of(2, 1L, 600000L, 15000L, 2.5), List.of(total.get("trades"), total.get("wins"), total.get("invested"), total.get("pnl"), total.get("ret")));
+        assertEquals("2026-10-16", r.get("from"));
+        assertEquals(3, ((List<?>) v.simulate(40, 300_000, 5, 0, "15:00", 0, false).get("trades")).size(), "스팩 포함");
+    }
 }
