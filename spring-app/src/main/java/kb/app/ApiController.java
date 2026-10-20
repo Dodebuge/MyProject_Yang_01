@@ -157,8 +157,8 @@ class ApiController {
     ResponseEntity<Map<String, Object>> kosdaqSim(@RequestParam(defaultValue = "100") double min, @RequestParam(defaultValue = "300000") double amount,
                                                   @RequestParam(defaultValue = "0") double tp, @RequestParam(defaultValue = "0") double sl,
                                                   @RequestParam(defaultValue = "15:00") String until, @RequestParam(defaultValue = "0.23") double cost,
-                                                  @RequestParam(defaultValue = "1") String spac) throws IOException {
-        return ok(volume.ticks.simulate(min, amount, tp, sl, until, cost, !"0".equals(spac)));
+                                                  @RequestParam(defaultValue = "1") String spac, @RequestParam(defaultValue = "30") int hold) throws IOException {
+        return ok(volume.ticks.simulate(min, amount, tp, sl, until, cost, !"0".equals(spac), hold));
     }
 
     @GetMapping("/trader")

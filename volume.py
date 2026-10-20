@@ -212,15 +212,19 @@ class Ticks:
                 "slots": slots, "prev": prev, "week": week, "stocks": stocks}
 
     def simulate(self, min_ratio: float = 100, amount: float = 300_000, tp: float = 0, sl: float = 0,
-                 until: str = "15:00", cost: float = 0.23, spac: bool = True) -> dict:
-        """GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 min_ratio% 이상 + 주가 상승' 종목을 amount원씩 사고 판 결과.
-        매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 조건을 처음 만족한 종목을 그 시각 현재가로 하루 한 번.
+                 until: str = "15:00", cost: float = 0.23, spac: bool = True, hold: int = 30) -> dict:
+        """GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 min_ratio% 이상 + 시가보다 높음 + 전일 대비 상승'이
+        hold분 이상 이어진 종목을 amount원씩 사고 판 결과.
+        시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00, 장 시작 30초 뒤)의 현재가로 봄 (그래서 첫 기록에서는 조건이 안 됨).
+        매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 세 조건을 확인해, 연속으로 만족한 첫 기록부터 hold분이 지난 기록의
+        현재가로 하루 한 번 (중간에 한 번이라도 깨지면 처음부터 다시). hold=0이면 처음 만족한 기록에서 바로.
         매도: 이후 기록에서 익절 tp%·손절 sl%(0이면 안 함)에 닿으면 그 시각 현재가, 아니면 그날 마지막 기록(종가).
         cost%: 수수료·세금을 매도 금액에서 뺌. 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺌. spac=True면 스팩 제외.
         -> {"from", "to", "total": {trades, wins, invested, pnl, ret}, "days": [{date, trades, wins, invested, pnl, ret}], "trades": [...]}"""
-        if amount <= 0 or len(until) != 5 or until[2] != ":":
-            raise ValueError("매수 금액·시각이 올바르지 않습니다")
+        if amount <= 0 or hold < 0 or len(until) != 5 or until[2] != ":":
+            raise ValueError("매수 금액·시각·유지 시간이 올바르지 않습니다")
         num = lambda v: float(v) if v not in (None, "") else 0.0
+        mins = lambda hm: int(hm[:2]) * 60 + int(hm[3:])
         with closing(self._connect()) as con:
             ats = [r[0] for r in con.execute(f"SELECT at FROM {self.table} ORDER BY at")]
             slots: dict[str, list[str]] = {}
@@ -239,7 +243,8 @@ class Ticks:
             for p, d in zip(days, days[1:]):
                 for k in [k for k in cache if k[:10] < p]:
                     del cache[k]
-                held, bought = {}, set()
+                held, bought, since = {}, set(), {}  # since: 조건을 연속으로 만족하기 시작한 기록 시각
+                opens = {c: num(r[2]) for c, r in load(d, slots[d][0]).items()}  # 첫 기록 현재가 = 시가로 봄
                 for i, t in enumerate(slots[d]):
                     now = load(d, t)
                     for code, tr in list(held.items()):
@@ -255,11 +260,16 @@ class Ticks:
                     for code, r in now.items():
                         px, pv = num(r[2]), num(prev[code][4]) if code in prev else 0
                         if (code in bought or not pv or not px or not 0 < num(r[3]) < 29.5 or (spac and "스팩" in r[1])
-                                or (num(r[4]) / pv - 1) * 100 < min_ratio or amount < px):
+                                or (num(r[4]) / pv - 1) * 100 < min_ratio or not px > opens.get(code, px) or amount < px):
+                            since.pop(code, None)
+                            continue
+                        start = since.setdefault(code, t)
+                        if mins(t) - mins(start) < hold:
                             continue
                         bought.add(code)
-                        held[code] = {"date": d, "code": code, "name": r[1], "buyAt": t, "buyPrice": px, "qty": int(amount // px),
-                                      "ratio": round((num(r[4]) / pv - 1) * 100, 1), "change": num(r[3]), "prevAt": f"{p} {before[-1]}"}
+                        held[code] = {"date": d, "code": code, "name": r[1], "since": start, "open": opens[code], "buyAt": t, "buyPrice": px,
+                                      "qty": int(amount // px), "ratio": round((num(r[4]) / pv - 1) * 100, 1), "change": num(r[3]),
+                                      "prevAt": f"{p} {before[-1]}"}
                         trades.append(held[code])
                 last = load(d, slots[d][-1])
                 for code, tr in held.items():  # 익절·손절 없으면 그날 마지막 기록에 팜 (값이 없으면 산 값)
@@ -342,21 +352,25 @@ if __name__ == "__main__":
     assert (r["at"], r["prev"], r["week"]) == ("10:30", {"date": "2026-10-15", "at": "10:30"}, {"date": "2026-10-09", "at": "10:20"}), r
     assert (r["stocks"][0]["prevRatio"], r["stocks"][0]["weekRatio"]) == (50.0, 87.5), r["stocks"]
     assert t.intraday()["at"] == "10:40" and t.intraday("2026-10-08")["prev"] is None and r["utcOffset"] == 540
-    # 시뮬레이션: A는 09:00에 사서 10:00 익절, C는 10:00에 사서 마지막 기록에 팜. B(하락)·스팩·마지막 기록에만 늘어난 E는 안 삼
+    # 시뮬레이션 (거래량 +40% 이상·시가(첫 기록)보다 높음·전일 대비 상승이 30분 이어지면 매수, 익절 5%)
+    # A: 09:30부터 이어져 10:00에 사서 10:30 익절. B: 10:00에 시가 아래로 깨져 다시 세다 마지막 기록이라 안 삼.
+    # C: 09:30은 하락이라 10:00부터 세어 10:30에 사서 마지막 기록에 팜. D스팩은 스팩 제외. E는 거래량이 안 늘어 안 삼
     s = Ticks("시험", Path(tempfile.mkdtemp()) / "s.db", "s_tick", KST, 5, dtime(9, 0), dtime(15, 40), lambda c, a: [])
     row = lambda c, px, ch, v: [c, c, px, ch, v, 0]
-    for at, rs in [("2026-10-15T09:00", [row("A", 1, 0, 100), row("B", 1, 0, 100), row("C", 1, 0, 100), row("D스팩", 1, 0, 100), row("E", 1, 0, 100)]),
-                   ("2026-10-15T10:00", [row("A", 1, 0, 200), row("B", 1, 0, 200), row("C", 1, 0, 200), row("D스팩", 1, 0, 200), row("E", 1, 0, 200)]),
-                   ("2026-10-15T15:40", [row("A", 1, 0, 300), row("B", 1, 0, 300), row("C", 1, 0, 300), row("D스팩", 1, 0, 300), row("E", 1, 0, 300)]),
-                   ("2026-10-16T09:00", [row("A", 1000, 1.0, 150), row("B", 1000, -1.0, 100), row("C", 2000, 1.0, 100), row("D스팩", 1000, 1.0, 900), row("E", 1000, 1.0, 100)]),
-                   ("2026-10-16T10:00", [row("A", 1100, 11.0, 300), row("B", 1000, -1.0, 900), row("C", 2000, 2.0, 400), row("D스팩", 1000, 1.0, 900), row("E", 1000, 1.0, 200)]),
-                   ("2026-10-16T15:40", [row("A", 900, 1.0, 400), row("B", 1000, -1.0, 900), row("C", 1900, 2.0, 500), row("D스팩", 1000, 1.0, 900), row("E", 1000, 1.0, 900)])]:
-        s.save(at, rs)
+    days = {"09:00": [("A", 1000, 0.5, 100), ("B", 1000, 0.5, 100), ("C", 2000, 0.5, 100), ("D스팩", 1000, 0.5, 100), ("E", 1000, 0.5, 100)],
+            "09:30": [("A", 1010, 1.0, 200), ("B", 1010, 1.0, 200), ("C", 2010, -1.0, 200), ("D스팩", 1010, 1.0, 200), ("E", 1010, 1.0, 100)],
+            "10:00": [("A", 1020, 2.0, 300), ("B", 990, 1.0, 300), ("C", 2010, 1.0, 300), ("D스팩", 1020, 2.0, 300), ("E", 1020, 2.0, 100)],
+            "10:30": [("A", 1080, 8.0, 400), ("B", 1010, 1.0, 400), ("C", 2020, 1.0, 400), ("D스팩", 1020, 2.0, 400), ("E", 1030, 3.0, 100)],
+            "15:40": [("A", 900, 1.0, 500), ("B", 1010, 1.0, 500), ("C", 1900, 1.0, 500), ("D스팩", 1000, 1.0, 500), ("E", 1030, 3.0, 100)]}
+    for hm, rs in days.items():
+        s.save(f"2026-10-15T{hm}", [row(c, 1, 0, 100) for c, *_ in rs])
+        s.save(f"2026-10-16T{hm}", [row(*x) for x in rs])
     r = s.simulate(min_ratio=40, tp=5, cost=0)
-    assert [(x["code"], x["buyAt"], x["qty"], x["sellAt"], x["sellPrice"], x["reason"], x["pnl"]) for x in r["trades"]] == [
-        ("A", "09:00", 300, "10:00", 1100, "익절", 30000), ("C", "10:00", 150, "15:40", 1900, "마지막 기록", -15000)], r["trades"]
-    assert r["total"] == {"trades": 2, "wins": 1, "invested": 600000, "pnl": 15000, "ret": 2.5} and r["from"] == "2026-10-16", r
+    assert [(x["code"], x["since"], x["buyAt"], x["qty"], x["sellAt"], x["sellPrice"], x["reason"], x["pnl"]) for x in r["trades"]] == [
+        ("A", "09:30", "10:00", 294, "10:30", 1080, "익절", 17640), ("C", "10:00", "10:30", 148, "15:40", 1900, "마지막 기록", -17760)], r["trades"]
+    assert r["total"] == {"trades": 2, "wins": 1, "invested": 598840, "pnl": -120, "ret": -0.02} and r["from"] == "2026-10-16", r
     assert [x["code"] for x in s.simulate(min_ratio=40, tp=5, cost=0, spac=False)["trades"]] == ["A", "D스팩", "C"]
+    assert [(x["code"], x["buyAt"]) for x in s.simulate(min_ratio=40, hold=0)["trades"]][:2] == [("A", "09:30"), ("B", "09:30")]
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()

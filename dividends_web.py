@@ -38,8 +38,8 @@ API:
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
-    GET /api/kosdaq-sim?min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1
-                                   -> {"from", "to", "total", "days", "trades"}  같은 시각 전일 대비 거래량 min% 이상 + 상승 종목을 amount원씩 산 시뮬레이션 (kosdaq.db만 읽음)
+    GET /api/kosdaq-sim?min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1&hold=30
+                                   -> {"from", "to", "total", "days", "trades"}  같은 시각 전일 대비 거래량 min% 이상 + 시가 위 + 상승이 hold분 이어진 종목을 amount원씩 산 시뮬레이션 (kosdaq.db만 읽음)
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
                                    장중 5분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
     GET /api/alerts[?since=id]     -> {"alerts": [{"id", "market", "day", "at", "code", "name", "text", "d", "ratio", "price", "change", "chart"}], "ntfy", "markets"}
@@ -191,7 +191,7 @@ def make_handler(client: KBClient):
                 self._api(lambda q: volume.KOSDAQ.simulate(
                     float(q.get("min", ["100"])[0]), float(q.get("amount", ["300000"])[0]), float(q.get("tp", ["0"])[0]),
                     float(q.get("sl", ["0"])[0]), q.get("until", ["15:00"])[0], float(q.get("cost", ["0.23"])[0]),
-                    q.get("spac", ["1"])[0] != "0"), parse_qs(url.query))
+                    q.get("spac", ["1"])[0] != "0", int(q.get("hold", ["30"])[0])), parse_qs(url.query))
             elif url.path == "/api/russell-volume":
                 self._api(lambda q: russell.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/russell-intraday":

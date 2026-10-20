@@ -223,14 +223,16 @@ public final class Ticks {
     }
 
     /**
-     * GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 minRatio% 이상 + 주가 상승' 종목을 amount원씩 사고 판 결과
-     * (volume.py Ticks.simulate와 같은 규칙·JSON). 매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 처음 만족한 종목을 그 시각 현재가로 하루 한 번.
+     * GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 minRatio% 이상 + 시가보다 높음 + 전일 대비 상승'이 hold분 이상
+     * 이어진 종목을 amount원씩 사고 판 결과 (volume.py Ticks.simulate와 같은 규칙·JSON).
+     * 시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00)의 현재가로 봄. 매수: 기록 시각마다(until까지, 그날 마지막 기록 제외)
+     * 세 조건을 연속으로 만족한 첫 기록부터 hold분이 지난 기록의 현재가로 하루 한 번 (중간에 깨지면 처음부터 다시, hold=0이면 바로).
      * 매도: 이후 기록에서 익절 tp%·손절 sl%(0이면 안 함)에 닿으면 그 시각 현재가, 아니면 그날 마지막 기록. cost%는 매도 금액에서 뺌.
      * 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺌. spac이면 스팩 제외.
      */
-    Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac) throws IOException {
-        if (amount <= 0 || until.length() != 5 || until.charAt(2) != ':') {
-            throw new IllegalArgumentException("매수 금액·시각이 올바르지 않습니다");
+    Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac, int hold) throws IOException {
+        if (amount <= 0 || hold < 0 || until.length() != 5 || until.charAt(2) != ':') {
+            throw new IllegalArgumentException("매수 금액·시각·유지 시간이 올바르지 않습니다");
         }
         List<Map<String, Object>> trades = new ArrayList<>();
         List<String> days;
@@ -251,6 +253,9 @@ public final class Ticks {
                 List<String> today = slots.get(d);
                 Map<Object, Map<String, Object>> held = new LinkedHashMap<>();
                 java.util.Set<Object> bought = new java.util.HashSet<>();
+                Map<Object, String> since = new HashMap<>();  // 조건을 연속으로 만족하기 시작한 기록 시각
+                Map<Object, Double> opens = new HashMap<>();  // 첫 기록 현재가 = 시가로 봄
+                byCode(c, cache, d + "T" + today.get(0)).forEach((code, r) -> opens.put(code, num(r.get(2))));
                 for (int i = 0; i < today.size(); i++) {
                     String t = today.get(i);
                     Map<Object, List<Object>> now = byCode(c, cache, d + "T" + t);
@@ -281,7 +286,12 @@ public final class Ticks {
                         double pv = prev.containsKey(r.get(0)) ? num(prev.get(r.get(0)).get(4)) : 0;
                         double ch = num(r.get(3));
                         if (bought.contains(r.get(0)) || pv <= 0 || px <= 0 || !(ch > 0 && ch < 29.5) || spac && Values.str(r.get(1)).contains("스팩")
-                                || (num(r.get(4)) / pv - 1) * 100 < minRatio || amount < px) {
+                                || (num(r.get(4)) / pv - 1) * 100 < minRatio || !(px > opens.getOrDefault(r.get(0), px)) || amount < px) {
+                            since.remove(r.get(0));
+                            continue;
+                        }
+                        String start = since.computeIfAbsent(r.get(0), k -> t);
+                        if (mins(t) - mins(start) < hold) {
                             continue;
                         }
                         bought.add(r.get(0));
@@ -289,6 +299,8 @@ public final class Ticks {
                         tr.put("date", d);
                         tr.put("code", r.get(0));
                         tr.put("name", r.get(1));
+                        tr.put("since", start);
+                        tr.put("open", opens.get(r.get(0)));
                         tr.put("buyAt", t);
                         tr.put("buyPrice", px);
                         tr.put("qty", (long) Math.floor(amount / px));
@@ -364,6 +376,10 @@ public final class Ticks {
             cache.put(at, m);
         }
         return m;
+    }
+
+    private static int mins(String hm) {
+        return Integer.parseInt(hm.substring(0, 2)) * 60 + Integer.parseInt(hm.substring(3));
     }
 
     private static double num(Object v) {
