@@ -7,7 +7,7 @@
 (주봉 chrt_clsf=W의 거래량은 일봉 합과 맞지 않아 쓰지 않습니다.)
 여러 종목을 동시에 부르면 가끔(수백 번에 한 번꼴) 필드가 밀린 응답(거래량 빈 값 등)이나 500 오류가 와서, 그런 응답은 다시 부릅니다.
 
-장중 10분마다 코스닥 전 종목의 누적 거래량을 kosdaq.db에 저장해, 같은 시각의 거래량을 전일·전주와 비교합니다 (아래 '장중 기록').
+장중 5분마다 코스닥 전 종목의 누적 거래량을 kosdaq.db에 저장해, 같은 시각의 거래량을 전일·전주와 비교합니다 (아래 '장중 기록').
 러셀 2000(russell.py)도 같은 Ticks로 기록합니다.
 
     python volume.py   # 콘솔로 전주 대비 10% 이상 오른 종목 확인
@@ -248,8 +248,8 @@ def _kosdaq_rows(client: KBClient, at: datetime) -> list[list]:
     return rows if last and last[0].get("dt") == at.strftime("%Y%m%d") else []  # 휴장일: 시세가 마지막 거래일 값 그대로
 
 
-# 장중(평일 09:00~15:40, 15:40은 15:30 종가 단일가까지 담기게) 10분마다. 하루 약 4MB
-KOSDAQ = Ticks("코스닥 10분", Path(__file__).resolve().parent / "kosdaq.db", "kosdaq_tick", KST, 10, dtime(9, 0), dtime(15, 40), _kosdaq_rows)
+# 장중(평일 09:00~15:40, 15:40은 15:30 종가 단일가까지 담기게) 5분마다. 하루 약 8MB
+KOSDAQ = Ticks("코스닥 5분", Path(__file__).resolve().parent / "kosdaq.db", "kosdaq_tick", KST, 5, dtime(9, 0), dtime(15, 40), _kosdaq_rows)
 
 if __name__ == "__main__":
     import tempfile
@@ -261,10 +261,10 @@ if __name__ == "__main__":
     assert week_change(rows) == {"avg": 120, "prevAvg": 100, "days": 5, "prevDays": 3, "ratio": 20.0}
     assert week_change(rows[:5]) is None
     assert sane(rows) and not sane([{"dt": "20261016", "vlm": ""}]) and not sane(rows[1:2] + rows[:1]) and not sane([])
-    # 10분 시각: 장중만, 15:40 다음은 다음 평일 09:00, 금요일 다음은 월요일
+    # 5분 시각: 장중만, 15:40 다음은 다음 평일 09:00, 금요일 다음은 월요일
     k = lambda *a: datetime(2026, 10, *a)
     nt = KOSDAQ.next_tick
-    assert nt(k(16, 9, 3)) == k(16, 9, 10) and nt(k(16, 8, 0)) == k(16, 9, 0)
+    assert nt(k(16, 9, 3)) == k(16, 9, 5) and nt(k(16, 9, 5)) == k(16, 9, 10) and nt(k(16, 8, 0)) == k(16, 9, 0)
     assert nt(k(15, 15, 40)) == k(16, 9, 0) and nt(k(16, 15, 35)) == k(16, 15, 40)
     assert nt(k(16, 23, 0)) == k(19, 9, 0) and nt(k(17, 12, 0)) == k(19, 9, 0)
     # 같은 시각 비교: 전일 = 직전 기록일, 전주 = 7일 전 이전의 마지막 기록일. 같은 시각이 없으면 그 이전 마지막 기록

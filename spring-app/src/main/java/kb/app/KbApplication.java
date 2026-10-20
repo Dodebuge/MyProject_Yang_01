@@ -105,7 +105,7 @@ public class KbApplication {
         return new Russell(client, dataDir.resolve("russell2000.csv"), dataDir.resolve("russell.db"));
     }
 
-    /** 장중 10분마다 코스닥 전 종목 누적 거래량을 kosdaq.db에 기록. */
+    /** 장중 5분마다 코스닥 전 종목 누적 거래량을 kosdaq.db에 기록. */
     @Bean(destroyMethod = "stop")
     Ticks kosdaqTicks(Volume volume) {
         volume.ticks.start();

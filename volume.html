@@ -7,7 +7,7 @@
 <!--
   코스닥·러셀 2000 거래량 증가 종목. dividends_web.py가 /volume 으로 제공합니다 (/volume?market=russell 이면 러셀 2000).
   러셀 2000은 같은 API의 russell-* 판(russell2000.csv 종목, 같은 시각은 뉴욕 장중 30분마다)을 씁니다. 보기 두 가지:
-  - 같은 시각: 서버가 장중(평일 09:00~15:40) 10분마다 저장한 누적 거래량(kosdaq.db)을 전일·전주 같은 시각과 비교 (/api/kosdaq-intraday, KB 조회 없음)
+  - 같은 시각: 서버가 장중(평일 09:00~15:40) 5분마다 저장한 누적 거래량(kosdaq.db)을 전일·전주 같은 시각과 비교 (/api/kosdaq-intraday, KB 조회 없음)
   - 주간 평균: 이번 주와 전주의 하루 평균 거래량 (/api/kosdaq-volume, 약 1,700종목 일봉 조회라 30초 남짓).
     서버에 저장된 마지막 응답(?cached=1)을 먼저 그리고 새 응답으로 교체합니다.
 -->
@@ -153,7 +153,7 @@ const usd = n => n >= 1e9 ? "$" + fmt(n / 1e9, 1) + "B" : n >= 1e6 ? "$" + fmt(n
 // 시장별 설정. 러셀 2000의 같은 시각 기록은 뉴욕 시간이라 한국 시간을 함께 보여 줌
 const MARKETS = {
   kosdaq: { title: "코스닥 거래량 증가", api: "kosdaq", name: "코스닥", chart: "kr", dp: 0, money: compact, spac: true, local: "",
-            every: "장중(평일 09:00~15:40) 10분마다", weekly: "코스닥 전 종목 일봉을 조회해 1분 가까이 걸립니다" },
+            every: "장중(평일 09:00~15:40) 5분마다", weekly: "코스닥 전 종목 일봉을 조회해 1분 가까이 걸립니다" },
   russell: { title: "러셀 2000 거래량 증가", api: "russell", name: "러셀 2000", chart: "us", dp: 2, money: usd, spac: false, local: "뉴욕 ",
              every: "뉴욕 장중(평일 10:00~16:30 뉴욕 시간, 한국 밤 23:00~05:30 무렵) 30분마다", weekly: "러셀 2000 종목(russell2000.csv)마다 일봉을 조회해 1분 남짓 걸립니다" },
 };

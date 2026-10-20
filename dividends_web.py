@@ -39,7 +39,7 @@ API:
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
-                                   장중 10분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
+                                   장중 5분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
     GET /api/alerts[?since=id]     -> {"alerts": [{"id", "market", "day", "at", "code", "name", "text", "d", "ratio", "price", "change", "chart"}], "ntfy", "markets"}
                                    코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (alerts.py, alerts.db)
     GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다 (russell.db)
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     client = KBClient.from_env()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(client))
     snapshots.start(lambda: query_holdings(client, refresh=True), summarize)  # 4시간마다 보유 금액 기록 (MYSQL_HOST 있을 때만)
-    volume.KOSDAQ.start(client)  # 장중 10분마다 코스닥 거래량 기록 (kosdaq.db)
+    volume.KOSDAQ.start(client)  # 장중 5분마다 코스닥 거래량 기록 (kosdaq.db)
     monitor.start(client)  # 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용)
     alerts.start(client)  # 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
     russell.RUSSELL.start(client)  # 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell.db, russell2000.csv가 있을 때)

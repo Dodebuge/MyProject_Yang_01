@@ -18,7 +18,7 @@ import java.util.TreeMap
  * 휴장일이 있는 주나 아직 끝나지 않은 이번 주도 공정하게 비교하려고 합계 대신 하루 평균을 씁니다.
  * 종목별 일봉은 코루틴으로 8개씩 동시에 부릅니다 (Values.parallelIO).
  * 여러 종목을 동시에 부르면 가끔(수백 번에 한 번꼴) 필드가 밀린 응답(거래량 빈 값 등)이나 500 오류가 와서, 그런 응답은 다시 부릅니다.
- * 장중 10분마다 코스닥 전 종목의 누적 거래량을 kosdaq.db에 저장해, 같은 시각의 거래량을 전일·전주와 비교합니다 (Ticks, 아래 '장중 기록').
+ * 장중 5분마다 코스닥 전 종목의 누적 거래량을 kosdaq.db에 저장해, 같은 시각의 거래량을 전일·전주와 비교합니다 (Ticks, 아래 '장중 기록').
  */
 internal class Volume(private val client: KBClient, tickDb: Path) {
 
@@ -27,7 +27,7 @@ internal class Volume(private val client: KBClient, tickDb: Path) {
 
     /** 장중(평일 09:00~15:40, 15:40은 15:30 종가 단일가까지 담기게) 10분마다 코스닥 거래량 기록. 하루 약 4MB */
     @JvmField
-    val ticks = Ticks("코스닥 10분", tickDb, "kosdaq_tick", ZoneId.of("Asia/Seoul"), 10,
+    val ticks = Ticks("코스닥 5분", tickDb, "kosdaq_tick", ZoneId.of("Asia/Seoul"), 5,
         LocalTime.of(9, 0), LocalTime.of(15, 40), ::kosdaqRows)
 
     /** GET /api/kosdaq-volume -> {"fetchedAt", "total", "stocks": [...]} (stocks는 전 종목, 화면에서 거름). synchronized: 동시에 와도 KB 조회는 한 번 */

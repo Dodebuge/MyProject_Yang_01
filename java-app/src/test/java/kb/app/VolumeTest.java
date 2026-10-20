@@ -58,7 +58,8 @@ class VolumeTest {
 
     @Test
     void nextTickStaysInMarketHours() {
-        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 10), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 9, 3)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 5), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 9, 3)));
+        assertEquals(LocalDateTime.of(2026, 10, 16, 9, 10), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 9, 5)));
         assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 8, 0)));
         assertEquals(LocalDateTime.of(2026, 10, 16, 15, 40), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 16, 15, 35)));
         assertEquals(LocalDateTime.of(2026, 10, 16, 9, 0), KOSDAQ.nextTick(LocalDateTime.of(2026, 10, 15, 15, 40)));

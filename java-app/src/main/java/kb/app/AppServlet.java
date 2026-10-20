@@ -36,7 +36,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/search?q=                  -> 종목 검색 (국내 이름·종목번호, 미국 티커)
  *   GET /api/chart?market=kr|us&code=   -> 일봉 차트 (최근 약 1년)
  *   GET /api/kosdaq-volume              -> 코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
- *   GET /api/kosdaq-intraday[?date=&at=] -> 장중 10분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
+ *   GET /api/kosdaq-intraday[?date=&at=] -> 장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/russell-volume, /api/russell-intraday -> 러셀 2000 (russell2000.csv 종목) 같은 모양. 같은 시각은 뉴욕 시간 30분마다
  *   GET /api/trader, POST /api/trader  -> 토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader, trader.db)
  *   GET /api/alerts[?since=id]         -> 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (Alerts, alerts.db)
