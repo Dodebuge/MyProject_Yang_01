@@ -418,6 +418,13 @@ if __name__ == "__main__":
         g.save(f"2026-10-15T{hm}", [row("G", 1, 0, 100)])
         g.save(f"2026-10-16T{hm}", [row("G", px, 1.0 if px != 1000 else 0.0, v)])
     assert [(x["buyAt"], x["buyPrice"]) for x in g.simulate(min_ratio=40, hold=0, buy="volume-up")["trades"]] == [("10:00", 1010)]
+    # 전일 = 직전 기록일: 월요일(10-19)은 기록이 없는 일·토요일을 건너뛰고 금요일(10-16) 같은 시각과 비교
+    w = Ticks("시험", Path(tempfile.mkdtemp()) / "w.db", "w_tick", KST, 5, dtime(9, 0), dtime(15, 40), lambda c, a: [])
+    for hm, px, ch, v in [("09:00", 1000, 0.0, 100), ("09:30", 1010, 1.0, 200), ("15:40", 1020, 2.0, 300)]:
+        w.save(f"2026-10-16T{hm}", [row("A", 1000, 0.0, 100)])
+        w.save(f"2026-10-19T{hm}", [row("A", px, ch, v)])
+    assert [(x["date"], x["buyAt"], x["prevAt"]) for x in w.simulate(min_ratio=40, hold=0)["trades"]] == [("2026-10-19", "09:30", "2026-10-16 09:30")]
+    assert w.intraday("2026-10-19", "09:30")["prev"] == {"date": "2026-10-16", "at": "09:30"}
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()

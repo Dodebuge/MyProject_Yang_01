@@ -165,6 +165,19 @@ class VolumeTest {
                 "시뮬레이션은 그날 마지막 기록에서 안 삼");
     }
 
+    @Test
+    void comparesMondayWithFridayWhenWeekendHasNoRecords() throws Exception {
+        // 전일 = 직전 기록일: 월요일(10-19)은 기록이 없는 일·토요일을 건너뛰고 금요일(10-16) 같은 시각과 비교 (volume.py 자체 점검과 같음)
+        Ticks w = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("weekend").resolve("kosdaq.db")).ticks;
+        Object[][] at = {{"09:00", 1000, 0.0, 100}, {"09:30", 1010, 1.0, 200}, {"15:40", 1020, 2.0, 300}};
+        for (Object[] x : at) {
+            w.save("2026-10-16T" + x[0], List.of(Arrays.<Object>asList("A", "A", 1000, 0.0, 100, 0)));
+            w.save("2026-10-19T" + x[0], List.of(Arrays.<Object>asList("A", "A", x[1], x[2], x[3], 0)));
+        }
+        assertEquals(List.of("2026-10-19 09:30 2026-10-16 09:30"),
+                pick(w.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 0, "volume-open-up", "tp-sl", "", 0, 0, null), "date", "buyAt", "prevAt"));
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> pick(Map<String, Object> r, String... keys) {
         List<String> out = new ArrayList<>();
