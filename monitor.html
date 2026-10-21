@@ -229,15 +229,15 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
     <div class="head"><h2>매수 시뮬레이션</h2><span class="sub" id="sim-sub">저장된 5분 기록(kosdaq.db)으로 계산 · KB 조회 없음</span></div>
     <form class="sim-form" id="sim-form">
       <label>시장 <select id="sim-market" aria-label="시장"><option value="kosdaq">코스닥 (5분 기록 · 원)</option><option value="russell">러셀 2000 (30분 기록 · 뉴욕 시간 · 달러)</option></select></label>
-      <label><input id="sim-alerts" type="checkbox"> 알림 종목만 (알림 시각부터)</label>
-      <label>매수 조건 <select id="sim-buy" aria-label="매수 조건 모듈"><option value="volume-open-up">거래량 증가 + 시가 위 + 상승</option></select></label>
+      <label><input id="sim-alerts" type="checkbox" checked> 알림 종목만 (알림 시각부터)</label>
+      <label>매수 조건 <select id="sim-buy" aria-label="매수 조건 모듈"><option value="surge">급등 초입: 거래량 500%↑ + 등락 5~15%</option></select></label>
       <label>거래량 기준 (전일 같은 시각 대비) <input id="sim-min" type="number" value="100" step="10" min="0" aria-label="거래량 증가율"> %</label>
       <label><input id="sim-hold" type="number" value="30" step="5" min="0" aria-label="유지 시간(분)"> 분 이상 유지</label>
       <label>종목당 <input id="sim-amount" type="number" value="300000" step="any" min="1" style="width:110px" aria-label="종목당 매수 금액"> <span id="sim-unit">원</span></label>
       <label>하루 최대 <input id="sim-maxbuys" type="number" value="0" step="1" min="0" aria-label="하루 최대 매수 종목 수"> 종목 (0 = 제한 없음)</label>
       <label>매도 <select id="sim-sell" aria-label="매도 모듈"><option value="tp-sl">익절·손절, 아니면 마지막 기록</option></select></label>
-      <label>익절 <input id="sim-tp" type="number" value="0" step="0.5" min="0" aria-label="익절 %"> %</label>
-      <label>손절 <input id="sim-sl" type="number" value="0" step="0.5" min="0" aria-label="손절 %"> %</label>
+      <label>익절 <input id="sim-tp" type="number" value="5" step="0.5" min="0" aria-label="익절 %"> %</label>
+      <label>손절 <input id="sim-sl" type="number" value="5" step="0.5" min="0" aria-label="손절 %"> %</label>
       <label>최대 보유 <input id="sim-maxhold" type="number" value="0" step="10" min="0" aria-label="최대 보유 시간(분)"> 분 (0 = 안 함)</label>
       <label>매수는 <input id="sim-start" type="time" value="" step="300" aria-label="매수 시작 시각"> 부터 <input id="sim-until" type="time" value="15:00" step="300" aria-label="매수 마감 시각"> 까지</label>
       <label>비용 <input id="sim-cost" type="number" value="0.23" step="any" min="0" aria-label="수수료·세금 %"> %</label>
@@ -747,6 +747,7 @@ $("#sim-live-off").onclick = async () => {
 };
 getJson("api/kosdaq-sim-modules").then(m => {  // 서버 모듈 목록으로 선택칸 채움 (실패하면 기본 하나만)
   for (const k of ["buy", "sell"]) $(`#sim-${k}`).innerHTML = m[k].map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join("");
+  if (m.buy.some(x => x.id === "surge")) $("#sim-buy").value = "surge";  // 기본: 코스닥 surge · 익절 5 · 손절 5 · 알림 종목만
 }).catch(() => {});
 $("#sim-body").ondblclick = e => {
   const tr = e.target.closest("tbody tr[data-code]");
