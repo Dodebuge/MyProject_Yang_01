@@ -115,7 +115,7 @@ class VolumeTest {
             v.save("2026-10-15T" + t[0][0], prev);
             v.save("2026-10-16T" + t[0][0], rows);
         }
-        Map<String, Object> r = v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-open-up", "tp-sl");
+        Map<String, Object> r = v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-open-up", "tp-sl", "", 0, 0, null);
         List<String> got = new ArrayList<>();
         for (Map<String, Object> x : (List<Map<String, Object>>) r.get("trades")) {
             got.add(x.get("code") + " " + x.get("since") + " " + x.get("buyAt") + " " + x.get("qty") + " " + x.get("sellAt") + " "
@@ -125,18 +125,38 @@ class VolumeTest {
         Map<String, Object> total = (Map<String, Object>) r.get("total");
         assertEquals(List.of(2, 1L, 598840L, -120L, -0.02), List.of(total.get("trades"), total.get("wins"), total.get("invested"), total.get("pnl"), total.get("ret")));
         assertEquals("2026-10-16", r.get("from"));
-        assertEquals(3, ((List<?>) v.simulate(40, 300_000, 5, 0, "15:00", 0, false, 30, "volume-open-up", "tp-sl").get("trades")).size(), "스팩 포함");
-        List<Map<String, Object>> now = (List<Map<String, Object>>) v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-open-up", "tp-sl").get("trades");
+        assertEquals(3, ((List<?>) v.simulate(40, 300_000, 5, 0, "15:00", 0, false, 30, "volume-open-up", "tp-sl", "", 0, 0, null).get("trades")).size(), "스팩 포함");
+        List<Map<String, Object>> now = (List<Map<String, Object>>) v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-open-up", "tp-sl", "", 0, 0, null).get("trades");
         assertEquals(List.of("A 09:30", "B 09:30"), List.of(now.get(0).get("code") + " " + now.get(0).get("buyAt"), now.get(1).get("code") + " " + now.get(1).get("buyAt")), "hold=0이면 바로");
         // 모듈 교체: 시가 무시면 B도 10:00에 삼. 추적 손절 5%면 A는 고점 1080에서 15:40 900으로 내려 팜 (volume.py와 같음)
         List<String> codes2 = new ArrayList<>();
-        ((List<Map<String, Object>>) v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-up", "tp-sl").get("trades")).forEach(x -> codes2.add((String) x.get("code")));
+        ((List<Map<String, Object>>) v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-up", "tp-sl", "", 0, 0, null).get("trades")).forEach(x -> codes2.add((String) x.get("code")));
         assertEquals(List.of("A", "B", "C"), codes2);
         List<String> sold = new ArrayList<>();
-        ((List<Map<String, Object>>) v.simulate(40, 300_000, 0, 5, "15:00", 0, true, 30, "volume-open-up", "trailing").get("trades"))
+        ((List<Map<String, Object>>) v.simulate(40, 300_000, 0, 5, "15:00", 0, true, 30, "volume-open-up", "trailing", "", 0, 0, null).get("trades"))
                 .forEach(x -> sold.add(x.get("code") + " " + x.get("sellAt") + " " + x.get("reason")));
         assertEquals(List.of("A 15:40 고점 대비 손절", "C 15:40 고점 대비 손절"), sold);
-        assertThrows(IllegalArgumentException.class, () -> v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "nope", "tp-sl"));
+        assertThrows(IllegalArgumentException.class, () -> v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "nope", "tp-sl", "", 0, 0, null));
+        // 매수 시작 10:30이면 그 전 기록은 안 봄. 보유 30분이면 A는 10:30, C는 15:40에 '보유 시간'. 하루 최대 1종목이면 A만.
+        // 알림 종목만이면 C(10:00 알림)만 10:00부터 세어 10:30에 (volume.py 자체 점검과 같음)
+        assertEquals(List.of("A 10:30", "B 10:30", "C 10:30"), pick(v.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 0, "volume-open-up", "tp-sl", "10:30", 0, 0, null), "code", "buyAt"));
+        assertEquals(List.of("A 10:30 보유 시간", "C 15:40 보유 시간"), pick(v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "volume-open-up", "tp-sl", "", 30, 0, null), "code", "sellAt", "reason"));
+        assertEquals(List.of("A"), pick(v.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 0, "volume-open-up", "tp-sl", "", 0, 1, null), "code"));
+        assertEquals(List.of("C 10:00 10:30"), pick(v.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 30, "volume-open-up", "tp-sl", "", 0, 0,
+                Map.of("2026-10-16", Map.of("C", "10:00"))), "code", "since", "buyAt"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> pick(Map<String, Object> r, String... keys) {
+        List<String> out = new ArrayList<>();
+        for (Map<String, Object> x : (List<Map<String, Object>>) r.get("trades")) {
+            List<String> v = new ArrayList<>();
+            for (String k : keys) {
+                v.add(String.valueOf(x.get(k)));
+            }
+            out.add(String.join(" ", v));
+        }
+        return out;
     }
 
     @Test
@@ -149,7 +169,7 @@ class VolumeTest {
             g.save("2026-10-15T" + x[0], List.of(Arrays.<Object>asList("G", "G", 1, 0, 100, 0)));
             g.save("2026-10-16T" + x[0], List.of(Arrays.<Object>asList("G", "G", x[1], x[2], x[3], 0)));
         }
-        List<Map<String, Object>> ts = (List<Map<String, Object>>) g.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-up", "tp-sl").get("trades");
+        List<Map<String, Object>> ts = (List<Map<String, Object>>) g.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-up", "tp-sl", "", 0, 0, null).get("trades");
         assertEquals(List.of("10:00 1010.0"), List.of(ts.get(0).get("buyAt") + " " + ts.get(0).get("buyPrice")));
         assertEquals(1, ts.size());
     }

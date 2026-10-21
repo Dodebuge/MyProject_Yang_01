@@ -66,4 +66,21 @@ class AlertsTest {
         List<Map<String, Object>> after = (List<Map<String, Object>>) alerts.recent(((Number) a.get("id")).longValue()).get("alerts");
         assertEquals(Arrays.asList("20261017"), after.stream().map(r -> r.get("day")).collect(Collectors.toList()));
     }
+
+    @Test
+    void firstTimesConvertsAlertTimeToMarketZone() throws Exception {
+        java.nio.file.Path db = Files.createTempDirectory("alerts").resolve("alerts.db");
+        Alerts alerts = new Alerts(null, null, db, Collections.emptyMap());
+        alerts.recent(0);  // 표 만들기
+        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + db.toAbsolutePath());
+             java.sql.Statement st = c.createStatement()) {
+            // 러셀 알림 시각(한국 2026-10-20 23:20)은 뉴욕 10:20 (서머타임). 같은 종목은 첫 알림만 (alerts.py 자체 점검과 같음)
+            st.execute("INSERT INTO signal_alert (market, day, at, code, name, text, d, sig, chart) VALUES "
+                    + "('russell', '20261020', '2026-10-20 23:20', 'ABC', 'abc', 't', '', 's', 'c'),"
+                    + "('russell', '20261020', '2026-10-20 23:50', 'ABC', 'abc', 't2', '', 's2', 'c'),"
+                    + "('kosdaq', '20261020', '2026-10-20 10:16', '206560', '덱스터', 't', '', 's', 'c')");
+        }
+        assertEquals(Map.of("2026-10-20", Map.of("ABC", "10:20")), alerts.firstTimes("russell"));
+        assertEquals(Map.of("2026-10-20", Map.of("206560", "10:16")), alerts.firstTimes("kosdaq"));
+    }
 }

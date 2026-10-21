@@ -101,10 +101,19 @@ appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1
 - 기록이 쌓이려면 서버가 장중에 켜져 있어야 합니다. 전일 비교는 이틀째, 전주 비교는 8일째부터 보입니다.
 - Python·Java·Spring 서버가 같은 `kosdaq.db`를 쓰고, 같은 시각을 두 서버가 기록하면 나중 값으로 덮어씁니다.
 
-### 매수 시뮬레이션 (코스닥)
+### 매수 시뮬레이션 (코스닥 · 러셀 2000)
 
-- 모니터 페이지(`/monitor`)의 **코스닥 매수 시뮬레이션** 카드, `/api/kosdaq-sim?min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1&hold=30&buy=volume-open-up&sell=tp-sl`.
-  위 5분 기록만 읽어(KB 조회 없음) 기록된 날마다 다음처럼 사고 팔았다고 보고 수익률을 계산합니다.
+- 모니터 페이지(`/monitor`)의 **매수 시뮬레이션** 카드, `/api/kosdaq-sim?market=kosdaq&min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1&hold=30&buy=volume-open-up&sell=tp-sl&start=&maxHold=0&maxBuys=0&alerts=0`.
+  위 기록만 읽어(KB 조회 없음) 기록된 날마다 다음처럼 사고 팔았다고 보고 수익률을 계산합니다.
+- 추가 값:
+
+  | 값 | 뜻 |
+  |---|---|
+  | `market` | `kosdaq`(5분 기록, 원) 또는 `russell`(30분 기록, 뉴욕 시간, 달러) |
+  | `start` | 이 시각 전에는 사지 않음 (비우면 첫 기록부터) |
+  | `maxHold` | 산 뒤 이 분이 지난 첫 기록에 '보유 시간'으로 매도 (0이면 안 함) |
+  | `maxBuys` | 하루 최대 매수 종목 수. 같은 시각에 여럿이면 거래량 증가율 큰 순 (0이면 제한 없음) |
+  | `alerts=1` | 그날 시그널 알림(`alerts.db`)이 온 종목만, 알림 시각(그 시장 시간) 이후 기록에서만 |
 - **모듈**: 매수 조건(`buy`)과 매도(`sell`)는 이름으로 바꿔 끼웁니다. 엔진(`Ticks.simulate`)은 기록 읽기·hold 유지·하루 한 번 매수·마지막 기록 매도·손익만 맡습니다.
   새 규칙은 `sim_modules.py`의 `BUY`·`SELL`(Java 서버는 `SimModules.java`)에 같은 이름으로 한 줄 추가하면 화면 선택 목록(`/api/kosdaq-sim-modules`)에 나옵니다.
 

@@ -346,6 +346,29 @@ final class Alerts {
         return out;
     }
 
+    /**
+     * 시뮬레이션 '알림 종목만'용: {그 시장 현지 날짜 'yyyy-MM-dd': {종목: 첫 알림 현지 시각 'HH:mm'}} (alerts.first_times와 같음).
+     * at은 한국 시간이라 시장 시간대(코스닥 서울, 러셀 뉴욕)로 바꿈.
+     */
+    Map<String, Map<String, String>> firstTimes(String market) throws IOException {
+        ZoneId zone = "russell".equals(market) ? ZoneId.of("America/New_York") : SEOUL;
+        Map<String, Map<String, String>> out = new LinkedHashMap<>();
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement("SELECT at, code FROM signal_alert WHERE market = ? ORDER BY at")) {
+            ps.setString(1, market);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ZonedDateTime local = LocalDateTime.parse(rs.getString(1), AT).atZone(SEOUL).withZoneSameInstant(zone);
+                    out.computeIfAbsent(local.toLocalDate().toString(), k -> new LinkedHashMap<>())
+                            .putIfAbsent(rs.getString(2), local.toLocalTime().toString().substring(0, 5));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IOException("alerts.db 저장소 오류: " + e.getMessage(), e);
+        }
+        return out;
+    }
+
     private Connection connect() throws SQLException {
         try {
             Class.forName("org.sqlite.JDBC");  // Tomcat은 WEB-INF/lib의 JDBC 드라이버를 자동 등록하지 않을 수 있음

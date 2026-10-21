@@ -174,10 +174,19 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/chart", req -> chart.chart(param(req, "market", "kr"), param(req, "code", ""), param(req, "exchange", ""), !"0".equals(param(req, "recent", "1"))));
         apis.put("/api/kosdaq-volume", req -> volume.query(refresh(req)));
         apis.put("/api/kosdaq-intraday", req -> volume.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
-        apis.put("/api/kosdaq-sim", req -> volume.ticks.simulate(Double.parseDouble(param(req, "min", "100")), Double.parseDouble(param(req, "amount", "300000")),
-                Double.parseDouble(param(req, "tp", "0")), Double.parseDouble(param(req, "sl", "0")), param(req, "until", "15:00"),
-                Double.parseDouble(param(req, "cost", "0.23")), !"0".equals(param(req, "spac", "1")), Integer.parseInt(param(req, "hold", "30")),
-                param(req, "buy", "volume-open-up"), param(req, "sell", "tp-sl")));
+        apis.put("/api/kosdaq-sim", req -> {
+            String market = param(req, "market", "kosdaq");
+            Ticks ticks = "kosdaq".equals(market) ? volume.ticks : "russell".equals(market) ? russell.ticks : null;
+            if (ticks == null) {
+                throw new IllegalArgumentException("없는 시장입니다: " + market);
+            }
+            return ticks.simulate(Double.parseDouble(param(req, "min", "100")), Double.parseDouble(param(req, "amount", "300000")),
+                    Double.parseDouble(param(req, "tp", "0")), Double.parseDouble(param(req, "sl", "0")), param(req, "until", "15:00"),
+                    Double.parseDouble(param(req, "cost", "0.23")), !"0".equals(param(req, "spac", "1")), Integer.parseInt(param(req, "hold", "30")),
+                    param(req, "buy", "volume-open-up"), param(req, "sell", "tp-sl"), param(req, "start", ""),
+                    Integer.parseInt(param(req, "maxHold", "0")), Integer.parseInt(param(req, "maxBuys", "0")),
+                    "1".equals(param(req, "alerts", "0")) ? alerts.firstTimes(market) : null);
+        });
         apis.put("/api/kosdaq-sim-modules", req -> SimModules.catalog());
         apis.put("/api/trader", req -> trader.status());
         apis.put("/api/alerts", req -> alerts.recent(Long.parseLong(param(req, "since", "0"))));

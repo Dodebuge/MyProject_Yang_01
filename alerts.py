@@ -196,6 +196,16 @@ def recent(since: int = 0) -> dict:
     return {"alerts": rows, "ntfy": bool(os.environ.get("NTFY_TOPIC", "").strip()), "every": EVERY_MINUTES, "top": TOP, "markets": markets}
 
 
+def first_times(market: str) -> dict[str, dict[str, str]]:
+    """시뮬레이션 '알림 종목만'용: {그 시장 현지 날짜 'YYYY-MM-DD': {종목: 첫 알림 현지 시각 'HH:MM'}}. at은 한국 시간이라 시장 시간대로 바꿈."""
+    tz, out = MARKETS[market].tz, {}
+    with closing(_connect()) as con:
+        for at, code in con.execute("SELECT at, code FROM signal_alert WHERE market = ? ORDER BY at", (market,)):
+            local = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=KST).astimezone(tz)
+            out.setdefault(local.strftime("%Y-%m-%d"), {}).setdefault(code, local.strftime("%H:%M"))
+    return out
+
+
 def start(client: KBClient) -> None:
     """시장마다 백그라운드 스레드로 장중 5분마다 check."""
     def loop(m: Market):
@@ -246,4 +256,9 @@ if __name__ == "__main__":
     assert record(MARKETS["kosdaq"], "20261017", s, gc)                                 # 다음 날은 다시
     r = recent()
     assert [x["day"] for x in r["alerts"]] == ["20261017", "20261016"] and recent(a["id"])["alerts"][0]["day"] == "20261017"
+    with closing(_connect()) as con, con:  # 러셀 알림 시각(한국 2026-10-20 23:20)은 뉴욕 10:20 (서머타임)
+        con.execute("INSERT INTO signal_alert (market, day, at, code, name, text, d, sig, chart) VALUES "
+                    "('russell', '20261020', '2026-10-20 23:20', 'ABC', 'abc', 't', '', 's', 'c')")
+    assert first_times("russell") == {"2026-10-20": {"ABC": "10:20"}}
+    assert [list(v) for v in first_times("kosdaq").values()] == [["000001"]]  # 같은 종목은 첫 알림 시각만
     print("ok")

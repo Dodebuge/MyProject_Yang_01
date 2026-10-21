@@ -38,8 +38,10 @@ API:
     GET /api/dividends?year=2026   -> {"year", "start", "end", "fetchedAt", "entries": [...]}
     GET /api/recurring             -> {"start", "end", "fetchedAt", "plans": [...]}  소수점 정기 구매 (거래내역 소수단위매수, 최근 반년)
     GET /api/kosdaq-volume         -> {"fetchedAt", "total", "stocks": [{"code", "name", "price", "change", "value", "avg", "prevAvg", "days", "prevDays", "ratio"}]}  코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시, ?refresh=1이면 다시 조회)
-    GET /api/kosdaq-sim?min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1&hold=30&buy=volume-open-up&sell=tp-sl
-                                   -> {"from", "to", "total", "days", "trades"}  매수 조건 모듈(buy)이 hold분 이어진 종목을 amount원씩 사고 매도 모듈(sell)로 판 시뮬레이션 (kosdaq.db만 읽음)
+    GET /api/kosdaq-sim?market=kosdaq&min=100&amount=300000&tp=0&sl=0&until=15:00&cost=0.23&spac=1&hold=30&buy=volume-open-up&sell=tp-sl
+                       &start=&maxHold=0&maxBuys=0&alerts=0
+                                   -> {"from", "to", "total", "days", "trades"}  매수 조건 모듈(buy)이 hold분 이어진 종목을 amount씩 사고 매도 모듈(sell)로 판 시뮬레이션
+                                   (market=russell이면 russell.db·뉴욕 시간·달러, alerts=1이면 그 시장 알림 종목만 알림 시각부터, 저장된 기록만 읽음)
     GET /api/kosdaq-sim-modules    -> {"buy": [{"id", "label"}], "sell": [...]}  시뮬레이션 모듈 목록 (sim_modules.py)
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
                                    장중 5분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
@@ -150,6 +152,19 @@ def _save_monitor(d: dict) -> dict:
     return out
 
 
+def _simulate(q: dict) -> dict:
+    """GET /api/kosdaq-sim : market=kosdaq|russell의 저장된 기록으로 Ticks.simulate (alerts=1이면 그 시장 알림 종목만 알림 시각부터)."""
+    g = lambda k, d: q.get(k, [d])[0]
+    market = g("market", "kosdaq")
+    ticks = {"kosdaq": volume.KOSDAQ, "russell": russell.RUSSELL}.get(market)
+    if not ticks:
+        raise ValueError(f"없는 시장입니다: {market}")
+    return ticks.simulate(float(g("min", "100")), float(g("amount", "300000")), float(g("tp", "0")), float(g("sl", "0")),
+                          g("until", "15:00"), float(g("cost", "0.23")), g("spac", "1") != "0", int(g("hold", "30")),
+                          g("buy", "volume-open-up"), g("sell", "tp-sl"), g("start", ""), int(g("maxHold", "0") or 0),
+                          int(g("maxBuys", "0") or 0), alerts.first_times(market) if g("alerts", "0") == "1" else None)
+
+
 def _trader_only_java() -> dict:
     """토스 자동매매는 실제 주문 로직을 한 곳에만 두려고 Spring·Java 서버(Trader.java)에서만 동작합니다."""
     raise ValueError("토스 자동매매는 Spring·Java 서버에서만 동작합니다 (spring-app/run.sh). 실제 주문 로직을 한 곳(Trader.java)에만 둡니다.")
@@ -191,12 +206,8 @@ def make_handler(client: KBClient):
                 self._api(lambda q: volume.KOSDAQ.intraday(q.get("date", [""])[0], q.get("at", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/kosdaq-sim-modules":
                 self._api(lambda q: sim_modules.catalog(), {})
-            elif url.path == "/api/kosdaq-sim":  # 저장된 5분 기록으로 매수·매도 시뮬레이션 (buy·sell = sim_modules 모듈 이름)
-                self._api(lambda q: volume.KOSDAQ.simulate(
-                    float(q.get("min", ["100"])[0]), float(q.get("amount", ["300000"])[0]), float(q.get("tp", ["0"])[0]),
-                    float(q.get("sl", ["0"])[0]), q.get("until", ["15:00"])[0], float(q.get("cost", ["0.23"])[0]),
-                    q.get("spac", ["1"])[0] != "0", int(q.get("hold", ["30"])[0]),
-                    q.get("buy", ["volume-open-up"])[0], q.get("sell", ["tp-sl"])[0]), parse_qs(url.query))
+            elif url.path == "/api/kosdaq-sim":  # 저장된 기록으로 매수·매도 시뮬레이션 (market=kosdaq|russell, buy·sell = sim_modules 모듈 이름)
+                self._api(_simulate, parse_qs(url.query))
             elif url.path == "/api/russell-volume":
                 self._api(lambda q: russell.query(client, _refresh(q)), parse_qs(url.query))
             elif url.path == "/api/russell-intraday":

@@ -29,7 +29,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday        장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
- *   GET /api/kosdaq-sim             같은 기록으로 매수·매도 시뮬레이션 (buy·sell = SimModules 모듈 이름)
+ *   GET /api/kosdaq-sim             같은 기록으로 매수·매도 시뮬레이션 (market=kosdaq|russell, buy·sell = SimModules 모듈 이름,
+ *                                   start·maxHold·maxBuys, alerts=1이면 알림 종목만 알림 시각부터)
  *   GET /api/kosdaq-sim-modules     시뮬레이션 매수 조건·매도 모듈 목록
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
  *   GET·POST /api/trader             토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader)
@@ -160,8 +161,16 @@ class ApiController {
                                                   @RequestParam(defaultValue = "15:00") String until, @RequestParam(defaultValue = "0.23") double cost,
                                                   @RequestParam(defaultValue = "1") String spac, @RequestParam(defaultValue = "30") int hold,
                                                   @RequestParam(defaultValue = "volume-open-up") String buy,
-                                                  @RequestParam(defaultValue = "tp-sl") String sell) throws IOException {
-        return ok(volume.ticks.simulate(min, amount, tp, sl, until, cost, !"0".equals(spac), hold, buy, sell));
+                                                  @RequestParam(defaultValue = "tp-sl") String sell,
+                                                  @RequestParam(defaultValue = "kosdaq") String market, @RequestParam(defaultValue = "") String start,
+                                                  @RequestParam(defaultValue = "0") int maxHold, @RequestParam(defaultValue = "0") int maxBuys,
+                                                  @RequestParam(defaultValue = "0") String alerts) throws IOException {
+        Ticks ticks = "kosdaq".equals(market) ? volume.ticks : "russell".equals(market) ? russell.ticks : null;
+        if (ticks == null) {
+            throw new IllegalArgumentException("없는 시장입니다: " + market);
+        }
+        return ok(ticks.simulate(min, amount, tp, sl, until, cost, !"0".equals(spac), hold, buy, sell, start, maxHold, maxBuys,
+                "1".equals(alerts) ? this.alerts.firstTimes(market) : null));
     }
 
     @GetMapping("/kosdaq-sim-modules")

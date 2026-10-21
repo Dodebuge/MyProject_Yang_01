@@ -223,16 +223,20 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
   </section>
 
   <section class="card" id="sim-card">
-    <div class="head"><h2>코스닥 매수 시뮬레이션</h2><span class="sub">저장된 5분 기록(kosdaq.db)으로 계산 · KB 조회 없음</span></div>
+    <div class="head"><h2>매수 시뮬레이션</h2><span class="sub" id="sim-sub">저장된 5분 기록(kosdaq.db)으로 계산 · KB 조회 없음</span></div>
     <form class="sim-form" id="sim-form">
+      <label>시장 <select id="sim-market" aria-label="시장"><option value="kosdaq">코스닥 (5분 기록 · 원)</option><option value="russell">러셀 2000 (30분 기록 · 뉴욕 시간 · 달러)</option></select></label>
+      <label><input id="sim-alerts" type="checkbox"> 알림 종목만 (알림 시각부터)</label>
       <label>매수 조건 <select id="sim-buy" aria-label="매수 조건 모듈"><option value="volume-open-up">거래량 증가 + 시가 위 + 상승</option></select></label>
       <label>거래량 기준 (전일 같은 시각 대비) <input id="sim-min" type="number" value="100" step="10" min="0" aria-label="거래량 증가율"> %</label>
       <label><input id="sim-hold" type="number" value="30" step="5" min="0" aria-label="유지 시간(분)"> 분 이상 유지</label>
-      <label>종목당 <input id="sim-amount" type="number" value="300000" step="10000" min="10000" style="width:110px" aria-label="종목당 매수 금액"> 원</label>
+      <label>종목당 <input id="sim-amount" type="number" value="300000" step="any" min="1" style="width:110px" aria-label="종목당 매수 금액"> <span id="sim-unit">원</span></label>
+      <label>하루 최대 <input id="sim-maxbuys" type="number" value="0" step="1" min="0" aria-label="하루 최대 매수 종목 수"> 종목 (0 = 제한 없음)</label>
       <label>매도 <select id="sim-sell" aria-label="매도 모듈"><option value="tp-sl">익절·손절, 아니면 마지막 기록</option></select></label>
       <label>익절 <input id="sim-tp" type="number" value="0" step="0.5" min="0" aria-label="익절 %"> %</label>
       <label>손절 <input id="sim-sl" type="number" value="0" step="0.5" min="0" aria-label="손절 %"> %</label>
-      <label>매수는 <input id="sim-until" type="time" value="15:00" step="300" aria-label="매수 마감 시각"> 까지</label>
+      <label>최대 보유 <input id="sim-maxhold" type="number" value="0" step="10" min="0" aria-label="최대 보유 시간(분)"> 분 (0 = 안 함)</label>
+      <label>매수는 <input id="sim-start" type="time" value="" step="300" aria-label="매수 시작 시각"> 부터 <input id="sim-until" type="time" value="15:00" step="300" aria-label="매수 마감 시각"> 까지</label>
       <label>비용 <input id="sim-cost" type="number" value="0.23" step="any" min="0" aria-label="수수료·세금 %"> %</label>
       <label><input id="sim-spac" type="checkbox" checked> 스팩 제외</label>
       <button id="sim-run">시뮬레이션 실행</button>
@@ -242,7 +246,11 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
       조건이 연속으로 정한 시간(기본 30분) 이상 이어진 시각의 현재가로 종목당 금액만큼(1주 단위) 하루 한 번 삽니다. 중간에 하나라도 깨지면 처음부터 다시 셉니다(0분이면 처음 만족한 시각에 바로).
       시가는 KB 순위 조회에 없어 그날 첫 기록(09:00, 장 시작 30초 뒤) 가격으로 보므로, 가장 빠른 매수는 09:05에 조건을 만족하고 30분이 지난 09:35입니다. 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺍니다.
       판매는 이후 5분 기록에서 매도 모듈이 정한 시각(기본: 익절·손절에 닿은 시각, 추적은 산 뒤 고점 대비 손절 %, 0이면 안 함)의 현재가, 아니면 그날 마지막 기록(15:40, 종가)입니다. 비용(수수료·거래세)은 판 금액에서 뺍니다.
-      5분 간격 현재가로 계산하는 근사라 실제 체결가·호가 공백·장중 고가/저가는 반영되지 않습니다. 과거 결과는 앞으로의 수익을 보장하지 않습니다.</p>
+      최대 보유 시간을 넣으면 산 뒤 그 시간이 지난 첫 기록에 '보유 시간'으로 팝니다. 하루 최대 종목 수를 넣으면 같은 시각에 여럿이 되면 거래량 증가율 큰 종목부터 삽니다.
+      알림 종목만은 그날 시그널 알림이 온 종목을 알림 시각 이후 기록에서만 봅니다. 매수 시작 시각을 비우면 첫 기록부터 봅니다.
+      러셀 2000은 뉴욕 장중 30분 기록(10:00~16:30, 뉴욕 시간)이라 첫 기록이 장 시작 30분 뒤이고, 금액·손익은 달러입니다.
+      현재가와 등락률이 서로 맞지 않는 기록(KB가 가끔 자릿수가 빠진 현재가를 줌)은 계산에서 뺍니다.
+      기록 간격 현재가로 계산하는 근사라 실제 체결가·호가 공백·장중 고가/저가는 반영되지 않습니다. 과거 결과는 앞으로의 수익을 보장하지 않습니다.</p>
   </section>
 
   <section class="card">
@@ -619,20 +627,38 @@ $("#theme").onclick = () => {
 };
 // ---------------------------------------------------------------- 매수 시뮬레이션 (/api/kosdaq-sim)
 const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n, d)}%`;
-const signedWon = n => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}원`;
+const SIM_MARKET = {  // 시장을 바꾸면 금액·비용 기본값과 단위를 바꿈
+  kosdaq: { unit: "원", amount: 300000, cost: 0.23, sub: "저장된 5분 기록(kosdaq.db)으로 계산 · KB 조회 없음", chart: "kr" },
+  russell: { unit: "달러", amount: 10000, cost: 0.25, sub: "저장된 30분 기록(russell.db, 뉴욕 시간)으로 계산 · KB 조회 없음", chart: "us" },
+};
+let simUnit = "원";
+const simPx = n => fmt(n, simUnit === "달러" ? 2 : 0);  // 러셀 가격은 센트까지
+const signedWon = n => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}${simUnit}`;
+$("#sim-market").onchange = () => {
+  const m = SIM_MARKET[$("#sim-market").value];
+  $("#sim-unit").textContent = m.unit;
+  $("#sim-amount").value = m.amount;
+  $("#sim-cost").value = m.cost;
+  $("#sim-sub").textContent = m.sub;
+  $("#sim-spac").closest("label").hidden = $("#sim-market").value !== "kosdaq";
+};
 $("#sim-form").onsubmit = async e => {
   e.preventDefault();
-  const q = new URLSearchParams({ min: $("#sim-min").value || 0, amount: $("#sim-amount").value || 0, tp: $("#sim-tp").value || 0,
+  const market = $("#sim-market").value;
+  const q = new URLSearchParams({ market, start: $("#sim-start").value, maxHold: $("#sim-maxhold").value || 0, maxBuys: $("#sim-maxbuys").value || 0,
+    alerts: $("#sim-alerts").checked ? 1 : 0, min: $("#sim-min").value || 0, amount: $("#sim-amount").value || 0, tp: $("#sim-tp").value || 0,
     sl: $("#sim-sl").value || 0, until: $("#sim-until").value || "15:00", cost: $("#sim-cost").value || 0, spac: $("#sim-spac").checked ? 1 : 0, hold: $("#sim-hold").value || 0,
     buy: $("#sim-buy").value, sell: $("#sim-sell").value });
   $("#sim-run").disabled = true;
   $("#sim-body").innerHTML = `<div class="loading"><div class="spinner"></div>계산 중…</div>`;
   try {
     const d = await getJson(`api/kosdaq-sim?${q}`), t = d.total;
+    simUnit = SIM_MARKET[market].unit;
+    $("#sim-body").dataset.chart = SIM_MARKET[market].chart;
     if (!d.from) { $("#sim-body").innerHTML = `<div class="empty">비교할 기록이 2거래일 이상 쌓여야 합니다.</div>`; return; }
     const sum = (label, v, c = "") => `<div><span>${label}</span><b class="${c}">${v}</b></div>`;
     $("#sim-body").innerHTML = `<div class="sim-sum">
-        ${sum("수익률", pct(t.ret, 2), cls(t.ret))}${sum("손익", signedWon(t.pnl), cls(t.pnl))}${sum("매수 합계", `${fmt(t.invested)}원`)}
+        ${sum("수익률", pct(t.ret, 2), cls(t.ret))}${sum("손익", signedWon(t.pnl), cls(t.pnl))}${sum("매수 합계", `${fmt(t.invested)}${simUnit}`)}
         ${sum("거래", `${fmt(t.trades)}건`)}${sum("이긴 거래", t.trades ? `${fmt(t.wins)}건 (${fmt(t.wins / t.trades * 100, 0)}%)` : "—")}
         ${sum("기간", d.from === d.to ? d.from : `${d.from} ~ ${d.to}`)}</div>
       <div class="table"><table><thead><tr><th>날짜</th><th class="num">거래</th><th class="num hide-sm">이긴 거래</th><th class="num hide-sm">매수 합계</th><th class="num">손익</th><th class="num">수익률</th></tr></thead>
@@ -641,8 +667,8 @@ $("#sim-form").onsubmit = async e => {
       ${d.trades.length ? `<div class="table sim-table" style="margin-top:12px"><table><thead><tr><th>날짜</th><th>종목</th><th class="num hide-sm">조건 시작</th><th class="num">매수</th><th class="num hide-sm">거래량 증가</th>
         <th class="num hide-sm">수량</th><th class="num">매도</th><th class="hide-sm">이유</th><th class="num">손익</th><th class="num">수익률</th></tr></thead>
         <tbody>${d.trades.map(x => `<tr data-code="${esc(x.code)}" title="더블클릭하면 차트 열기"><td>${md(x.date)}</td><td><b>${esc(x.name)}</b><span class="code">${esc(x.code)}</span></td>
-          <td class="num hide-sm">${x.since} <span class="days">시가 ${fmt(x.open)}</span></td><td class="num">${x.buyAt} ${fmt(x.buyPrice)} <span class="days">${pct(x.change, 1)}</span></td><td class="num hide-sm">${pct(x.ratio)}</td><td class="num hide-sm">${fmt(x.qty)}</td>
-          <td class="num">${x.sellAt} ${fmt(x.sellPrice)}</td><td class="hide-sm">${esc(x.reason)}</td>
+          <td class="num hide-sm">${x.since} <span class="days">시가 ${simPx(x.open)}</span></td><td class="num">${x.buyAt} ${simPx(x.buyPrice)} <span class="days">${pct(x.change, 1)}</span></td><td class="num hide-sm">${pct(x.ratio)}</td><td class="num hide-sm">${fmt(x.qty)}</td>
+          <td class="num">${x.sellAt} ${simPx(x.sellPrice)}</td><td class="hide-sm">${esc(x.reason)}</td>
           <td class="num ${cls(x.pnl)}">${signedWon(x.pnl)}</td><td class="num"><span class="ratio ${cls(x.ret)}">${pct(x.ret, 2)}</span></td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty">조건에 맞는 매수가 없었습니다.</div>`}`;
   } catch (err) {
@@ -654,7 +680,7 @@ getJson("api/kosdaq-sim-modules").then(m => {  // 서버 모듈 목록으로 선
 }).catch(() => {});
 $("#sim-body").ondblclick = e => {
   const tr = e.target.closest("tbody tr[data-code]");
-  if (tr) location.href = `chart?market=kr&code=${encodeURIComponent(tr.dataset.code)}`;
+  if (tr) location.href = `chart?market=${$("#sim-body").dataset.chart || "kr"}&code=${encodeURIComponent(tr.dataset.code)}`;
 };
 
 loadIndices();
