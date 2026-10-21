@@ -225,9 +225,11 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
   <section class="card" id="sim-card">
     <div class="head"><h2>코스닥 매수 시뮬레이션</h2><span class="sub">저장된 5분 기록(kosdaq.db)으로 계산 · KB 조회 없음</span></div>
     <form class="sim-form" id="sim-form">
-      <label>전일 같은 시각 대비 거래량 <input id="sim-min" type="number" value="100" step="10" min="0" aria-label="거래량 증가율"> % 이상 + 시가 위 + 전일 대비 상승이</label>
+      <label>매수 조건 <select id="sim-buy" aria-label="매수 조건 모듈"><option value="volume-open-up">거래량 증가 + 시가 위 + 상승</option></select></label>
+      <label>거래량 기준 (전일 같은 시각 대비) <input id="sim-min" type="number" value="100" step="10" min="0" aria-label="거래량 증가율"> %</label>
       <label><input id="sim-hold" type="number" value="30" step="5" min="0" aria-label="유지 시간(분)"> 분 이상 유지</label>
       <label>종목당 <input id="sim-amount" type="number" value="300000" step="10000" min="10000" style="width:110px" aria-label="종목당 매수 금액"> 원</label>
+      <label>매도 <select id="sim-sell" aria-label="매도 모듈"><option value="tp-sl">익절·손절, 아니면 마지막 기록</option></select></label>
       <label>익절 <input id="sim-tp" type="number" value="0" step="0.5" min="0" aria-label="익절 %"> %</label>
       <label>손절 <input id="sim-sl" type="number" value="0" step="0.5" min="0" aria-label="손절 %"> %</label>
       <label>매수는 <input id="sim-until" type="time" value="15:00" step="300" aria-label="매수 마감 시각"> 까지</label>
@@ -236,10 +238,10 @@ td { padding: 7px 6px; border-top: 1px solid var(--grid); }
       <button id="sim-run">시뮬레이션 실행</button>
     </form>
     <div id="sim-body"></div>
-    <p class="note">5분 기록마다 ① 전일 같은 시각(없으면 그 이전 마지막 기록)보다 누적 거래량이 기준 이상 많고 ② 현재가가 당일 시가보다 높고 ③ 전일 대비 오른 종목을 확인해,
-      세 조건이 연속으로 정한 시간(기본 30분) 이상 이어진 시각의 현재가로 종목당 금액만큼(1주 단위) 하루 한 번 삽니다. 중간에 하나라도 깨지면 처음부터 다시 셉니다(0분이면 처음 만족한 시각에 바로).
+    <p class="note">매수 조건·매도는 바꿔 끼우는 모듈입니다(sim_modules.py · SimModules.java에 추가하면 목록에 나옵니다). 기본 매수 조건은 5분 기록마다 ① 전일 같은 시각(없으면 그 이전 마지막 기록)보다 누적 거래량이 기준 이상 많고 ② 현재가가 당일 시가보다 높고 ③ 전일 대비 오른 종목이고,
+      조건이 연속으로 정한 시간(기본 30분) 이상 이어진 시각의 현재가로 종목당 금액만큼(1주 단위) 하루 한 번 삽니다. 중간에 하나라도 깨지면 처음부터 다시 셉니다(0분이면 처음 만족한 시각에 바로).
       시가는 KB 순위 조회에 없어 그날 첫 기록(09:00, 장 시작 30초 뒤) 가격으로 보므로, 가장 빠른 매수는 09:05에 조건을 만족하고 30분이 지난 09:35입니다. 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺍니다.
-      판매는 이후 5분 기록에서 익절·손절(0이면 안 함)에 닿은 시각의 현재가, 아니면 그날 마지막 기록(15:40, 종가)입니다. 비용(수수료·거래세)은 판 금액에서 뺍니다.
+      판매는 이후 5분 기록에서 매도 모듈이 정한 시각(기본: 익절·손절에 닿은 시각, 추적은 산 뒤 고점 대비 손절 %, 0이면 안 함)의 현재가, 아니면 그날 마지막 기록(15:40, 종가)입니다. 비용(수수료·거래세)은 판 금액에서 뺍니다.
       5분 간격 현재가로 계산하는 근사라 실제 체결가·호가 공백·장중 고가/저가는 반영되지 않습니다. 과거 결과는 앞으로의 수익을 보장하지 않습니다.</p>
   </section>
 
@@ -621,7 +623,8 @@ const signedWon = n => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}원`;
 $("#sim-form").onsubmit = async e => {
   e.preventDefault();
   const q = new URLSearchParams({ min: $("#sim-min").value || 0, amount: $("#sim-amount").value || 0, tp: $("#sim-tp").value || 0,
-    sl: $("#sim-sl").value || 0, until: $("#sim-until").value || "15:00", cost: $("#sim-cost").value || 0, spac: $("#sim-spac").checked ? 1 : 0, hold: $("#sim-hold").value || 0 });
+    sl: $("#sim-sl").value || 0, until: $("#sim-until").value || "15:00", cost: $("#sim-cost").value || 0, spac: $("#sim-spac").checked ? 1 : 0, hold: $("#sim-hold").value || 0,
+    buy: $("#sim-buy").value, sell: $("#sim-sell").value });
   $("#sim-run").disabled = true;
   $("#sim-body").innerHTML = `<div class="loading"><div class="spinner"></div>계산 중…</div>`;
   try {
@@ -646,6 +649,9 @@ $("#sim-form").onsubmit = async e => {
     $("#sim-body").innerHTML = `<div class="err">시뮬레이션 실패: ${esc(err.message)}</div>`;
   } finally { $("#sim-run").disabled = false; }
 };
+getJson("api/kosdaq-sim-modules").then(m => {  // 서버 모듈 목록으로 선택칸 채움 (실패하면 기본 하나만)
+  for (const k of ["buy", "sell"]) $(`#sim-${k}`).innerHTML = m[k].map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join("");
+}).catch(() => {});
 $("#sim-body").ondblclick = e => {
   const tr = e.target.closest("tbody tr[data-code]");
   if (tr) location.href = `chart?market=kr&code=${encodeURIComponent(tr.dataset.code)}`;

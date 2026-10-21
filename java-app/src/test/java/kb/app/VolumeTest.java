@@ -3,6 +3,7 @@ package kb.app;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -114,7 +115,7 @@ class VolumeTest {
             v.save("2026-10-15T" + t[0][0], prev);
             v.save("2026-10-16T" + t[0][0], rows);
         }
-        Map<String, Object> r = v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30);
+        Map<String, Object> r = v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-open-up", "tp-sl");
         List<String> got = new ArrayList<>();
         for (Map<String, Object> x : (List<Map<String, Object>>) r.get("trades")) {
             got.add(x.get("code") + " " + x.get("since") + " " + x.get("buyAt") + " " + x.get("qty") + " " + x.get("sellAt") + " "
@@ -124,8 +125,17 @@ class VolumeTest {
         Map<String, Object> total = (Map<String, Object>) r.get("total");
         assertEquals(List.of(2, 1L, 598840L, -120L, -0.02), List.of(total.get("trades"), total.get("wins"), total.get("invested"), total.get("pnl"), total.get("ret")));
         assertEquals("2026-10-16", r.get("from"));
-        assertEquals(3, ((List<?>) v.simulate(40, 300_000, 5, 0, "15:00", 0, false, 30).get("trades")).size(), "스팩 포함");
-        List<Map<String, Object>> now = (List<Map<String, Object>>) v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0).get("trades");
+        assertEquals(3, ((List<?>) v.simulate(40, 300_000, 5, 0, "15:00", 0, false, 30, "volume-open-up", "tp-sl").get("trades")).size(), "스팩 포함");
+        List<Map<String, Object>> now = (List<Map<String, Object>>) v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-open-up", "tp-sl").get("trades");
         assertEquals(List.of("A 09:30", "B 09:30"), List.of(now.get(0).get("code") + " " + now.get(0).get("buyAt"), now.get(1).get("code") + " " + now.get(1).get("buyAt")), "hold=0이면 바로");
+        // 모듈 교체: 시가 무시면 B도 10:00에 삼. 추적 손절 5%면 A는 고점 1080에서 15:40 900으로 내려 팜 (volume.py와 같음)
+        List<String> codes2 = new ArrayList<>();
+        ((List<Map<String, Object>>) v.simulate(40, 300_000, 5, 0, "15:00", 0, true, 30, "volume-up", "tp-sl").get("trades")).forEach(x -> codes2.add((String) x.get("code")));
+        assertEquals(List.of("A", "B", "C"), codes2);
+        List<String> sold = new ArrayList<>();
+        ((List<Map<String, Object>>) v.simulate(40, 300_000, 0, 5, "15:00", 0, true, 30, "volume-open-up", "trailing").get("trades"))
+                .forEach(x -> sold.add(x.get("code") + " " + x.get("sellAt") + " " + x.get("reason")));
+        assertEquals(List.of("A 15:40 고점 대비 손절", "C 15:40 고점 대비 손절"), sold);
+        assertThrows(IllegalArgumentException.class, () -> v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "nope", "tp-sl"));
     }
 }

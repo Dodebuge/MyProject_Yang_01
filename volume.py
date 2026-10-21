@@ -30,6 +30,7 @@ from typing import Callable
 import requests
 
 import chart
+import sim_modules
 from daily_store import KST
 from heatmap import _valid_day
 from kb_client import KBApiError, KBClient
@@ -212,17 +213,20 @@ class Ticks:
                 "slots": slots, "prev": prev, "week": week, "stocks": stocks}
 
     def simulate(self, min_ratio: float = 100, amount: float = 300_000, tp: float = 0, sl: float = 0,
-                 until: str = "15:00", cost: float = 0.23, spac: bool = True, hold: int = 30) -> dict:
-        """GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 min_ratio% 이상 + 시가보다 높음 + 전일 대비 상승'이
-        hold분 이상 이어진 종목을 amount원씩 사고 판 결과.
-        시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00, 장 시작 30초 뒤)의 현재가로 봄 (그래서 첫 기록에서는 조건이 안 됨).
-        매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 세 조건을 확인해, 연속으로 만족한 첫 기록부터 hold분이 지난 기록의
+                 until: str = "15:00", cost: float = 0.23, spac: bool = True, hold: int = 30,
+                 buy: str = "volume-open-up", sell: str = "tp-sl") -> dict:
+        """GET /api/kosdaq-sim : 저장된 기록으로 매수 조건 모듈(buy)이 hold분 이상 이어진 종목을 amount원씩 사고,
+        매도 모듈(sell)로 판 결과. 모듈은 sim_modules.py (기본: 거래량 min_ratio% 이상 + 시가 위 + 상승, 익절 tp%·손절 sl%).
+        시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00, 장 시작 30초 뒤)의 현재가로 봄.
+        매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 조건을 확인해, 연속으로 만족한 첫 기록부터 hold분이 지난 기록의
         현재가로 하루 한 번 (중간에 한 번이라도 깨지면 처음부터 다시). hold=0이면 처음 만족한 기록에서 바로.
-        매도: 이후 기록에서 익절 tp%·손절 sl%(0이면 안 함)에 닿으면 그 시각 현재가, 아니면 그날 마지막 기록(종가).
+        매도: 이후 기록마다 매도 모듈이 이유를 주면 그 시각 현재가, 아니면 그날 마지막 기록(종가).
         cost%: 수수료·세금을 매도 금액에서 뺌. 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺌. spac=True면 스팩 제외.
         -> {"from", "to", "total": {trades, wins, invested, pnl, ret}, "days": [{date, trades, wins, invested, pnl, ret}], "trades": [...]}"""
         if amount <= 0 or hold < 0 or len(until) != 5 or until[2] != ":":
             raise ValueError("매수 금액·시각·유지 시간이 올바르지 않습니다")
+        buy_rule, sell_rule = sim_modules.pick(sim_modules.BUY, buy), sim_modules.pick(sim_modules.SELL, sell)
+        o = {"min": min_ratio, "tp": tp, "sl": sl}
         num = lambda v: float(v) if v not in (None, "") else 0.0
         mins = lambda hm: int(hm[:2]) * 60 + int(hm[3:])
         with closing(self._connect()) as con:
@@ -249,8 +253,7 @@ class Ticks:
                     now = load(d, t)
                     for code, tr in list(held.items()):
                         px = num(now[code][2]) if code in now else 0
-                        hit = "익절" if tp and px >= tr["buyPrice"] * (1 + tp / 100) else "손절" if sl and px and px <= tr["buyPrice"] * (1 - sl / 100) else None
-                        if hit:
+                        if px and (hit := sell_rule(tr, px, o)):
                             tr.update(sellAt=t, sellPrice=px, reason=hit)
                             del held[code]
                     before = [s for s in slots[p] if s <= t]
@@ -259,16 +262,17 @@ class Ticks:
                     prev = load(p, before[-1])
                     for code, r in now.items():
                         px, pv = num(r[2]), num(prev[code][4]) if code in prev else 0
-                        if (code in bought or not pv or not px or not 0 < num(r[3]) < 29.5 or (spac and "스팩" in r[1])
-                                or (num(r[4]) / pv - 1) * 100 < min_ratio or not px > opens.get(code, px) or amount < px):
+                        if (code in bought or not pv or not px or num(r[3]) >= 29.5 or (spac and "스팩" in r[1]) or amount < px
+                                or not buy_rule(s := {"price": px, "change": num(r[3]), "ratio": (num(r[4]) / pv - 1) * 100,
+                                                      "open": opens.get(code, px)}, o)):
                             since.pop(code, None)
                             continue
                         start = since.setdefault(code, t)
                         if mins(t) - mins(start) < hold:
                             continue
                         bought.add(code)
-                        held[code] = {"date": d, "code": code, "name": r[1], "since": start, "open": opens[code], "buyAt": t, "buyPrice": px,
-                                      "qty": int(amount // px), "ratio": round((num(r[4]) / pv - 1) * 100, 1), "change": num(r[3]),
+                        held[code] = {"date": d, "code": code, "name": r[1], "since": start, "open": s["open"], "buyAt": t, "buyPrice": px,
+                                      "qty": int(amount // px), "ratio": round(s["ratio"], 1), "change": s["change"],
                                       "prevAt": f"{p} {before[-1]}"}
                         trades.append(held[code])
                 last = load(d, slots[d][-1])
@@ -371,6 +375,11 @@ if __name__ == "__main__":
     assert r["total"] == {"trades": 2, "wins": 1, "invested": 598840, "pnl": -120, "ret": -0.02} and r["from"] == "2026-10-16", r
     assert [x["code"] for x in s.simulate(min_ratio=40, tp=5, cost=0, spac=False)["trades"]] == ["A", "D스팩", "C"]
     assert [(x["code"], x["buyAt"]) for x in s.simulate(min_ratio=40, hold=0)["trades"]][:2] == [("A", "09:30"), ("B", "09:30")]
+    # 모듈 교체: 시가 무시면 B도 09:30부터 이어져 10:00에 삼. 추적 손절 5%면 A는 10:30 고점 1080에서 15:40 900으로 내려 팜
+    assert [x["code"] for x in s.simulate(min_ratio=40, tp=5, cost=0, buy="volume-up")["trades"]] == ["A", "B", "C"]
+    assert [(x["code"], x["sellAt"], x["reason"]) for x in s.simulate(min_ratio=40, sl=5, cost=0, sell="trailing")["trades"]] == [
+        ("A", "15:40", "고점 대비 손절"), ("C", "15:40", "고점 대비 손절")]
+    assert sim_modules.catalog()["buy"][0]["id"] == "volume-open-up"
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()

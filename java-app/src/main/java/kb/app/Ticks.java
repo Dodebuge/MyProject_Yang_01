@@ -223,17 +223,21 @@ public final class Ticks {
     }
 
     /**
-     * GET /api/kosdaq-sim : 저장된 기록으로 '같은 시각 전일 대비 거래량 minRatio% 이상 + 시가보다 높음 + 전일 대비 상승'이 hold분 이상
-     * 이어진 종목을 amount원씩 사고 판 결과 (volume.py Ticks.simulate와 같은 규칙·JSON).
+     * GET /api/kosdaq-sim : 저장된 기록으로 매수 조건 모듈(buy)이 hold분 이상 이어진 종목을 amount원씩 사고 매도 모듈(sell)로 판 결과
+     * (volume.py Ticks.simulate와 같은 규칙·JSON). 모듈은 SimModules (기본: 거래량 minRatio% 이상 + 시가 위 + 상승, 익절 tp%·손절 sl%).
      * 시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00)의 현재가로 봄. 매수: 기록 시각마다(until까지, 그날 마지막 기록 제외)
-     * 세 조건을 연속으로 만족한 첫 기록부터 hold분이 지난 기록의 현재가로 하루 한 번 (중간에 깨지면 처음부터 다시, hold=0이면 바로).
-     * 매도: 이후 기록에서 익절 tp%·손절 sl%(0이면 안 함)에 닿으면 그 시각 현재가, 아니면 그날 마지막 기록. cost%는 매도 금액에서 뺌.
+     * 조건을 연속으로 만족한 첫 기록부터 hold분이 지난 기록의 현재가로 하루 한 번 (중간에 깨지면 처음부터 다시, hold=0이면 바로).
+     * 매도: 이후 기록마다 매도 모듈이 이유를 주면 그 시각 현재가, 아니면 그날 마지막 기록. cost%는 매도 금액에서 뺌.
      * 상한가 근처(+29.5% 이상)는 살 수 없다고 보고 뺌. spac이면 스팩 제외.
      */
-    Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac, int hold) throws IOException {
+    Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac, int hold,
+                                 String buy, String sell) throws IOException {
         if (amount <= 0 || hold < 0 || until.length() != 5 || until.charAt(2) != ':') {
             throw new IllegalArgumentException("매수 금액·시각·유지 시간이 올바르지 않습니다");
         }
+        SimModules.Buy buyRule = SimModules.pick(SimModules.BUY, buy);
+        SimModules.Sell sellRule = SimModules.pick(SimModules.SELL, sell);
+        Map<String, Double> o = Map.of("min", minRatio, "tp", tp, "sl", sl);
         List<Map<String, Object>> trades = new ArrayList<>();
         List<String> days;
         try (Connection c = connect()) {
@@ -262,8 +266,7 @@ public final class Ticks {
                     for (java.util.Iterator<Map.Entry<Object, Map<String, Object>>> it = held.entrySet().iterator(); it.hasNext(); ) {
                         Map.Entry<Object, Map<String, Object>> e = it.next();
                         double px = now.containsKey(e.getKey()) ? num(now.get(e.getKey()).get(2)) : 0;
-                        double buy = (double) e.getValue().get("buyPrice");
-                        String hit = tp > 0 && px >= buy * (1 + tp / 100) ? "익절" : sl > 0 && px > 0 && px <= buy * (1 - sl / 100) ? "손절" : null;
+                        String hit = px > 0 ? sellRule.check(e.getValue(), px, o) : null;
                         if (hit != null) {
                             e.getValue().put("sellAt", t);
                             e.getValue().put("sellPrice", px);
@@ -285,8 +288,9 @@ public final class Ticks {
                         double px = num(r.get(2));
                         double pv = prev.containsKey(r.get(0)) ? num(prev.get(r.get(0)).get(4)) : 0;
                         double ch = num(r.get(3));
-                        if (bought.contains(r.get(0)) || pv <= 0 || px <= 0 || !(ch > 0 && ch < 29.5) || spac && Values.str(r.get(1)).contains("스팩")
-                                || (num(r.get(4)) / pv - 1) * 100 < minRatio || !(px > opens.getOrDefault(r.get(0), px)) || amount < px) {
+                        if (bought.contains(r.get(0)) || pv <= 0 || px <= 0 || ch >= 29.5 || spac && Values.str(r.get(1)).contains("스팩") || amount < px
+                                || !buyRule.test(Map.of("price", px, "change", ch, "ratio", (num(r.get(4)) / pv - 1) * 100,
+                                "open", opens.getOrDefault(r.get(0), px)), o)) {
                             since.remove(r.get(0));
                             continue;
                         }
@@ -300,7 +304,7 @@ public final class Ticks {
                         tr.put("code", r.get(0));
                         tr.put("name", r.get(1));
                         tr.put("since", start);
-                        tr.put("open", opens.get(r.get(0)));
+                        tr.put("open", opens.getOrDefault(r.get(0), px));  // 첫 기록에 없던 종목은 지금 값
                         tr.put("buyAt", t);
                         tr.put("buyPrice", px);
                         tr.put("qty", (long) Math.floor(amount / px));

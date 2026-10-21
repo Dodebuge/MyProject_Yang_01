@@ -176,7 +176,9 @@ public class AppServlet extends HttpServlet {
         apis.put("/api/kosdaq-intraday", req -> volume.ticks.intraday(param(req, "date", ""), param(req, "at", "")));
         apis.put("/api/kosdaq-sim", req -> volume.ticks.simulate(Double.parseDouble(param(req, "min", "100")), Double.parseDouble(param(req, "amount", "300000")),
                 Double.parseDouble(param(req, "tp", "0")), Double.parseDouble(param(req, "sl", "0")), param(req, "until", "15:00"),
-                Double.parseDouble(param(req, "cost", "0.23")), !"0".equals(param(req, "spac", "1")), Integer.parseInt(param(req, "hold", "30"))));
+                Double.parseDouble(param(req, "cost", "0.23")), !"0".equals(param(req, "spac", "1")), Integer.parseInt(param(req, "hold", "30")),
+                param(req, "buy", "volume-open-up"), param(req, "sell", "tp-sl")));
+        apis.put("/api/kosdaq-sim-modules", req -> SimModules.catalog());
         apis.put("/api/trader", req -> trader.status());
         apis.put("/api/alerts", req -> alerts.recent(Long.parseLong(param(req, "since", "0"))));
         apis.put("/api/russell-volume", req -> russell.query(refresh(req)));
