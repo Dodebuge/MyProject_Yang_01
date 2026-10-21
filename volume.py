@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import date, datetime, timedelta, tzinfo
 from datetime import time as dtime
+from statistics import median
 from pathlib import Path
 from typing import Callable
 
@@ -243,10 +244,25 @@ class Ticks:
                     cache[k] = {r[0]: r for r in json.loads(row[0])}
                 return cache[k]
 
+            def clean(day: str) -> None:
+                """현재가·등락률로 역산한 전일 종가가 그날 중앙값과 2% 넘게 다른 기록은 잘못 받은 값으로 보고 뺌
+                (KB가 가끔 자릿수가 빠진 현재가를 줌: 6220 → 709 → 6510, 등락률은 그대로)."""
+                recs = [load(day, t) for t in slots[day]]
+                base: dict[str, list[float]] = {}
+                for rec in recs:
+                    for c, r in rec.items():
+                        if num(r[2]):
+                            base.setdefault(c, []).append(num(r[2]) / (1 + num(r[3]) / 100))
+                mid = {c: median(v) for c, v in base.items()}  # ponytail: 그날 전체 중앙값(데이터 정리용), 하루 대부분이 깨진 종목은 못 거름
+                for rec in recs:
+                    for c in [c for c, r in rec.items() if num(r[2]) and abs(num(r[2]) / (1 + num(r[3]) / 100) / mid[c] - 1) > 0.02]:
+                        del rec[c]
+
             trades, days = [], list(slots)
             for p, d in zip(days, days[1:]):
                 for k in [k for k in cache if k[:10] < p]:
                     del cache[k]
+                clean(d)
                 held, bought, since = {}, set(), {}  # since: 조건을 연속으로 만족하기 시작한 기록 시각
                 opens = {c: num(r[2]) for c, r in load(d, slots[d][0]).items()}  # 첫 기록 현재가 = 시가로 봄
                 for i, t in enumerate(slots[d]):
@@ -365,7 +381,7 @@ if __name__ == "__main__":
             "09:30": [("A", 1010, 1.0, 200), ("B", 1010, 1.0, 200), ("C", 2010, -1.0, 200), ("D스팩", 1010, 1.0, 200), ("E", 1010, 1.0, 100)],
             "10:00": [("A", 1020, 2.0, 300), ("B", 990, 1.0, 300), ("C", 2010, 1.0, 300), ("D스팩", 1020, 2.0, 300), ("E", 1020, 2.0, 100)],
             "10:30": [("A", 1080, 8.0, 400), ("B", 1010, 1.0, 400), ("C", 2020, 1.0, 400), ("D스팩", 1020, 2.0, 400), ("E", 1030, 3.0, 100)],
-            "15:40": [("A", 900, 1.0, 500), ("B", 1010, 1.0, 500), ("C", 1900, 1.0, 500), ("D스팩", 1000, 1.0, 500), ("E", 1030, 3.0, 100)]}
+            "15:40": [("A", 900, -10.0, 500), ("B", 1010, 1.0, 500), ("C", 1900, -4.5, 500), ("D스팩", 1000, 1.0, 500), ("E", 1030, 3.0, 100)]}
     for hm, rs in days.items():
         s.save(f"2026-10-15T{hm}", [row(c, 1, 0, 100) for c, *_ in rs])
         s.save(f"2026-10-16T{hm}", [row(*x) for x in rs])
@@ -380,6 +396,12 @@ if __name__ == "__main__":
     assert [(x["code"], x["sellAt"], x["reason"]) for x in s.simulate(min_ratio=40, sl=5, cost=0, sell="trailing")["trades"]] == [
         ("A", "15:40", "고점 대비 손절"), ("C", "15:40", "고점 대비 손절")]
     assert sim_modules.catalog()["buy"][0]["id"] == "volume-open-up"
+    # 자릿수가 빠진 현재가(09:30 100원, 등락률은 그대로)는 빼고 10:00에 1010원으로 삼 (안 빼면 100원에 사서 큰 수익으로 보임)
+    g = Ticks("시험", Path(tempfile.mkdtemp()) / "g.db", "g_tick", KST, 5, dtime(9, 0), dtime(15, 40), lambda c, a: [])
+    for hm, px, v in [("09:00", 1000, 100), ("09:30", 100, 200), ("10:00", 1010, 300), ("15:40", 1010, 400)]:
+        g.save(f"2026-10-15T{hm}", [row("G", 1, 0, 100)])
+        g.save(f"2026-10-16T{hm}", [row("G", px, 1.0 if px != 1000 else 0.0, v)])
+    assert [(x["buyAt"], x["buyPrice"]) for x in g.simulate(min_ratio=40, hold=0, buy="volume-up")["trades"]] == [("10:00", 1010)]
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()

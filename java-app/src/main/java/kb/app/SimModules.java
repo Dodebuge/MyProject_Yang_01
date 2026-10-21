@@ -37,6 +37,7 @@ final class SimModules {
         BUY.put("volume-open-up", new Module<Buy>("거래량 증가 + 시가 위 + 상승",
                 (s, o) -> s.get("ratio") >= o.get("min") && s.get("price") > s.get("open") && s.get("change") > 0));
         BUY.put("volume-up", new Module<Buy>("거래량 증가 + 상승 (시가 무시)", (s, o) -> s.get("ratio") >= o.get("min") && s.get("change") > 0));
+        BUY.put("surge", new Module<Buy>("급등 초입: 거래량 500%↑ + 등락 5~15%", (s, o) -> s.get("ratio") >= 500 && s.get("change") >= 5 && s.get("change") < 15));
         SELL.put("tp-sl", new Module<Sell>("익절·손절, 아니면 마지막 기록", SimModules::tpSl));
         SELL.put("trailing", new Module<Sell>("익절 · 고점 대비 손절(추적), 아니면 마지막 기록", SimModules::trailing));
     }

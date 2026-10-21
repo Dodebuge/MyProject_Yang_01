@@ -255,6 +255,7 @@ public final class Ticks {
                 String d = days.get(di);
                 cache.keySet().removeIf(k -> k.substring(0, 10).compareTo(p) < 0);
                 List<String> today = slots.get(d);
+                clean(c, cache, d, today);
                 Map<Object, Map<String, Object>> held = new LinkedHashMap<>();
                 java.util.Set<Object> bought = new java.util.HashSet<>();
                 Map<Object, String> since = new HashMap<>();  // 조건을 연속으로 만족하기 시작한 기록 시각
@@ -368,6 +369,37 @@ public final class Ticks {
         m.put("pnl", pnl);
         m.put("ret", inv > 0 ? (Object) (Math.round((double) pnl / inv * 10000) / 100.0) : null);
         return m;
+    }
+
+    /**
+     * 현재가·등락률로 역산한 전일 종가가 그날 중앙값과 2% 넘게 다른 기록은 잘못 받은 값으로 보고 뺌
+     * (KB가 가끔 자릿수가 빠진 현재가를 줌: 6220 → 709 → 6510, 등락률은 그대로). volume.py Ticks.simulate clean과 같음.
+     */
+    private void clean(Connection c, Map<String, Map<Object, List<Object>>> cache, String day, List<String> times) throws SQLException {
+        List<Map<Object, List<Object>>> recs = new ArrayList<>();
+        Map<Object, List<Double>> bases = new HashMap<>();
+        for (String t : times) {
+            Map<Object, List<Object>> rec = byCode(c, cache, day + "T" + t);
+            recs.add(rec);
+            rec.forEach((code, r) -> {
+                if (num(r.get(2)) > 0) {
+                    bases.computeIfAbsent(code, k -> new ArrayList<>()).add(base(r));
+                }
+            });
+        }
+        Map<Object, Double> mid = new HashMap<>();
+        bases.forEach((code, v) -> {
+            java.util.Collections.sort(v);
+            int n = v.size();
+            mid.put(code, n % 2 == 1 ? v.get(n / 2) : (v.get(n / 2 - 1) + v.get(n / 2)) / 2);
+        });
+        for (Map<Object, List<Object>> rec : recs) {
+            rec.entrySet().removeIf(e -> num(e.getValue().get(2)) > 0 && Math.abs(base(e.getValue()) / mid.get(e.getKey()) - 1) > 0.02);
+        }
+    }
+
+    private static double base(List<Object> r) {
+        return num(r.get(2)) / (1 + num(r.get(3)) / 100);
     }
 
     private Map<Object, List<Object>> byCode(Connection c, Map<String, Map<Object, List<Object>>> cache, String at) throws SQLException {

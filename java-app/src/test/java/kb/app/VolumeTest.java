@@ -104,7 +104,7 @@ class VolumeTest {
                 {{"09:30"}, {1010, 1.0, 200}, {1010, 1.0, 200}, {2010, -1.0, 200}, {1010, 1.0, 200}, {1010, 1.0, 100}},
                 {{"10:00"}, {1020, 2.0, 300}, {990, 1.0, 300}, {2010, 1.0, 300}, {1020, 2.0, 300}, {1020, 2.0, 100}},
                 {{"10:30"}, {1080, 8.0, 400}, {1010, 1.0, 400}, {2020, 1.0, 400}, {1020, 2.0, 400}, {1030, 3.0, 100}},
-                {{"15:40"}, {900, 1.0, 500}, {1010, 1.0, 500}, {1900, 1.0, 500}, {1000, 1.0, 500}, {1030, 3.0, 100}}};
+                {{"15:40"}, {900, -10.0, 500}, {1010, 1.0, 500}, {1900, -4.5, 500}, {1000, 1.0, 500}, {1030, 3.0, 100}}};
         for (Object[][] t : at) {
             List<List<Object>> prev = new ArrayList<>();
             List<List<Object>> rows = new ArrayList<>();
@@ -137,5 +137,20 @@ class VolumeTest {
                 .forEach(x -> sold.add(x.get("code") + " " + x.get("sellAt") + " " + x.get("reason")));
         assertEquals(List.of("A 15:40 고점 대비 손절", "C 15:40 고점 대비 손절"), sold);
         assertThrows(IllegalArgumentException.class, () -> v.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "nope", "tp-sl"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void simulateDropsPriceThatDoesNotMatchChange() throws Exception {
+        // 자릿수가 빠진 현재가(09:30 100원, 등락률은 그대로)는 빼고 10:00에 1010원으로 삼 (volume.py 자체 점검과 같음)
+        Ticks g = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("glitch").resolve("kosdaq.db")).ticks;
+        Object[][] at = {{"09:00", 1000, 0.0, 100}, {"09:30", 100, 1.0, 200}, {"10:00", 1010, 1.0, 300}, {"15:40", 1010, 1.0, 400}};
+        for (Object[] x : at) {
+            g.save("2026-10-15T" + x[0], List.of(Arrays.<Object>asList("G", "G", 1, 0, 100, 0)));
+            g.save("2026-10-16T" + x[0], List.of(Arrays.<Object>asList("G", "G", x[1], x[2], x[3], 0)));
+        }
+        List<Map<String, Object>> ts = (List<Map<String, Object>>) g.simulate(40, 300_000, 0, 0, "15:00", 0, true, 0, "volume-up", "tp-sl").get("trades");
+        assertEquals(List.of("10:00 1010.0"), List.of(ts.get(0).get("buyAt") + " " + ts.get(0).get("buyPrice")));
+        assertEquals(1, ts.size());
     }
 }
