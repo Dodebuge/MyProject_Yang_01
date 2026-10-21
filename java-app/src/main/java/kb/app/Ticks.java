@@ -236,6 +236,26 @@ public final class Ticks {
     Map<String, Object> simulate(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac, int hold,
                                  String buy, String sell, String start, int maxHold, int maxBuys,
                                  Map<String, Map<String, String>> allowed) throws IOException {
+        return run(minRatio, amount, tp, sl, until, cost, spac, hold, buy, sell, start, maxHold, maxBuys, allowed, false);
+    }
+
+    /**
+     * 자동매매용 (Trader 시뮬레이션 전략): 마지막 두 기록일로 같은 규칙을 돌려, 오늘(마지막 기록일)의 마지막 기록 시각에
+     * 새로 살 종목과 팔 종목. 장중이라 마지막 기록에서도 사고, '마지막 기록' 매도는 하지 않음 (장마감 매도는 Trader가 함).
+     * p: 시뮬레이션 화면 값 {min, amount, tp, sl, until, spac, hold, buy, sell, start, maxHold, maxBuys}
+     * -> {date, at, every(기록 간격 분), buy: [{code, name, price}], sell: {종목: 이유}}
+     */
+    Map<String, Object> live(Map<String, Object> p, Map<String, Map<String, String>> allowed) throws IOException {
+        return run(Values.num(p.getOrDefault("min", 100)), Values.num(p.get("amount")), Values.num(p.getOrDefault("tp", 0)),
+                Values.num(p.getOrDefault("sl", 0)), Values.str(p.getOrDefault("until", "15:00")), 0, !Boolean.FALSE.equals(p.get("spac")),
+                (int) Values.num(p.getOrDefault("hold", 30)), Values.str(p.getOrDefault("buy", "volume-open-up")), Values.str(p.getOrDefault("sell", "tp-sl")),
+                Values.str(p.getOrDefault("start", "")), (int) Values.num(p.getOrDefault("maxHold", 0)), (int) Values.num(p.getOrDefault("maxBuys", 0)),
+                allowed, true);
+    }
+
+    private Map<String, Object> run(double minRatio, double amount, double tp, double sl, String until, double cost, boolean spac, int hold,
+                                    String buy, String sell, String start, int maxHold, int maxBuys,
+                                    Map<String, Map<String, String>> allowed, boolean live) throws IOException {
         if (amount <= 0 || hold < 0 || maxHold < 0 || maxBuys < 0 || until.length() != 5 || until.charAt(2) != ':'
                 || !start.isEmpty() && (start.length() != 5 || start.charAt(2) != ':')) {
             throw new IllegalArgumentException("매수 금액·시각·유지 시간이 올바르지 않습니다");
@@ -245,6 +265,7 @@ public final class Ticks {
         Map<String, Double> o = Map.of("min", minRatio, "tp", tp, "sl", sl);
         List<Map<String, Object>> trades = new ArrayList<>();
         List<String> days;
+        String liveAt = null;  // live: 오늘 마지막 기록 시각
         try (Connection c = connect()) {
             Map<String, List<String>> slots = new LinkedHashMap<>();
             try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery("SELECT at FROM " + table + " ORDER BY at")) {
@@ -255,7 +276,7 @@ public final class Ticks {
             }
             days = new ArrayList<>(slots.keySet());
             Map<String, Map<Object, List<Object>>> cache = new HashMap<>();  // 하루 앞까지만 들고 있음 (14일 전부 올리면 수백 MB)
-            for (int di = 1; di < days.size(); di++) {
+            for (int di = live ? Math.max(1, days.size() - 1) : 1; di < days.size(); di++) {
                 String p = days.get(di - 1);
                 String d = days.get(di);
                 cache.keySet().removeIf(k -> k.substring(0, 10).compareTo(p) < 0);
@@ -289,7 +310,7 @@ public final class Ticks {
                             before = s;
                         }
                     }
-                    if (t.compareTo(until) > 0 || t.compareTo(start) < 0 || i == today.size() - 1 || before == null) {
+                    if (t.compareTo(until) > 0 || t.compareTo(start) < 0 || !live && i == today.size() - 1 || before == null) {
                         continue;
                     }
                     Map<Object, List<Object>> prev = byCode(c, cache, p + "T" + before);
@@ -339,6 +360,10 @@ public final class Ticks {
                     }
                 }
                 String lastAt = today.get(today.size() - 1);
+                if (live) {
+                    liveAt = lastAt;
+                    continue;
+                }
                 Map<Object, List<Object>> last = byCode(c, cache, d + "T" + lastAt);
                 for (Map.Entry<Object, Map<String, Object>> e : held.entrySet()) {  // 익절·손절 없으면 그날 마지막 기록에 팜 (값이 없으면 산 값)
                     e.getValue().put("sellAt", lastAt);
@@ -348,6 +373,29 @@ public final class Ticks {
             }
         } catch (SQLException e) {
             throw new IOException(db.getFileName() + " 저장소 오류: " + e.getMessage(), e);
+        }
+        if (live) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            List<Map<String, Object>> buys = new ArrayList<>();
+            Map<String, String> sells = new LinkedHashMap<>();
+            for (Map<String, Object> tr : trades) {
+                if (liveAt.equals(tr.get("buyAt"))) {
+                    Map<String, Object> b = new LinkedHashMap<>();
+                    b.put("code", Values.str(tr.get("code")));
+                    b.put("name", Values.str(tr.get("name")));
+                    b.put("price", tr.get("buyPrice"));
+                    buys.add(b);
+                }
+                if (liveAt.equals(tr.get("sellAt"))) {
+                    sells.put(Values.str(tr.get("code")), Values.str(tr.get("reason")));
+                }
+            }
+            out.put("date", liveAt == null ? null : days.get(days.size() - 1));
+            out.put("at", liveAt);
+            out.put("every", minutes);
+            out.put("buy", buys);
+            out.put("sell", sells);
+            return out;
         }
         for (Map<String, Object> tr : trades) {
             long qty = (long) tr.get("qty");

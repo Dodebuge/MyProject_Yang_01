@@ -49,6 +49,10 @@ import java.util.function.Supplier;
  *     (미장 연동 종목은 '장마감 전량 매도'를 끄면 팔지 않고 보유, 다음 날부터도 익절·손절만)
  *   - 꺼도 이미 산 종목의 익절·손절·장마감 매도는 계속 (켜고 끄는 건 새 매수만)
  *   - 서버가 꺼져 있어 전날 못 판 종목은 다음 장 시작 후 바로 매도
+ *   - 시뮬레이션 전략 (모니터 화면 '매수 시뮬레이션'의 실제 자동매매, 따로 켜고 끔): 코스닥(KR) 또는 러셀 2000(US) 새 기록마다
+ *     시뮬레이션 엔진(Ticks.live)을 오늘 기록으로 돌려, 그 시각에 산다고 나온 종목을 시장가 매수하고 판다고 나온 보유분을 매도.
+ *     투자 금액 = 하루 최대 매수 합계, 종목당 금액 = 투자 금액 ÷ 하루 최대 종목 수. 익절 %·손절 %(tp-sl 모듈)는 5초마다도 확인.
+ *     위의 최대 매수금액·종목 수·지수 조건과 따로 셈. 기록이 늦으면(기록 간격 + 10분) 주문하지 않음
  * 안전장치:
  *   - 같은 종목은 시장별 하루 한 번만 매수 (trader.db UNIQUE)
  *   - 주문마다 clientOrderId(멱등성 키): 응답을 못 받아 다시 보내도 두 번 체결되지 않음 (10분 안)
@@ -57,6 +61,11 @@ import java.util.function.Supplier;
  * 5초마다 확인합니다 (시세 1번 + 체결 확인). 토스 장 운영 정보(/market-calendar)로 휴장·장 시간을 알아냅니다.
  */
 final class Trader {
+
+    /** 시뮬레이션 전략의 신호 (Ticks.live): 시장 KR|US, 시뮬레이션 화면 값 -> {date, at, every, buy: [{code, name, price}], sell: {종목: 이유}} */
+    interface Strategy {
+        Map<String, Object> live(String market, Map<String, Object> params) throws IOException;
+    }
 
     /** 토스 API (TossClient). 시험은 가짜로 바꿔 끼웁니다. */
     interface Api {
@@ -70,6 +79,8 @@ final class Trader {
     static final Map<String, String[]> INDEX = Map.of("KR", new String[]{"229200", "코스닥"}, "US", new String[]{"IWM", "러셀 2000"});
     static final int TICK_SECONDS = 5;
     static final String PAIR = "미장 연동";       // 미장 연동 매수의 source
+    static final String SIM = "시뮬레이션";       // 시뮬레이션 전략 매수의 source
+    static final int SIM_CHECK_SECONDS = 30;      // 시뮬레이션 신호 확인 간격 (새 기록은 5분·30분마다)
     static final int PAIR_WINDOW_MINUTES = 30;   // 코스피 장 시작 후 몇 분 안에만 미장 연동 매수 (서버가 늦게 켜져 오후에 사지 않게)
     static final int CUTOFF_MINUTES = 10;            // 정규장 마감 몇 분 전에 전량 매도·매수 중단
     static final int ACCOUNT_SECONDS = 30;           // 화면의 토스 계좌 금액 갱신 간격
@@ -103,6 +114,11 @@ final class Trader {
     private final Map<String, Double> prevClose = new ConcurrentHashMap<>();   // "KR:2026-10-19" -> 지수 ETF 전일 종가 (하루 한 번 받음)
     private final Map<String, Map<String, Object>> pairChecks = new ConcurrentHashMap<>();  // "NVDA" -> 직전 미장 종가 비교 (미장 날짜·마감 여부가 바뀌면 다시)
     private volatile String pairPhase = "확인 전";
+    private volatile String simPhase = "확인 전";
+    private volatile long simCheckedAt;
+    private volatile String simDoneAt;  // 이미 처리한 기록 'KR 2026-10-21 10:05'
+    /** 시뮬레이션 전략 신호 (서버가 코스닥·러셀 기록으로 연결). null이면 시뮬레이션 전략은 대기만 */
+    volatile Strategy strategy;
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
@@ -186,6 +202,12 @@ final class Trader {
         pair.put("up", etf("069500", "KODEX 200"));          // 미국 티커가 모두 상승이면 살 종목
         pair.put("inverse", etf("114800", "KODEX 인버스"));  // 모두 하락이면 살 종목
         c.put("pair", pair);
+        Map<String, Object> sim = new LinkedHashMap<>();
+        sim.put("enabled", false);   // 시뮬레이션 전략 실제 매매 (위 enabled·pair와 따로)
+        sim.put("market", "KR");     // KR(코스닥 기록) | US(러셀 2000 기록)
+        sim.put("budget", 0.0);      // 투자 금액 = 하루 최대 매수 합계 (KR 원, US 달러)
+        sim.put("params", new LinkedHashMap<>());  // 시뮬레이션 화면 값 (simParams)
+        c.put("sim", sim);
         return c;
     }
 
@@ -307,13 +329,77 @@ final class Trader {
                 dst.put(k, e);
             }
         }
+        if (in.get("sim") instanceof Map) {
+            Map<String, Object> src = (Map<String, Object>) in.get("sim");
+            Map<String, Object> dst = (Map<String, Object>) c.get("sim");
+            if (src.containsKey("market")) {
+                market(Values.str(src.get("market")));
+                dst.put("market", Values.str(src.get("market")));
+            }
+            if (src.containsKey("budget")) {
+                double v = number(src.get("budget"), "투자 금액");
+                if (v < 0) {
+                    throw new IllegalArgumentException("투자 금액은 0 이상이어야 합니다.");
+                }
+                dst.put("budget", v);
+            }
+            if (src.get("params") instanceof Map) {
+                dst.put("params", simParams((Map<String, Object>) src.get("params")));
+            }
+            if (src.containsKey("enabled")) {
+                dst.put("enabled", Boolean.TRUE.equals(src.get("enabled")));
+            }
+            if (Boolean.TRUE.equals(dst.get("enabled"))) {
+                if (Values.num(dst.get("budget")) <= 0) {
+                    throw new IllegalArgumentException("투자 금액을 넣어 주세요.");
+                }
+                simParams((Map<String, Object>) dst.get("params"));  // 켤 때 저장된 값도 다시 검사
+            }
+        }
         try (Connection con = connect();
              PreparedStatement ps = con.prepareStatement("INSERT OR REPLACE INTO trader_config (k, v) VALUES ('config', ?)")) {
             ps.setString(1, GSON.toJson(c));
             ps.executeUpdate();
         }
         log("ALL", "설정 저장: " + (Boolean.TRUE.equals(c.get("enabled")) ? "켜짐" : "꺼짐") + " · 익절 " + c.get("takeProfit")
-                + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US") + " · 미장 연동 " + c.get("pair"));
+                + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US") + " · 미장 연동 " + c.get("pair")
+                + " · 시뮬레이션 " + c.get("sim"));
+    }
+
+    /** 시뮬레이션 화면 값 검사 (Ticks.live에 그대로 넘김). 하루 최대 종목 수는 1~50: 종목당 금액 = 투자 금액 ÷ 이 값 */
+    static Map<String, Object> simParams(Map<String, Object> in) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        for (String k : new String[]{"buy", "sell"}) {
+            String v = Values.str(in.getOrDefault(k, "buy".equals(k) ? "volume-open-up" : "tp-sl"));
+            if ("buy".equals(k)) {  // 없는 모듈이면 IllegalArgumentException
+                SimModules.pick(SimModules.BUY, v);
+            } else {
+                SimModules.pick(SimModules.SELL, v);
+            }
+            p.put(k, v);
+        }
+        String[][] nums = {{"min", "거래량 기준"}, {"hold", "유지 시간"}, {"tp", "익절 %"}, {"sl", "손절 %"}, {"maxHold", "최대 보유 시간"}, {"maxBuys", "하루 최대 종목 수"}};
+        for (String[] k : nums) {
+            double v = number(in.getOrDefault(k[0], "maxBuys".equals(k[0]) ? 5 : 0), k[1]);
+            if (v < 0 && !"min".equals(k[0])) {
+                throw new IllegalArgumentException(k[1] + " 값은 0 이상이어야 합니다: " + v);
+            }
+            p.put(k[0], v);
+        }
+        double mb = Values.num(p.get("maxBuys"));
+        if (mb < 1 || mb > 50 || mb != Math.rint(mb)) {
+            throw new IllegalArgumentException("실제 자동매매는 하루 최대 종목 수를 1~50으로 넣어 주세요 (종목당 금액 = 투자 금액 ÷ 종목 수).");
+        }
+        for (String k : new String[]{"until", "start"}) {
+            String v = Values.str(in.getOrDefault(k, "until".equals(k) ? "15:00" : "")).trim();
+            if (!(v.isEmpty() && "start".equals(k)) && !v.matches("([01][0-9]|2[0-3]):[0-5][0-9]")) {
+                throw new IllegalArgumentException(("until".equals(k) ? "매수 마감" : "매수 시작") + " 시각이 올바르지 않습니다: " + v);
+            }
+            p.put(k, v);
+        }
+        p.put("spac", !Boolean.FALSE.equals(in.get("spac")));
+        p.put("alerts", Boolean.TRUE.equals(in.get("alerts")));
+        return p;
     }
 
     /**
@@ -321,7 +407,14 @@ final class Trader {
      * 산 뒤에 설정 종목을 바꿔 맞는 것이 없으면 자동매매 화면의 % (tp, sl).
      */
     @SuppressWarnings("unchecked")
-    private static double[] limits(Map<String, Object> p, Map<String, Object> pc, double tp, double sl) {
+    private static double[] limits(Map<String, Object> p, Map<String, Object> pc, Map<String, Object> sc, double tp, double sl) {
+        if (SIM.equals(p.get("source"))) {  // 시뮬레이션 화면의 익절·손절 % (0이면 안 함, 손절은 tp-sl 모듈일 때만: 추적 손절은 기록마다 신호로)
+            Map<String, Object> sp = (Map<String, Object>) sc.get("params");
+            double stp = Values.num(sp.get("tp"));
+            double ssl = Values.num(sp.get("sl"));
+            return new double[]{stp > 0 ? stp / 100 : Double.POSITIVE_INFINITY,
+                    "tp-sl".equals(sp.get("sell")) && ssl > 0 ? ssl / 100 : Double.POSITIVE_INFINITY};
+        }
         if (PAIR.equals(p.get("source"))) {
             for (String k : new String[]{"up", "inverse"}) {
                 Map<String, Object> e = (Map<String, Object>) pc.get(k);
@@ -566,7 +659,7 @@ final class Trader {
                 continue;
             }
             double r = price / avg - 1;
-            double[] limit = limits(p, pc, tp, sl);
+            double[] limit = limits(p, pc, (Map<String, Object>) cfg.get("sim"), tp, sl);
             if (r >= limit[0]) {
                 sell(m, p, "익절 " + pct(r));
             } else if (r <= -limit[1]) {
@@ -576,6 +669,7 @@ final class Trader {
         if ("KR".equals(m)) {
             buyWatch(s, now, pc);
         }
+        simTick(m, s, cfg);
         if (!Boolean.TRUE.equals(cfg.get("enabled"))) {
             return;
         }
@@ -604,8 +698,8 @@ final class Trader {
             if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
                 continue;  // 오늘 이미 샀거나 시도함
             }
-            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source <> ?",
-                    m, s.day, PAIR);  // 미장 연동은 따로 셈
+            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'"
+                    + " AND source NOT IN (?, ?)", m, s.day, PAIR, SIM);  // 미장 연동·시뮬레이션은 따로 셈
             double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
             if (today.size() >= maxStocks || spent >= budget) {
                 waiting = "매매 중 · " + (today.size() >= maxStocks ? "오늘 최대 종목 수(" + maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
@@ -633,6 +727,98 @@ final class Trader {
             buy(m, s.day, c, qty, qty * price);
         }
         setPhase(m, waiting);
+    }
+
+    /**
+     * 시뮬레이션 전략: SIM_CHECK_SECONDS마다 신호(Ticks.live)를 받아, 새 기록 시각이면 판다는 보유분을 매도하고 산다는 종목을 매수.
+     * 같은 기록은 한 번만, 같은 종목은 하루 한 번 (trader_position UNIQUE). 오늘 기록이 아니거나 늦으면 주문하지 않음.
+     */
+    @SuppressWarnings("unchecked")
+    private void simTick(String m, Session s, Map<String, Object> cfg) throws SQLException, IOException {
+        Map<String, Object> sc = (Map<String, Object>) cfg.get("sim");
+        if (!Boolean.TRUE.equals(sc.get("enabled")) || !m.equals(sc.get("market"))) {
+            return;
+        }
+        if (strategy == null) {
+            setSimPhase(m, "이 서버에 코스닥·러셀 기록이 연결되지 않아 대기");
+            return;
+        }
+        long t = now().toInstant().toEpochMilli();
+        if (t - simCheckedAt < SIM_CHECK_SECONDS * 1000L) {
+            return;
+        }
+        simCheckedAt = t;
+        double budget = Values.num(sc.get("budget"));
+        Map<String, Object> p = new LinkedHashMap<>((Map<String, Object>) sc.get("params"));
+        int maxBuys = (int) Values.num(p.get("maxBuys"));
+        if (budget <= 0 || maxBuys < 1) {
+            setSimPhase(m, "투자 금액·하루 최대 종목 수가 없어 대기");
+            return;
+        }
+        p.put("amount", budget / maxBuys);  // 엔진도 종목당 금액보다 비싼 종목은 뺌
+        Map<String, Object> sig = strategy.live(m, p);
+        String at = Values.str(sig.get("at"));
+        if (!s.day.equals(sig.get("date"))) {
+            setSimPhase(m, "매매 중 · 오늘 기록이 아직 없음 (" + ("KR".equals(m) ? "코스닥 5분" : "러셀 2000 30분") + " 기록을 기다림)");
+            return;
+        }
+        ZonedDateTime local = now().withZoneSameInstant("KR".equals(m) ? SEOUL : ZoneId.of("America/New_York"));
+        int late = local.getHour() * 60 + local.getMinute() - (Integer.parseInt(at.substring(0, 2)) * 60 + Integer.parseInt(at.substring(3, 5)));
+        if (late > Values.num(sig.get("every")) + 10) {
+            setSimPhase(m, "매매 중 · 마지막 기록(" + at + ")이 " + late + "분 전이라 주문하지 않음 (기록이 멈췄는지 확인)");
+            return;
+        }
+        String key = m + " " + s.day + " " + at;
+        if (key.equals(simDoneAt)) {
+            return;
+        }
+        simDoneAt = key;
+        Map<String, Object> sells = map(sig.get("sell"));
+        int sold = 0;
+        for (Map<String, Object> pos : rows("SELECT * FROM trader_position WHERE market = ? AND status = 'OPEN' AND source = ? ORDER BY id", m, SIM)) {
+            Object why = sells.get(Values.str(pos.get("symbol")));
+            if (why != null) {
+                sell(m, pos, "시뮬레이션 " + why);
+                sold++;
+            }
+        }
+        int bought = 0;
+        String note = "";
+        for (Object o : sig.get("buy") instanceof List ? (List<Object>) sig.get("buy") : new ArrayList<>()) {
+            Map<String, Object> b = map(o);
+            String[] c = {Values.str(b.get("code")).trim().toUpperCase(), Values.str(b.get("name")), SIM};
+            if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
+                continue;  // 오늘 이미 샀거나 시도함 (다른 출처 포함)
+            }
+            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?",
+                    m, s.day, SIM);
+            double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
+            if (today.size() >= maxBuys || spent >= budget) {
+                note = " · 오늘 " + (today.size() >= maxBuys ? "최대 종목 수(" + maxBuys + ")" : "투자 금액") + "를 다 써서 남은 신호는 사지 않음";
+                break;
+            }
+            double amount = Math.min(budget / maxBuys, budget - spent);
+            Double price = prices(m, c[0]).get(c[0]);
+            if (price == null || price <= 0) {
+                failed(m, s.day, c, "현재가를 받지 못함 (토스에 없는 종목일 수 있음)");
+                continue;
+            }
+            long qty = (long) Math.floor(amount / price);
+            if (qty < 1) {
+                failed(m, s.day, c, "1주 가격(" + price + ")이 종목당 금액(" + round(amount) + ")보다 큼");
+                continue;
+            }
+            buy(m, s.day, c, qty, qty * price);
+            bought++;
+        }
+        setSimPhase(m, "매매 중 · 마지막 기록 " + at + " · 이번 매수 " + bought + " · 매도 " + sold + note);
+    }
+
+    private void setSimPhase(String m, String text) {
+        if (!text.equals(simPhase)) {
+            simPhase = text;
+            log(m, "시뮬레이션: " + text);
+        }
     }
 
     private List<String> watchList() throws SQLException {
@@ -1133,7 +1319,7 @@ final class Trader {
                 x.put("cutoff", s == null || s.close == null ? null : s.close.minusMinutes(CUTOFF_MINUTES).format(AT));
                 x.put("close", s == null || s.close == null ? null : s.close.format(AT));
                 List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'"
-                        + " AND source <> ?", m, day, PAIR);  // 미장 연동은 따로 셈
+                        + " AND source NOT IN (?, ?)", m, day, PAIR, SIM);  // 미장 연동·시뮬레이션은 따로 셈
                 x.put("spent", today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum());
                 x.put("count", today.size());
                 x.put("halted", getFlag("halt:" + m + ":" + day) != null);
@@ -1160,6 +1346,18 @@ final class Trader {
             out.put("watch", watch);
             out.put("pairPhase", api == null ? "토스 미설정" : leader ? pairPhase : "다른 서버가 주문 중이거나 확인 전");
             out.put("pairWindowMinutes", PAIR_WINDOW_MINUTES);
+            Map<String, Object> sc = (Map<String, Object>) ((Map<String, Object>) out.get("config")).get("sim");
+            String sm = Values.str(sc.get("market"));
+            List<Map<String, Object>> simToday = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?",
+                    sm, todayKey(sm), SIM);
+            Map<String, Object> simOut = new LinkedHashMap<>();
+            simOut.put("phase", api == null ? "토스 미설정" : !Boolean.TRUE.equals(sc.get("enabled")) ? "꺼짐 (새 매수 없음, 산 종목은 익절·손절·장마감 매도)"
+                    : leader ? simPhase : "다른 서버가 주문 중이거나 확인 전");
+            simOut.put("day", todayKey(sm));
+            simOut.put("spent", simToday.stream().mapToDouble(r -> Values.num(r.get("est"))).sum());
+            simOut.put("count", simToday.size());
+            simOut.put("connected", strategy != null);
+            out.put("sim", simOut);
             // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
             List<Map<String, Object>> history = rows("SELECT id, market, day, symbol, name, source, status, qty, avg, amount, est, bought,"
                     + " sell_qty, sell_avg, reason, closed FROM trader_position WHERE bought IS NOT NULL ORDER BY bought DESC, id DESC LIMIT 500");

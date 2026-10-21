@@ -690,4 +690,83 @@ class TraderTest {
         assertFalse(Trader.fmtQty(2.0).contains("."));
         assertEquals("0.5", Trader.fmtQty(0.5));
     }
+
+    // ------------------------------------------------------------------ 시뮬레이션 전략
+
+    private final List<Map<String, Object>> signals = new ArrayList<>();  // 가짜 엔진 신호 (차례로)
+    private final List<Map<String, Object>> asked = new ArrayList<>();
+
+    private void simConfig(boolean enabled, double budget, int maxBuys) throws Exception {
+        Map<String, Object> p = new HashMap<>();
+        p.put("buy", "surge");
+        p.put("sell", "tp-sl");
+        p.put("hold", 30);
+        p.put("tp", 5);
+        p.put("sl", 5);
+        p.put("maxBuys", maxBuys);
+        p.put("until", "15:00");
+        Map<String, Object> sim = new HashMap<>();
+        sim.put("enabled", enabled);
+        sim.put("market", "KR");
+        sim.put("budget", budget);
+        sim.put("params", p);
+        trader.command(Map.of("action", "config", "config", Map.of("sim", sim)));
+        trader.strategy = (m, params) -> {
+            asked.add(params);
+            return signals.isEmpty() ? Map.of("date", "2026-10-19", "at", "09:00", "every", 5, "buy", List.of(), "sell", Map.of()) : signals.remove(0);
+        };
+    }
+
+    private static Map<String, Object> signal(String at, List<Object> buy, Map<String, Object> sell) {
+        return Map.of("date", "2026-10-19", "at", at, "every", 5, "buy", buy, "sell", sell);
+    }
+
+    @Test
+    void simStrategyBuysSignalWithBudgetAndSellsOnSignal() throws Exception {
+        simConfig(true, 300_000, 2);  // 종목당 15만 원 -> 7만 원짜리 2주
+        signals.add(signal("09:00", List.of(Map.of("code", "005930", "name", "삼성전자", "price", 70_000.0)), Map.of()));
+        trader.tick();
+        assertEquals(List.of("BUY 005930 2"), toss.sides());
+        assertEquals(150_000.0, asked.get(0).get("amount"), "엔진에 종목당 금액을 넘김");
+        assertEquals("시뮬레이션", positions().get(0).get("source"));
+        assertEquals(0.0, ((Map<?, ?>) ((Map<?, ?>) trader.status().get("markets")).get("KR")).get("spent"), "일반 자동매매 금액과 따로 셈");
+        assertEquals(140_000.0, ((Map<?, ?>) trader.status().get("sim")).get("spent"));
+        trader.tick();  // 30초 안: 신호를 다시 묻지 않고 체결만 확인
+        assertEquals(1, asked.size());
+        assertEquals("OPEN", positions().get(0).get("status"));
+        now = now.plusMinutes(5);
+        signals.add(signal("09:05", List.of(), Map.of("005930", "고점 대비 손절")));
+        trader.tick();
+        assertEquals(List.of("BUY 005930 2", "SELL 005930 2"), toss.sides());
+        trader.tick();
+        assertEquals("시뮬레이션 고점 대비 손절", positions().get(0).get("reason"));
+    }
+
+    @Test
+    void simStrategyUsesItsOwnTakeProfitAndSkipsStaleRecords() throws Exception {
+        simConfig(true, 300_000, 2);
+        signals.add(signal("08:30", List.of(Map.of("code", "005930", "name", "삼성전자", "price", 70_000.0)), Map.of()));
+        trader.tick();
+        assertTrue(toss.sides().isEmpty(), "마지막 기록이 31분 전이면(5분 + 10분 넘음) 주문하지 않음");
+        assertTrue(String.valueOf(((Map<?, ?>) trader.status().get("sim")).get("phase")).contains("주문하지 않음"));
+        now = now.plusMinutes(1);
+        signals.add(signal("09:00", List.of(Map.of("code", "005930", "name", "삼성전자", "price", 70_000.0)), Map.of()));
+        trader.tick();
+        trader.tick();
+        toss.price.put("005930", 72_100.0);  // +3%: 자동매매 화면 익절(3%)이 아니라 시뮬레이션 익절(5%)이라 안 팖
+        trader.tick();
+        assertEquals(List.of("BUY 005930 2"), toss.sides());
+        toss.price.put("005930", 73_500.0);  // +5%
+        trader.tick();
+        assertEquals(List.of("BUY 005930 2", "SELL 005930 2"), toss.sides());
+    }
+
+    @Test
+    void simStrategyNeedsBudgetAndMaxBuysToTurnOn() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> simConfig(true, 0, 2), "투자 금액 없음");
+        assertThrows(IllegalArgumentException.class, () -> simConfig(true, 300_000, 0), "하루 최대 종목 수 0");
+        simConfig(false, 300_000, 2);  // 꺼 두면 신호를 묻지 않음
+        trader.tick();
+        assertTrue(asked.isEmpty());
+    }
 }

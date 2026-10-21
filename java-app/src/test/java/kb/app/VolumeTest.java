@@ -146,6 +146,25 @@ class VolumeTest {
                 Map.of("2026-10-16", Map.of("C", "10:00"))), "code", "since", "buyAt"));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void liveBuysAtLatestRecordAndKeepsPositionsOpen() throws Exception {
+        // 장중 10:00까지만 기록: A는 09:30부터 이어져 마지막 기록(10:00)에서 삼. 시뮬레이션이면 그날 마지막 기록이라 안 사지만 장중이라 삼
+        Ticks t = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("live").resolve("kosdaq.db")).ticks;
+        Object[][] at = {{"09:00", 1000, 0.0, 100}, {"09:30", 1010, 1.0, 200}, {"10:00", 1020, 2.0, 300}};
+        for (Object[] x : at) {
+            t.save("2026-10-15T" + x[0], List.of(Arrays.<Object>asList("A", "A", 1, 0, 100, 0)));
+            t.save("2026-10-16T" + x[0], List.of(Arrays.<Object>asList("A", "A", x[1], x[2], x[3], 0)));
+        }
+        Map<String, Object> p = new LinkedHashMap<>(Map.of("min", 40, "amount", 300_000, "hold", 30, "maxBuys", 2));
+        Map<String, Object> r = t.live(p, null);
+        assertEquals(List.of("2026-10-16", "10:00", 5), List.of(r.get("date"), r.get("at"), r.get("every")));
+        assertEquals(List.of("A"), ((List<Map<String, Object>>) r.get("buy")).stream().map(b -> b.get("code")).collect(java.util.stream.Collectors.toList()));
+        assertEquals(Map.of(), r.get("sell"), "장중이라 '마지막 기록' 매도 없음");
+        assertEquals(0, ((List<?>) t.simulate(40, 300_000, 0, 0, "15:00", 0, true, 30, "volume-open-up", "tp-sl", "", 0, 0, null).get("trades")).size(),
+                "시뮬레이션은 그날 마지막 기록에서 안 삼");
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> pick(Map<String, Object> r, String... keys) {
         List<String> out = new ArrayList<>();

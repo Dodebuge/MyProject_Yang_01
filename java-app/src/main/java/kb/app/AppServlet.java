@@ -153,6 +153,8 @@ public class AppServlet extends HttpServlet {
         alerts.start();  // 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널을 장중 5분마다 확인 (ntfy·브라우저 알림)
         trader = new Trader(toss, dataDir.resolve("trader.db"));  // 토스 자동매매 (토스 키가 없으면 꺼짐)
         alerts.listener = (market, a) -> trader.onSignal("kosdaq".equals(market) ? "KR" : "US", Values.str(a.get("code")), Values.str(a.get("name")));
+        trader.strategy = (m, p) -> ("KR".equals(m) ? volume.ticks : russell.ticks).live(p,  // 시뮬레이션 전략 신호 (같은 엔진, 오늘 기록)
+                Boolean.TRUE.equals(p.get("alerts")) ? alerts.firstTimes("KR".equals(m) ? "kosdaq" : "russell") : null);
         trader.start();
         try {
             snapshots = new Snapshots(heatmap, dataDir.resolve(".env"));  // MYSQL_HOST가 있으면 4시간마다 보유 금액 기록

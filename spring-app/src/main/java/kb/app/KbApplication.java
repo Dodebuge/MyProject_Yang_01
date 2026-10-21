@@ -127,9 +127,11 @@ public class KbApplication {
      * 토스 토큰이 클라이언트당 1개라 내정보(Heatmap)와 같은 TossClient를 씁니다.
      */
     @Bean(destroyMethod = "stop")
-    Trader trader(Heatmap heatmap, Alerts alerts, @Value("${kb.data-dir}") Path dataDir) {
+    Trader trader(Heatmap heatmap, Alerts alerts, Volume volume, Russell russell, @Value("${kb.data-dir}") Path dataDir) {
         Trader t = new Trader(heatmap.toss(), dataDir.resolve("trader.db"));
         alerts.listener = (market, a) -> t.onSignal("kosdaq".equals(market) ? "KR" : "US", Values.str(a.get("code")), Values.str(a.get("name")));
+        t.strategy = (m, p) -> ("KR".equals(m) ? volume.ticks : russell.ticks).live(p,  // 시뮬레이션 전략 신호 (같은 엔진, 오늘 기록)
+                Boolean.TRUE.equals(p.get("alerts")) ? alerts.firstTimes("KR".equals(m) ? "kosdaq" : "russell") : null);
         t.start();
         return t;
     }
