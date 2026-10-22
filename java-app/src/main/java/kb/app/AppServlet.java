@@ -81,6 +81,7 @@ public class AppServlet extends HttpServlet {
     private Volume volume;
     private Russell russell;
     private Alerts alerts;
+    private Minutes minutes;
     private Trader trader;
     private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
@@ -100,6 +101,9 @@ public class AppServlet extends HttpServlet {
         }
         if (volume != null) {
             volume.ticks.stop();
+        }
+        if (minutes != null) {
+            minutes.stop();
         }
         if (russell != null) {
             russell.ticks.stop();
@@ -143,7 +147,9 @@ public class AppServlet extends HttpServlet {
         monitor.start();  // 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용)
         SimModules.rulesFile = dataDir.resolve("sim_buy_rules.json");  // 시뮬레이션·자동매매 매수 조건 (모니터 화면에서 편집)
         volume = new Volume(client, dataDir.resolve("kosdaq.db"));
-        volume.ticks.start();  // 장중 10분마다 코스닥 거래량 기록
+        volume.ticks.start();  // 장중 5분마다 코스닥 거래량 기록
+        minutes = new Minutes(client, toss, dataDir.resolve("minutes.db"));  // 절반은 토스로
+        minutes.start();  // 평일 20:10 코스닥 전 종목 1분봉 수집
         russell = new Russell(client, dataDir.resolve("russell2000.csv"), dataDir.resolve("russell.db"));
         russell.ticks.start();  // 뉴욕 장중 30분마다 러셀 2000 거래량 기록 (russell2000.csv가 있을 때)
         try {

@@ -10,6 +10,8 @@ kb.db
 kb.db-*
 kosdaq.db
 kosdaq.db-*
+minutes.db
+minutes.db-*
 russell.db
 russell.db-*
 russell2000.csv

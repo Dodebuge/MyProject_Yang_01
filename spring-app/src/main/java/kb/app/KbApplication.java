@@ -137,6 +137,14 @@ public class KbApplication {
         return t;
     }
 
+    /** 평일 20:10(NXT 시간외 뒤) 코스닥 전 종목 1분봉을 minutes.db에 수집 (KB·토스 절반씩, 시작할 때 마지막 거래일을 이어 받음). */
+    @Bean(destroyMethod = "stop")
+    Minutes kosdaqMinutes(KBClient client, Heatmap heatmap, @Value("${kb.data-dir}") Path dataDir) {
+        Minutes m = new Minutes(client, heatmap.toss(), dataDir.resolve("minutes.db"));  // 절반은 토스로 (토스 키가 없으면 모두 KB)
+        m.start();
+        return m;
+    }
+
     /** 뉴욕 장중 30분마다 러셀 2000(russell2000.csv) 거래량을 russell.db에 기록. */
     @Bean(destroyMethod = "stop")
     Ticks russellTicks(Russell russell) {
