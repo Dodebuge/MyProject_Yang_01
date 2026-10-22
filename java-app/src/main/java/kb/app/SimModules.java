@@ -55,13 +55,16 @@ final class SimModules {
     static final int MAX_CONDS = 10;
     private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,39}");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
-    // sim_modules.py DEFAULT_BUY와 같음 (surge: 10-20·10-21 -0.86%·+1.43%, surge-vwap: 10-20~10-22 알림 종목 +1.12%)
+    // surge: 10-20·10-21 -0.86%·+1.43%, surge-vwap: 10-20~10-22 알림 종목 +1.12%. surge300(화면 기본): 거래량 기준을 300%로 낮춘 surge,
+    // 10-20~10-22 알림 종목 · 유지 30 · 익절 7 · 손절 5를 1분봉으로 다시 재면 10건 +1.64%. surge300은 Java 서버만 (sim_modules.py에는 없음)
     private static final String DEFAULT_BUY = "["
             + "{\"id\": \"volume-open-up\", \"label\": \"거래량 증가 + 시가 위 + 상승\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": \"min\"},"
             + " {\"left\": \"price\", \"op\": \">\", \"right\": \"open\"}, {\"left\": \"change\", \"op\": \">\", \"right\": 0}]},"
             + "{\"id\": \"volume-up\", \"label\": \"거래량 증가 + 상승 (시가 무시)\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": \"min\"},"
             + " {\"left\": \"change\", \"op\": \">\", \"right\": 0}]},"
             + "{\"id\": \"surge\", \"label\": \"급등 초입: 거래량 500%↑ + 등락 5~15%\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": 500},"
+            + " {\"left\": \"change\", \"op\": \">=\", \"right\": 5}, {\"left\": \"change\", \"op\": \"<\", \"right\": 15}]},"
+            + "{\"id\": \"surge300\", \"label\": \"급등 초입: 거래량 300%↑ + 등락 5~15%\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": 300},"
             + " {\"left\": \"change\", \"op\": \">=\", \"right\": 5}, {\"left\": \"change\", \"op\": \"<\", \"right\": 15}]},"
             + "{\"id\": \"surge-vwap\", \"label\": \"급등 초입 + VWAP 위\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": 500},"
             + " {\"left\": \"change\", \"op\": \">=\", \"right\": 5}, {\"left\": \"change\", \"op\": \"<\", \"right\": 15}, {\"left\": \"price\", \"op\": \">\", \"right\": \"vwap\"}]},"

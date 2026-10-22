@@ -23,9 +23,11 @@ class SimModulesTest {
     @Test
     void buyRulesComeFromConfigAndAreValidated() throws Exception {
         SimModules.rulesFile = Files.createTempDirectory("rules").resolve("sim_buy_rules.json");
-        assertEquals(List.of("volume-open-up", "volume-up", "surge", "surge-vwap", "vwap-up"), ids());
+        assertEquals(List.of("volume-open-up", "volume-up", "surge", "surge300", "surge-vwap", "vwap-up"), ids());
         Map<String, Double> s = Map.of("price", 1100.0, "change", 6.0, "ratio", 600.0, "open", 1000.0, "value", 1.0, "vwap", 1050.0);
         assertTrue(SimModules.buy("surge").test(s, Map.of("min", 100.0)));
+        assertTrue(SimModules.buy("surge300").test(Map.of("price", 1.0, "change", 6.0, "ratio", 300.0, "open", 1.0, "value", 1.0, "vwap", 1.0), Map.of("min", 999.0)));
+        assertFalse(SimModules.buy("surge").test(Map.of("price", 1.0, "change", 6.0, "ratio", 300.0, "open", 1.0, "value", 1.0, "vwap", 1.0), Map.of("min", 0.0)));
         assertTrue(SimModules.buy("volume-up").test(s, Map.of("min", 600.0)));
         assertFalse(SimModules.buy("volume-up").test(s, Map.of("min", 601.0)));  // min = 화면 거래량 기준
 
