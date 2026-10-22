@@ -260,8 +260,8 @@ public final class Ticks {
                 || !start.isEmpty() && (start.length() != 5 || start.charAt(2) != ':')) {
             throw new IllegalArgumentException("매수 금액·시각·유지 시간이 올바르지 않습니다");
         }
-        SimModules.Buy buyRule = SimModules.pick(SimModules.BUY, buy);
-        SimModules.Sell sellRule = SimModules.pick(SimModules.SELL, sell);
+        SimModules.Buy buyRule = SimModules.buy(buy);
+        SimModules.Sell sellRule = SimModules.sell(sell);
         Map<String, Double> o = Map.of("min", minRatio, "tp", tp, "sl", sl);
         List<Map<String, Object>> trades = new ArrayList<>();
         List<String> days;

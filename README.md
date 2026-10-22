@@ -119,9 +119,13 @@ appKey/appSecret은 서버(`dividends_web.py`)에만 있고, 서버는 127.0.0.1
   | `maxBuys` | 하루 최대 매수 종목 수. 같은 시각에 여럿이면 거래량 증가율 큰 순 (0이면 제한 없음) |
   | `alerts=1` | 그날 시그널 알림(`alerts.db`)이 온 종목만, 알림 시각(그 시장 시간) 이후 기록에서만 |
 - **모듈**: 매수 조건(`buy`)과 매도(`sell`)는 이름으로 바꿔 끼웁니다. 엔진(`Ticks.simulate`)은 기록 읽기·hold 유지·하루 한 번 매수·마지막 기록 매도·손익만 맡습니다.
-  새 규칙은 `sim_modules.py`의 `BUY`·`SELL`(Java 서버는 `SimModules.java`)에 같은 이름으로 한 줄 추가하면 화면 선택 목록(`/api/kosdaq-sim-modules`)에 나옵니다.
+  - **매수 조건은 설정 파일**(`sim_buy_rules.json`, 데이터 폴더, 없으면 아래 기본 규칙)의 조건 목록입니다. `/monitor` 시뮬레이션의 **매수 조건 편집**에서 추가·수정·삭제하고 저장합니다
+    (`GET·POST /api/kosdaq-sim-modules`, POST는 목록 통째로. Python·Java 서버가 같은 파일·같은 검사). 시뮬레이션과 실제 자동매매(시뮬레이션 전략)가 함께 씁니다.
+  - 규칙: `{"id", "label", "all": [{"left", "op", "right"}]}` — 조건을 **모두** 만족하면 매수 조건 성립. `left`·`right` 값은 `price`(현재가)·`change`(등락률 %)·`ratio`(전일 같은 시각 대비 거래량 증가율 %)·`open`(시가)·`vwap`·`value`(누적 거래대금),
+    `op`는 `>` `>=` `<` `<=`, `right`는 숫자·값·`"min"`(화면의 거래량 기준). id는 영문 소문자·숫자·`-` 40자, 규칙 30개·조건 10개까지.
+  - 매도는 코드 모듈(`sim_modules.py`의 `SELL`, Java `SimModules.java`)입니다.
 
-  | 이름 | 종류 | 규칙 |
+  | 이름 | 종류 | 규칙 (기본) |
   |---|---|---|
   | `volume-open-up` (기본) | 매수 | 거래량 `min`% 이상 + 시가 위 + 전일 대비 상승 |
   | `volume-up` | 매수 | 거래량 `min`% 이상 + 전일 대비 상승 (시가 무시) |

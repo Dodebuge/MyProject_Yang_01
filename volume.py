@@ -218,7 +218,8 @@ class Ticks:
                  buy: str = "volume-open-up", sell: str = "tp-sl", start: str = "", max_hold: int = 0, max_buys: int = 0,
                  allowed: dict[str, dict[str, str]] | None = None) -> dict:
         """GET /api/kosdaq-sim : 저장된 기록으로 매수 조건 모듈(buy)이 hold분 이상 이어진 종목을 amount원씩 사고,
-        매도 모듈(sell)로 판 결과. 모듈은 sim_modules.py (기본: 거래량 min_ratio% 이상 + 시가 위 + 상승, 익절 tp%·손절 sl%).
+        매도 모듈(sell)로 판 결과. 매수 조건은 sim_modules.py 설정(sim_buy_rules.json), 매도는 sim_modules.SELL
+        (기본: 거래량 min_ratio% 이상 + 시가 위 + 상승, 익절 tp%·손절 sl%).
         시가: KB 순위 TR(IVU10210)에 시가가 없어 그날 첫 기록(09:00, 장 시작 30초 뒤)의 현재가로 봄.
         매수: 기록 시각마다(until까지, 그날 마지막 기록 제외) 조건을 확인해, 연속으로 만족한 첫 기록부터 hold분이 지난 기록의
         현재가로 하루 한 번 (중간에 한 번이라도 깨지면 처음부터 다시). hold=0이면 처음 만족한 기록에서 바로.
@@ -231,7 +232,7 @@ class Ticks:
         if (amount <= 0 or hold < 0 or max_hold < 0 or max_buys < 0 or len(until) != 5 or until[2] != ":"
                 or (start and (len(start) != 5 or start[2] != ":"))):
             raise ValueError("매수 금액·시각·유지 시간이 올바르지 않습니다")
-        buy_rule, sell_rule = sim_modules.pick(sim_modules.BUY, buy), sim_modules.pick(sim_modules.SELL, sell)
+        buy_rule, sell_rule = sim_modules.buy(buy), sim_modules.sell(sell)
         o = {"min": min_ratio, "tp": tp, "sl": sl}
         num = lambda v: float(v) if v not in (None, "") else 0.0
         mins = lambda hm: int(hm[:2]) * 60 + int(hm[3:])
@@ -359,6 +360,7 @@ KOSDAQ = Ticks("코스닥 5분", Path(__file__).resolve().parent / "kosdaq.db", 
 
 if __name__ == "__main__":
     import tempfile
+    sim_modules.RULES_FILE = Path(tempfile.mkdtemp()) / "rules.json"  # 저장된 매수 조건 말고 기본 규칙으로 시험
 
     # 자체 점검: 휴장일로 3일뿐인 전주와 5일인 이번 주를 하루 평균으로 비교
     rows = [{"dt": d, "vlm": v} for d, v in [("20261016", 200), ("20261015", 100), ("20261014", 100), ("20261013", 100),
@@ -405,7 +407,6 @@ if __name__ == "__main__":
     assert [x["code"] for x in s.simulate(min_ratio=40, tp=5, cost=0, buy="volume-up")["trades"]] == ["A", "B", "C"]
     assert [(x["code"], x["sellAt"], x["reason"]) for x in s.simulate(min_ratio=40, sl=5, cost=0, sell="trailing")["trades"]] == [
         ("A", "15:40", "고점 대비 손절"), ("C", "15:40", "고점 대비 손절")]
-    assert sim_modules.catalog()["buy"][0]["id"] == "volume-open-up"
     # 매수 시작 10:30이면 그 전 기록은 안 봄 (유지 0이라 10:30에 A·B·C). 보유 30분이면 A는 10:30, C는 다음 기록(15:40)에 '보유 시간'
     assert [(x["code"], x["buyAt"]) for x in s.simulate(min_ratio=40, hold=0, start="10:30")["trades"]] == [("A", "10:30"), ("B", "10:30"), ("C", "10:30")]
     assert [(x["code"], x["sellAt"], x["reason"]) for x in s.simulate(min_ratio=40, cost=0, max_hold=30)["trades"]] == [

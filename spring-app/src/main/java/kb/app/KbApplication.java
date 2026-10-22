@@ -97,6 +97,7 @@ public class KbApplication {
 
     @Bean
     Volume volume(KBClient client, @Value("${kb.data-dir}") Path dataDir) {
+        SimModules.rulesFile = dataDir.resolve("sim_buy_rules.json");  // 시뮬레이션·자동매매 매수 조건 (모니터 화면에서 편집)
         return new Volume(client, dataDir.resolve("kosdaq.db"));
     }
 

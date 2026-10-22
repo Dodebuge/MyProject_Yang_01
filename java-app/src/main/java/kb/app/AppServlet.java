@@ -44,6 +44,7 @@ import jakarta.servlet.http.HttpServletResponse;
  *   GET /api/recent                     -> 최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET /api/settings, POST /api/settings -> 차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
  *   GET /api/monitor, POST /api/monitor  -> 시장 모니터 지수 칸 + 추가한 종목 (monitor_items.json, POST는 목록 통째로)
+ *   GET /api/kosdaq-sim-modules, POST  -> 시뮬레이션 매수 조건(sim_buy_rules.json, POST는 목록 통째로)·매도 모듈 목록
  *   GET /api/monitor-quotes[?refresh=1]  -> 5분마다 kb.db에 저장한 모니터 시세 (refresh=1이면 지금 KB에서 다시 받아 저장)
  *   (내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회)
  *   (heatmap·quarters·holdings·dividends·recurring·transactions·chart·kosdaq-volume·russell-volume은 ?cached=1 이면 last_api/*.txt의 마지막 응답을 바로 돌려줌)
@@ -84,6 +85,7 @@ public class AppServlet extends HttpServlet {
     private Snapshots snapshots;  // 4시간마다 보유 금액 기록 (MySQL)
     private static final int SETTINGS_MAX_BYTES = 4096;  // POST /api/settings 본문 크기 제한
     private static final int MONITOR_MAX_BYTES = 16384;  // POST /api/monitor 본문 크기 제한 (30종목이 수 KB)
+    private static final int RULES_MAX_BYTES = 65536;    // POST /api/kosdaq-sim-modules 본문 크기 제한 (매수 조건 30개 × 조건 10개)
 
     private interface Api {
         Map<String, Object> handle(HttpServletRequest req) throws IOException;
@@ -139,6 +141,7 @@ public class AppServlet extends HttpServlet {
         chart = new Chart(client, dataDir.resolve("recent_searches.txt"));  // 최근 검색 종목 10개
         monitor = new Monitor(chart, dataDir.resolve("kb.db"), client);
         monitor.start();  // 시장 모니터 지수·추가 종목 시세를 5분마다 kb.db에 저장 (화면 첫 로딩용)
+        SimModules.rulesFile = dataDir.resolve("sim_buy_rules.json");  // 시뮬레이션·자동매매 매수 조건 (모니터 화면에서 편집)
         volume = new Volume(client, dataDir.resolve("kosdaq.db"));
         volume.ticks.start();  // 장중 10분마다 코스닥 거래량 기록
         russell = new Russell(client, dataDir.resolve("russell2000.csv"), dataDir.resolve("russell.db"));
@@ -228,13 +231,14 @@ public class AppServlet extends HttpServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         resp.setHeader("Cache-Control", "no-store");
         String path = req.getPathInfo();
-        if (!"/api/settings".equals(path) && !"/api/trader".equals(path) && !"/api/monitor".equals(path)) {
+        if (!"/api/settings".equals(path) && !"/api/trader".equals(path) && !"/api/monitor".equals(path) && !"/api/kosdaq-sim-modules".equals(path)) {
             resp.sendError(404);
             return;
         }
         int status = 200;
         Object payload;
-        if (req.getContentLength() <= 0 || req.getContentLength() > ("/api/monitor".equals(path) ? MONITOR_MAX_BYTES : SETTINGS_MAX_BYTES)) {
+        int max = "/api/monitor".equals(path) ? MONITOR_MAX_BYTES : "/api/kosdaq-sim-modules".equals(path) ? RULES_MAX_BYTES : SETTINGS_MAX_BYTES;
+        if (req.getContentLength() <= 0 || req.getContentLength() > max) {
             status = 400;
             payload = error("요청 크기가 올바르지 않습니다");
         } else {
@@ -247,7 +251,8 @@ public class AppServlet extends HttpServlet {
             String text = new String(buf, 0, n, StandardCharsets.UTF_8);
             try {
                 payload = "/api/trader".equals(path) ? trader.command(GSON.fromJson(text, MAP_TYPE))
-                        : "/api/monitor".equals(path) ? saveMonitor(text) : chart.saveSettings(text);
+                        : "/api/monitor".equals(path) ? saveMonitor(text)
+                        : "/api/kosdaq-sim-modules".equals(path) ? SimModules.saveBuyRules(text) : chart.saveSettings(text);
             } catch (IllegalArgumentException | com.google.gson.JsonParseException e) {
                 status = 400;
                 payload = error(e.getMessage());

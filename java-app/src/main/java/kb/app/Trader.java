@@ -371,10 +371,10 @@ final class Trader {
         Map<String, Object> p = new LinkedHashMap<>();
         for (String k : new String[]{"buy", "sell"}) {
             String v = Values.str(in.getOrDefault(k, "buy".equals(k) ? "volume-open-up" : "tp-sl"));
-            if ("buy".equals(k)) {  // 없는 모듈이면 IllegalArgumentException
-                SimModules.pick(SimModules.BUY, v);
+            if ("buy".equals(k)) {  // 없는 매수 조건·매도 모듈이면 IllegalArgumentException
+                SimModules.buy(v);
             } else {
-                SimModules.pick(SimModules.SELL, v);
+                SimModules.sell(v);
             }
             p.put(k, v);
         }

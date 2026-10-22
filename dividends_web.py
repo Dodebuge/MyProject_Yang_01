@@ -42,7 +42,8 @@ API:
                        &start=&maxHold=0&maxBuys=0&alerts=0
                                    -> {"from", "to", "total", "days", "trades"}  매수 조건 모듈(buy)이 hold분 이어진 종목을 amount씩 사고 매도 모듈(sell)로 판 시뮬레이션
                                    (market=russell이면 russell.db·뉴욕 시간·달러, alerts=1이면 그 시장 알림 종목만 알림 시각부터, 저장된 기록만 읽음)
-    GET /api/kosdaq-sim-modules    -> {"buy": [{"id", "label"}], "sell": [...]}  시뮬레이션 모듈 목록 (sim_modules.py)
+    GET /api/kosdaq-sim-modules    -> {"buy": [{"id", "label", "all"}], "sell": [{"id", "label"}], "fields", "ops"}  시뮬레이션 매수 조건·매도 모듈 (sim_modules.py)
+    POST /api/kosdaq-sim-modules {"buy": [...]} -> 매수 조건 목록을 검사해 통째로 sim_buy_rules.json에 저장
     GET /api/kosdaq-intraday[?date=2026-10-16&at=10:30] -> {"date", "at", "dates", "slots", "prev", "week", "nextTick", "stocks": [{"code", "name", "price", "change", "vlm", "value", "prevVlm", "prevRatio", "weekVlm", "weekRatio"}]}
                                    장중 5분마다 저장한 코스닥 누적 거래량(kosdaq.db)으로 같은 시각의 전일·전주 대비 (KB 조회 없음)
     GET /api/alerts[?since=id]     -> {"alerts": [{"id", "market", "day", "at", "code", "name", "text", "d", "ratio", "price", "change", "chart"}], "ntfy", "markets"}
@@ -85,6 +86,7 @@ HERE = Path(__file__).resolve().parent
 PAGES = {"/": "home.html", "/heatmap": "heatmap.html", "/me": "me.html", "/chart": "chart.html", "/volume": "volume.html", "/trader": "trader.html", "/monitor": "monitor.html"}
 SETTINGS_MAX_BYTES = 4096  # POST /api/settings 본문 크기 제한 (설정은 수십 바이트)
 MONITOR_MAX_BYTES = 16384  # POST /api/monitor 본문 크기 제한 (30종목이 수 KB)
+RULES_MAX_BYTES = 65536  # POST /api/kosdaq-sim-modules 본문 크기 제한 (매수 조건 30개 × 조건 10개)
 DOC = re.compile(r"/docs/[\w.-]+\.html")  # 구조도 (docs/*.html). '/'가 더 들어갈 수 없어 docs 폴더 밖은 못 엶
 
 
@@ -230,7 +232,8 @@ def make_handler(client: KBClient):
             path = urlparse(self.path).path
             if path == "/api/trader":
                 return self._api(lambda q: _trader_only_java(), {})
-            save = {"/api/settings": (chart.save_settings, SETTINGS_MAX_BYTES), "/api/monitor": (_save_monitor, MONITOR_MAX_BYTES)}.get(path)
+            save = {"/api/settings": (chart.save_settings, SETTINGS_MAX_BYTES), "/api/monitor": (_save_monitor, MONITOR_MAX_BYTES),
+                    "/api/kosdaq-sim-modules": (sim_modules.save_buy_rules, RULES_MAX_BYTES)}.get(path)
             if not save:
                 return self.send_error(404)
             size = int(self.headers.get("Content-Length") or 0)

@@ -31,7 +31,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/kosdaq-intraday        장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/kosdaq-sim             같은 기록으로 매수·매도 시뮬레이션 (market=kosdaq|russell, buy·sell = SimModules 모듈 이름,
  *                                   start·maxHold·maxBuys, alerts=1이면 알림 종목만 알림 시각부터)
- *   GET /api/kosdaq-sim-modules     시뮬레이션 매수 조건·매도 모듈 목록
+ *   GET·POST /api/kosdaq-sim-modules 시뮬레이션 매수 조건(sim_buy_rules.json, POST는 목록 통째로)·매도 모듈 목록
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
  *   GET·POST /api/trader             토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader)
  *   GET /api/alerts[?since=id]       코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림
@@ -176,6 +176,14 @@ class ApiController {
     @GetMapping("/kosdaq-sim-modules")
     ResponseEntity<Map<String, Object>> kosdaqSimModules() {
         return ok(SimModules.catalog());
+    }
+
+    @PostMapping("/kosdaq-sim-modules")
+    ResponseEntity<Map<String, Object>> saveKosdaqSimModules(@RequestBody String body) throws IOException {
+        if (body.length() > 65536) {  // 매수 조건 30개 × 조건 10개
+            throw new IllegalArgumentException("요청 크기가 올바르지 않습니다");
+        }
+        return ok(SimModules.saveBuyRules(body));
     }
 
     @GetMapping("/trader")
