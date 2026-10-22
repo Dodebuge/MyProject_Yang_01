@@ -20,6 +20,25 @@ sudo systemctl daemon-reload && sudo systemctl enable --now kb-openapi-spring
 
 방화벽에서 8080만 열면 됩니다 (아래 "방화벽"). 접근 제한은 없습니다.
 
+## GitHub Actions 자동 배포 (Jetson)
+
+Jetson(공유기 안, `jetson@192.168.35.41`)에 GitHub Actions **self-hosted runner**를 두어, main에 서버 코드·화면이 push되면 Jetson이 스스로 받아 배포합니다.
+runner가 GitHub에 먼저 접속하는 방식이라 공유기 포트를 열 필요가 없습니다.
+
+- 워크플로: `.github/workflows/deploy-jetson.yml` (`runs-on: [self-hosted, jetson]`)
+  - `java-app/` `spring-app/` 화면(`*.html` `*.js`) `docs/` `deploy/jetson/`이 바뀐 push만 배포합니다 (Python만 바뀌면 안 함).
+  - **코스닥 장중(평일 08:50~15:40 KST)에는 기다렸다가 장 마감 뒤 배포**합니다. 기다리는 중에 새 push가 오면 이전 것은 취소되고 마지막 것만 배포합니다.
+  - Actions 화면의 **Run workflow**(now 체크)로 장중에도 바로 배포할 수 있습니다.
+  - 순서: `git pull --ff-only` -> `deploy/jetson/deploy.sh`(java-app 테스트 -> `run.sh prepare` 빌드 -> `systemctl restart` -> 9080 응답 확인).
+    테스트·빌드가 실패하면 재시작하지 않아 기존 서버가 그대로 돕니다.
+- 서버: systemd 서비스 `kb-openapi-spring` (`deploy/jetson/kb-openapi-spring.service`, User=jetson, 9080, 데이터 `/home/jetson/yang/MyProject_Yang_01`).
+  로그 `journalctl -u kb-openapi-spring -f`, 손으로 배포 `git pull --ff-only && sh deploy/jetson/deploy.sh`.
+- runner: `~/actions-runner` (이름·라벨 `jetson`), 서비스 `actions.runner.*` (`cd ~/actions-runner && sudo ./svc.sh status`).
+  등록: 저장소 Settings -> Actions -> Runners -> New self-hosted runner의 토큰으로
+  `./config.sh --url https://github.com/Dodebuge/MyProject_Yang_01 --token <토큰> --name jetson --labels jetson --unattended`, `sudo ./svc.sh install jetson && sudo ./svc.sh start`.
+- **공개 저장소 주의**: 외부 사람이 PR로 워크플로를 바꿔 Jetson에서 코드를 돌리지 못하게, 워크플로는 `pull_request`로 실행하지 않고
+  저장소 Settings -> Actions -> General -> "Fork pull request workflows from outside collaborators"를 **Require approval for all outside collaborators**로 둡니다.
+
 ## 방법 B. Tomcat 10 + Python
 
 ```
