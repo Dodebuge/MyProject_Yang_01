@@ -68,6 +68,19 @@ class AlertsTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void recentCarriesLatestFlowRecord() throws Exception {
+        // 알림 종목 체결강도·호가 기록: /api/alerts에 마지막 기록만 실림 (기록이 없으면 at null)
+        Alerts alerts = new Alerts(null, null, Files.createTempDirectory("alerts").resolve("alerts.db"), Collections.emptyMap());
+        assertNull(((Map<String, Object>) alerts.recent(0).get("flow")).get("at"));
+        alerts.flow.save("2026-10-22T09:05", List.of(Arrays.<Object>asList("065450", 3320, 120.5, 1000, 3000, 3300)));
+        alerts.flow.save("2026-10-22T09:10", List.of(Arrays.<Object>asList("065450", 3195, 95.9, 22567, 46531, 3290)));
+        Map<String, Object> flow = (Map<String, Object>) alerts.recent(0).get("flow");
+        assertEquals("2026-10-22T09:10", flow.get("at"));
+        assertEquals(List.of(List.of("065450", 3195L, 95.9, 22567L, 46531L, 3290L)), flow.get("rows"));
+    }
+
+    @Test
     void firstTimesConvertsAlertTimeToMarketZone() throws Exception {
         java.nio.file.Path db = Files.createTempDirectory("alerts").resolve("alerts.db");
         Alerts alerts = new Alerts(null, null, db, Collections.emptyMap());

@@ -196,6 +196,10 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
   ([deploy/README.md 'HTTPS'](deploy/README.md), `deploy/make-cert.sh`). 안드로이드 크롬은 페이지 알림을 막아 서비스 워커(`sw.js`)로 띄우는데,
   이건 신뢰되는 인증서(Tailscale, 루트 인증서를 설치한 mkcert)에서만 됩니다. 휴대폰은 ntfy가 가장 확실합니다.
 - `GET /api/alerts[?since=id]`: 최근 알림 200개(최신 먼저)와 시장별 감시 상태(확인 시각, top 30 목록, 다음 확인 시각).
+- **알림 종목 체결강도·호가** (Spring·Java 서버만): 장중 5분마다 그날 알림이 온 코스닥 종목만 체결(`IVU10080`, 체결강도)과 호가(`IVU10070`,
+  총매도·총매수 잔량, 가중평균가)를 불러 `alerts.db`의 `kosdaq_flow`에 `[종목, 현재가, 체결강도, 총매도잔량, 총매수잔량, VWAP]`로 저장합니다(14일 보관).
+  종목마다 두 번 부르므로 전 종목은 기록하지 않고, KB가 지난 값을 주지 않아 기록을 시작한 날부터 쌓입니다.
+  `/api/alerts`의 `flow`에 마지막 기록이 실리고, `/monitor` 알림 목록에 오늘 코스닥 알림마다 체결강도(100 이상 빨강)·잔량 매수/매도 배율·VWAP 위/아래를 보여 줍니다.
 
 점검: `python signals.py`(시그널 계산), `python alerts.py --offline`(새 시그널 고르기·중복 막기), Java `SignalsTest`·`AlertsTest`.
 

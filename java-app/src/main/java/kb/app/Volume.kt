@@ -88,6 +88,22 @@ internal class Volume(private val client: KBClient, tickDb: Path) {
         }.filterNotNull()
     }
 
+    /**
+     * 알림 종목 장중 기록(Alerts.flow) 한 행: [종목, 현재가, 체결강도, 총매도잔량, 총매수잔량, 가중평균가(VWAP)].
+     * 체결(IVU10080, 마지막 체결의 체결강도)과 호가(IVU10070) 두 번 부름. 오류면 null (그 종목만 이번 기록에서 빠짐).
+     */
+    fun flow(code: String): List<Any?>? = try {
+        val tick = KBClient.records(client.call("IVU10080", Heatmap.body("excg_clsf", "0", "ovtm_mkt_clsf", "0", "is_cd", code,
+            "inq_cnt", "1")), "out").firstOrNull()
+        val ob = client.call("IVU10070", Heatmap.body("is_cd", code, "ovtm_mkt_clsf", "0"))
+        if (tick == null) null else listOf(code, Values.lng(ob["now_prc"]), Values.num(tick["ccls_strn_p2"]),
+            Values.lng(ob["s_askprc_tl_q"]), Values.lng(ob["b_askprc_tl_q"]), Values.lng(ob["wt_avr_prc"]))
+    } catch (e: KBApiException) {
+        null
+    } catch (e: IOException) {
+        null
+    }
+
     // ------------------------------------------------------------------ 장중 기록 (Ticks)
 
     /** 코스닥 전 종목 시세 (IVU10210 한 번). 휴장일(오늘 일봉이 없음)이면 빈 목록. */

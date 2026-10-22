@@ -9,6 +9,7 @@
   - 지수 히트맵: 코스피·코스닥·S&P 500·나스닥·다우·러셀 2000(+ 추가 종목)을 등락률 색으로.
     KB 지수 시세 API가 없어 추종 ETF 일봉으로 계산합니다. 서버(monitor.py)가 5분마다 kb.db에 저장한 시세(/api/monitor-quotes)를 바로 그림.
   - 시그널 알림: 거래량 페이지와 같은 /api/alerts (코스닥·러셀 2000 모두). 1분마다 갱신.
+    오늘 코스닥 알림에는 마지막 체결강도·잔량 매수/매도 배율·VWAP 위/아래 (/api/alerts flow, Spring·Java 서버만).
 -->
 <style>
 :root {
@@ -104,6 +105,7 @@ dialog input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid 
 .alerts .when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 78px; }
 .alerts .mk { font-size: 11px; color: var(--ink-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
 .alerts .new { background: var(--select); }
+.alerts .flow { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 /* 코스피 자동매매 (미장 연동) */
 .err { border: 1px solid var(--bad); border-radius: 8px; padding: 8px 12px; color: var(--bad); margin: 10px 0 0; font-size: 13px; }
 .pair-ctl, .pair-rule { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
@@ -609,13 +611,22 @@ $("#etf-form").onsubmit = async e => {
 const AL = { last: -1, items: [], fresh: new Set(), mk: "" };
 const MK = { kosdaq: "코스닥", russell: "러셀 2000" };
 const alertDay = a => a.d ? ` ${+a.d.slice(4, 6)}/${+a.d.slice(6)}` : "";
+// 오늘 코스닥 알림 종목의 마지막 체결강도·호가 기록 (/api/alerts flow: [종목, 현재가, 체결강도, 총매도잔량, 총매수잔량, VWAP], Java 서버만)
+function alertFlow(a) {
+  const f = AL.flow, r = a.market === "kosdaq" && f?.at?.slice(0, 10) === a.at.slice(0, 10) && f.rows.find(x => x[0] === a.code);
+  if (!r) return "";
+  const [, px, strength, sell, buy, vwap] = r;
+  return `<span class="flow" title="${esc(f.at.slice(11))} 기록 · 체결강도 100 이상 = 매수 체결 우위 · 총매수잔량 ÷ 총매도잔량 · 현재가와 VWAP(당일 거래량가중평균가)">
+    <span class="${strength >= 100 ? "up" : "down"}">체결강도 ${fmt(strength, 1)}</span> · 잔량 매수/매도 ${sell ? fmt(buy / sell, 2) + "배" : "—"}
+    · ${vwap ? (px > vwap ? "VWAP 위" : "VWAP 아래") : "VWAP —"} (${esc(f.at.slice(11))})</span>`;
+}
 
 function renderAlerts() {
   const items = AL.items.filter(a => !AL.mk || a.market === AL.mk);
   $("#alerts").innerHTML = items.length ? items.map(a => `<li><a href="chart?${esc(a.chart)}" class="${AL.fresh.has(a.id) ? "new" : ""}" title="차트 열기">
       <span class="when">${esc(a.at.slice(5).replace("-", "/"))}</span><span class="mk">${esc(MK[a.market] || a.market)}</span>
       <b>${esc(a.name)}</b><span class="code">${esc(a.code)}</span><span class="sig buy">▲ ${esc(a.text)}${alertDay(a)}</span>
-      <span class="days">주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%</span></a></li>`).join("")
+      <span class="days">주간 거래량 ${a.ratio > 0 ? "+" : ""}${fmt(a.ratio, 1)}%</span>${alertFlow(a)}</a></li>`).join("")
     : `<li class="sub" style="padding:6px">아직 알림이 없습니다.</li>`;
 }
 
@@ -626,6 +637,7 @@ async function pollAlerts() {
   if (AL.last >= 0) d.alerts.forEach(a => AL.fresh.add(a.id));  // 첫 조회 뒤에 온 알림만 강조
   AL.items = [...d.alerts, ...AL.items.filter(x => !d.alerts.some(a => a.id === x.id))].slice(0, 200);
   AL.last = Math.max(AL.last, 0, ...d.alerts.map(a => a.id));
+  AL.flow = d.flow;
   const mk = Object.values(d.markets).map(m => `${m.name} ${m.status}${m.checkedAt ? ` ${m.checkedAt.slice(11)}` : ""}`).join(" · ");
   $("#alerts-status").textContent = `증가율 top ${d.top}의 새 상승 시그널 · 장중 ${d.every}분마다 · ${mk}`;
   renderAlerts();

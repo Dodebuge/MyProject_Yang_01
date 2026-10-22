@@ -107,11 +107,19 @@ final class Alerts {
     /** 새 알림마다 부름 (자동매매가 시그널 종목을 사려고): (시장 kosdaq|russell, 알림) */
     volatile java.util.function.BiConsumer<String, Map<String, Object>> listener;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    /**
+     * 장중 5분마다 오늘 알림이 온 코스닥 종목의 [종목, 현재가, 체결강도, 총매도잔량, 총매수잔량, 가중평균가] 기록 (alerts.db kosdaq_flow).
+     * 종목마다 KB를 두 번 불러(체결·호가) 전 종목이 아니라 알림 종목만. 지난 기록은 KB가 주지 않아 기록한 날부터 쌓임.
+     */
+    final Ticks flow;
 
     /** volume·russell이 null이면 시장 없이 (단위 테스트: 기록·중복 막기만). */
     Alerts(Volume volume, Russell russell, Path db, Map<String, String> env) {
         this.db = db;
         this.env = env;
+        flow = new Ticks("코스닥 알림 종목 체결강도·호가", db, "kosdaq_flow", SEOUL, EVERY_MINUTES, LocalTime.of(9, 0), LocalTime.of(15, 40),
+                at -> volume == null ? List.of() : firstTimes("kosdaq").getOrDefault(at.toLocalDate().toString(), Map.of()).keySet().stream()
+                        .map(volume::flow).filter(java.util.Objects::nonNull).collect(Collectors.toList()));
         if (volume != null) {
             markets.put("kosdaq", new Market("kosdaq", "코스닥", SEOUL, LocalTime.of(9, 5), LocalTime.of(15, 35),
                     () -> volume.query(false), s -> candles(volume.daily(Values.str(s.get("code"))), "p2", 10),
@@ -151,6 +159,9 @@ final class Alerts {
             return t;
         });
         markets.values().forEach(this::scheduleNext);
+        if (markets.containsKey("kosdaq")) {
+            flow.start();
+        }
         System.out.println("[시그널 알림] 코스닥·러셀 2000 증가율 top " + TOP + "을 장중 " + EVERY_MINUTES + "분마다 확인 (ntfy "
                 + (ntfyOn() ? "켜짐" : "꺼짐: .env에 NTFY_TOPIC") + ")");
     }
@@ -159,6 +170,7 @@ final class Alerts {
         if (timer != null) {
             timer.shutdownNow();
         }
+        flow.stop();
     }
 
     // 실행할 때마다 다음 시각을 다시 계산해 예약 (고정 주기로 두면 PC 절전·시계 보정 뒤 시각이 밀림)
@@ -301,7 +313,10 @@ final class Alerts {
         }
     }
 
-    /** GET /api/alerts[?since=id] -> {"alerts": [최근 알림, 최신 먼저], "ntfy", "every", "top", "markets": {시장: 감시 상태}} (alerts.recent와 같음) */
+    /**
+     * GET /api/alerts[?since=id] -> {"alerts": [최근 알림, 최신 먼저], "ntfy", "every", "top", "markets": {시장: 감시 상태},
+     * "flow": 코스닥 알림 종목 체결강도·호가 마지막 기록 {at, rows}} (alerts.recent와 같음, flow는 Java 서버만)
+     */
     Map<String, Object> recent(long since) throws IOException {
         List<Map<String, Object>> rows = new ArrayList<>();
         try (Connection c = connect();
@@ -343,6 +358,7 @@ final class Alerts {
         out.put("every", EVERY_MINUTES);
         out.put("top", TOP);
         out.put("markets", ms);
+        out.put("flow", flow.last());
         return out;
     }
 

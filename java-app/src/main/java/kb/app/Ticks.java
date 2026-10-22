@@ -518,6 +518,20 @@ public final class Ticks {
         return m;
     }
 
+    /** 마지막 기록 {at: 'yyyy-MM-ddTHH:mm', rows} (기록이 없으면 at null, rows 빈 목록). */
+    Map<String, Object> last() throws IOException {
+        Map<String, Object> out = new LinkedHashMap<>();
+        try (Connection c = connect(); Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery("SELECT at, payload FROM " + table + " ORDER BY at DESC LIMIT 1")) {
+            boolean any = rs.next();
+            out.put("at", any ? rs.getString(1) : null);
+            out.put("rows", any ? GSON.fromJson(rs.getString(2), ROWS) : List.of());
+        } catch (SQLException e) {
+            throw new IOException(db.getFileName() + " 저장소 오류: " + e.getMessage(), e);
+        }
+        return out;
+    }
+
     private List<List<Object>> load(Connection c, String at) throws SQLException {
         if (at == null) {
             return new ArrayList<>();
