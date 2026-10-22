@@ -11,6 +11,17 @@ import org.junit.jupiter.api.Test;
 
 class ChartTest {
 
+    /** 분봉: 시각 t(HHMM)를 붙이고 시각 순, 같은 시각 중복 제거 (chart.py 자체 점검과 같음). tm은 문자열·숫자 둘 다 */
+    @Test
+    void minuteCandlesCarryTimeInOrder() {
+        java.util.function.BiFunction<String, Object, Map<String, Object>> m = (d, tm) -> Map.of("dt", d, "tm", tm,
+                "opn_prc_p2", 1, "hgh_prc_p2", 1, "lw_prc_p2", 1, "cls_prc_p2", 1, "vlm", 1, "dl_tw_amt", 1);
+        List<Map<String, Object>> cs = Chart.candles(List.of(m.apply("20261022", "091000"), m.apply("20261022", 90500L),
+                m.apply("20261021", "153000"), m.apply("20261022", "091000")), "p2", 1);
+        assertEquals(List.of("20261021 1530", "20261022 0905", "20261022 0910"),
+                cs.stream().map(c -> c.get("d") + " " + c.get("t")).collect(java.util.stream.Collectors.toList()));
+    }
+
     /** 모니터 종목: 없으면 빈 목록, 잘못된 종목·중복은 버림, 통째로 교체, 깨진 파일은 빈 목록 (chart.py 자체 점검과 같은 경우). */
     @Test
     void monitorItemsAreValidatedAndSaved() throws Exception {

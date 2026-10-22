@@ -23,6 +23,8 @@ from kb_client import KBApiError, KBClient
 
 LIST_CACHE_SECONDS = 3600  # 상장 종목 목록은 하루에 거의 안 바뀜
 CHART_DAYS = "250"
+MINUTE_BARS = "800"  # 분봉 개수 (국내 1분봉은 시간외 포함 약 하루, 5분봉은 약 5일)
+MINUTES = (1, 3, 5)
 US_EXCHANGES = ("NAS", "NYS", "AMX")  # 나스닥, 뉴욕, 아멕스(NYSE Arca ETF 포함)
 TICKER = re.compile(r"[A-Z][A-Z.]{0,5}")
 
@@ -34,8 +36,10 @@ _recent_lock = threading.Lock()
 
 # 차트 설정 (기간, 이평선·볼린저밴드 표시): 화면에서 바꿀 때마다 chart_settings.json에 저장해 다음에도 그대로 엽니다.
 SETTINGS_FILE = Path(__file__).resolve().parent / "chart_settings.json"
-DEFAULT_SETTINGS = {"period": "6M", "ma5": True, "ma20": True, "ma60": True, "ma120": False, "bb": False, "rsi": False, "macd": False}
+DEFAULT_SETTINGS = {"period": "6M", "ma5": True, "ma20": True, "ma60": True, "ma120": False, "bb": False, "rsi": False, "macd": False,
+                    "interval": "D", "ema5": True, "ema9": True, "ema20": True}
 PERIODS = ("1M", "3M", "6M", "1Y")
+INTERVALS = ("D", "1", "3", "5")  # 일봉, 1·3·5분봉
 
 
 def settings() -> dict:
@@ -52,7 +56,9 @@ def _valid_settings(base: dict, d: dict) -> dict:
     out = dict(base)
     if d.get("period") in PERIODS:
         out["period"] = d["period"]
-    for k in ("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd"):
+    if d.get("interval") in INTERVALS:
+        out["interval"] = d["interval"]
+    for k in ("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd", "ema5", "ema9", "ema20"):
         if isinstance(d.get(k), bool):
             out[k] = d[k]
     return out
@@ -173,25 +179,34 @@ def _candles(rows: list[dict], suffix: str, value_scale: float) -> list[dict]:
                  "c": _f(r[f"cls_prc_{suffix}"]), "v": _f(r.get("vlm")), "amt": _f(r.get("dl_tw_amt")) * value_scale}
         except (KeyError, ValueError):
             continue  # 필드가 밀린 행
+        if "tm" in r:  # 분봉: 시각 HHMM (그 시장 현지 시간)
+            c["t"] = str(r["tm"]).strip().zfill(6)[:4]
+            if not c["t"].isdigit():
+                continue
         if _valid_day(d) and c["c"] > 0:
             out.append(c)
-    return sorted({c["d"]: c for c in out}.values(), key=lambda c: c["d"])  # 같은 날 중복 제거, 오래된 날부터
+    key = lambda c: c["d"] + c.get("t", "")
+    return sorted({key(c): c for c in out}.values(), key=key)  # 같은 날(분봉은 같은 시각) 중복 제거, 오래된 것부터
 
 
-def chart(client: KBClient, market: str, code: str, exchange: str = "", save: bool = True) -> dict:
-    """일봉 차트. save=False(?recent=0)면 최근 검색에 남기지 않음 (시그널 목록이 보유 종목 차트를 읽을 때)."""
+def chart(client: KBClient, market: str, code: str, exchange: str = "", save: bool = True, minutes: int = 0) -> dict:
+    """일봉 차트. save=False(?recent=0)면 최근 검색에 남기지 않음 (시그널 목록이 보유 종목 차트를 읽을 때).
+    minutes=1|3|5면 분봉 (캔들에 시각 t). 국내는 그 분봉을, 미국은 KB가 1분봉만 줘서 1분봉을 주고 bars=1로 알림 (화면이 묶음)."""
     code = code.strip()
+    if minutes and minutes not in MINUTES:
+        raise ValueError(f"분봉은 1·3·5분입니다: {minutes}")
     if market == "kr":
         if not re.fullmatch(r"[0-9A-Z]{6}", code):
             raise ValueError(f"국내 종목번호는 6자리입니다: {code}")
         m = client.call("IVM10050", {"is_cd": code})
         board = "KOSDAQ" if str(m.get("indx_nm") or "").startswith("코스닥") else "KOSPI"  # ETF는 indx_nm이 비어 KOSPI
         rows = client.call("IVS11560", {
-            "info_ccd": "1", "mkt_clsf": "1" if board == "KOSDAQ" else "0", "chrt_clsf": "D", "minute_tck_indx": "",
-            "is_cd": code, "inq_clsf": "2", "strt_dy": "", "inq_cnt": CHART_DAYS}).get("out2", [])
+            "info_ccd": "1", "mkt_clsf": "1" if board == "KOSDAQ" else "0", "chrt_clsf": "B" if minutes else "D",
+            "minute_tck_indx": str(minutes or ""), "is_cd": code, "inq_clsf": "2", "strt_dy": "",
+            "inq_cnt": MINUTE_BARS if minutes else CHART_DAYS}).get("out2", [])
         name = next((s["name"] for s in kr_stocks(client) if s["code"] == code), code)
-        out = {"market": "kr", "code": code, "name": name, "exchange": board, "currency": "KRW",
-               "candles": _candles(rows, "p2", 10)}  # 국내 차트 거래대금은 10원 단위
+        out = {"market": "kr", "code": code, "name": name, "exchange": board, "currency": "KRW", "bars": minutes,
+               "candles": _candles(rows, "p2", 1 if minutes else 10)}  # 국내 일봉 거래대금은 10원 단위, 분봉은 원
         if save:
             remember(out)
         return out
@@ -205,14 +220,14 @@ def chart(client: KBClient, market: str, code: str, exchange: str = "", save: bo
     for x in exchanges:
         try:
             out = client.call("GSC10060", {
-                "chrt_clsf": "3", "mdfy_stk_prc_use_f": "", "is_cd": code, "clsf": "1",  # chrt_clsf 3 = 일봉
-                "srch_strt_dy": time.strftime("%Y%m%d"), "rcrd_c": CHART_DAYS, "bndl": "", "krx_cd": x})
+                "chrt_clsf": "2" if minutes else "3", "mdfy_stk_prc_use_f": "", "is_cd": code, "clsf": "1",  # chrt_clsf 2 = 1분봉, 3 = 일봉
+                "srch_strt_dy": time.strftime("%Y%m%d"), "rcrd_c": MINUTE_BARS if minutes else CHART_DAYS, "bndl": "", "krx_cd": x})
         except KBApiError:
             continue
         candles = _candles(out.get("out2", []), "p4", 1)
         if candles:
             name = str(out.get("hngl_is_nm") or "").strip() or str(out.get("eng_is_nm") or "").strip() or code
-            out = {"market": "us", "code": code, "name": name, "exchange": x, "currency": "USD", "candles": candles}
+            out = {"market": "us", "code": code, "name": name, "exchange": x, "currency": "USD", "bars": 1 if minutes else 0, "candles": candles}
             if save:
                 remember(out)
             return out
@@ -239,6 +254,9 @@ if __name__ == "__main__":
                    {"dt": "20260101", "opn_prc_p2": 9, "hgh_prc_p2": 9, "lw_prc_p2": 9, "cls_prc_p2": 9, "vlm": 1, "dl_tw_amt": 1},
                    {"dt": "5803-3893", "opn_prc_p2": 1, "hgh_prc_p2": 1, "lw_prc_p2": 1, "cls_prc_p2": 1}], "p2", 10)
     assert [c["d"] for c in cs] == ["20260101", "20260102"] and cs[1]["amt"] == 30, cs
+    m = lambda d, tm, c: {"dt": d, "tm": tm, "opn_prc_p2": c, "hgh_prc_p2": c, "lw_prc_p2": c, "cls_prc_p2": c, "vlm": 1, "dl_tw_amt": c}
+    cs = _candles([m("20261022", "091000", 3), m("20261022", "90500", 2), m("20261021", "153000", 1), m("20261022", "091000", 3)], "p2", 1)
+    assert [(c["d"], c["t"]) for c in cs] == [("20261021", "1530"), ("20261022", "0905"), ("20261022", "0910")], cs  # 분봉: 시각 순, 중복 제거
     # 최근 검색: 최신순, 중복은 앞으로, RECENT_MAX개 유지, 깨진 줄 무시
     import tempfile
     RECENT_FILE = Path(tempfile.mkdtemp()) / "recent.txt"

@@ -25,7 +25,7 @@ API:
     GET /api/quarters?market=kr|us -> {"quarters", "asOf", "sectors": [{"name", "values"}], "stocks": [...], "failed"}
                                       히트맵 종목의 분기별 일평균 거래대금 (차트 TR, 10분 캐시)
     GET /api/search?q=삼성         -> {"query", "results": [{"market", "code", "name", "exchange"}]}  국내 이름·종목번호, 미국 티커
-    GET /api/chart?market=kr|us&code=005930[&exchange=NAS][&recent=0] -> {"market", "code", "name", "exchange", "currency", "candles": [{"d","o","h","l","c","v","amt"}]}
+    GET /api/chart?market=kr|us&code=005930[&exchange=NAS][&recent=0][&minutes=1|3|5] -> {"market", "code", "name", "exchange", "currency", "bars", "candles": [{"d","o","h","l","c","v","amt"(,"t")}]}
     GET /api/recent                -> {"items": [{"market", "code", "exchange", "name"}]}  최근 검색 종목 (recent_searches.txt, 최대 10개)
     GET /api/settings              -> {"period", "ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd"}  차트 설정 (chart_settings.json)
     POST /api/settings  {...}      -> 바꾼 설정을 저장하고 저장된 값을 돌려줌 (모르는 키·잘못된 값은 버림)
@@ -191,7 +191,8 @@ def make_handler(client: KBClient):
             elif url.path == "/api/search":
                 self._api(lambda q: chart.search(client, q.get("q", [""])[0]), parse_qs(url.query))
             elif url.path == "/api/chart":
-                self._api(lambda q: chart.chart(client, q.get("market", ["kr"])[0], q.get("code", [""])[0], q.get("exchange", [""])[0], q.get("recent", ["1"])[0] != "0"), parse_qs(url.query))
+                self._api(lambda q: chart.chart(client, q.get("market", ["kr"])[0], q.get("code", [""])[0], q.get("exchange", [""])[0], q.get("recent", ["1"])[0] != "0",
+                                                int(q.get("minutes", ["0"])[0] or 0)), parse_qs(url.query))
             elif url.path == "/api/settings":
                 self._api(lambda q: chart.settings(), {})
             elif url.path == "/api/monitor":

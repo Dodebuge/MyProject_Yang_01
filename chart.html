@@ -7,6 +7,7 @@
 <!--
   종목 검색 + 일봉 차트. dividends_web.py가 /chart 로 이 파일을 제공합니다.
   검색은 /api/search?q= (국내 이름·종목번호, 미국 티커), 차트는 /api/chart?market=kr|us&code= (최근 약 1년 일봉).
+  1·3·5분봉은 &minutes= (국내는 KB 분봉 그대로, 미국은 1분봉을 화면에서 묶음). 분봉에서는 EMA 5·9·20, 정배열, 20EMA 눌림을 보여 줌.
   /chart?market=kr&code=005930 처럼 주소로 바로 열 수 있고, 주소에 종목이 없으면 마지막으로 본 종목을 엽니다.
   서버에 저장된 그 종목의 마지막 차트(?cached=1)를 먼저 그리고 KB 응답이 오면 교체합니다.
 -->
@@ -19,6 +20,7 @@
   --up: #e34948; --down: #2a78d6;
   --ma5: #e0912b; --ma20: #1f8a4c; --ma60: #8a5cd6; --ma120: #9a6b3f; --bb: #0e9aa7;
   --rsi: #c2477a; --macd: #2f6fd0; --signal: #d9603b;
+  --ema5: #e0912b; --ema9: #c2477a; --ema20: #1f8a4c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -29,6 +31,7 @@
     --up: #e66767; --down: #3987e5;
     --ma5: #f0a646; --ma20: #3fb36d; --ma60: #a685e8; --ma120: #c08c5c; --bb: #2cc0cc;
   --rsi: #e2709d; --macd: #5b93ea; --signal: #ef8358;
+    --ema5: #f0a646; --ema9: #e2709d; --ema20: #3fb36d;
   }
 }
 :root[data-theme="dark"] {
@@ -39,6 +42,7 @@
   --up: #e66767; --down: #3987e5;
   --ma5: #f0a646; --ma20: #3fb36d; --ma60: #a685e8; --ma120: #c08c5c; --bb: #2cc0cc;
   --rsi: #e2709d; --macd: #5b93ea; --signal: #ef8358;
+  --ema5: #f0a646; --ema9: #e2709d; --ema20: #3fb36d;
 }
 
 * { box-sizing: border-box; }
@@ -63,6 +67,7 @@ input { cursor: text; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 13px; }
 .seg button[aria-pressed="true"] { background: var(--select); color: var(--series-1); font-weight: 600; }
+.segs { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
 .card + .card { margin-top: 12px; }
@@ -153,7 +158,9 @@ input { cursor: text; }
     <p class="sub" id="sig-status">보유 종목(ETF 제외)과 최근 검색 종목의 최근 일봉으로 계산합니다.</p>
     <div id="sig-body"></div>
   </section>
-  <p class="note">국내는 KB OpenAPI 상장 종목 목록(IVS10920)에서 이름·종목번호로, 미국은 티커로 찾습니다(나스닥·뉴욕·아멕스). 일봉은 국내 IVS11560, 미국 GSC10060(15분 지연)으로 최근 약 1년을 받습니다.</p>
+  <p class="note">국내는 KB OpenAPI 상장 종목 목록(IVS10920)에서 이름·종목번호로, 미국은 티커로 찾습니다(나스닥·뉴욕·아멕스). 일봉은 국내 IVS11560, 미국 GSC10060(15분 지연)으로 최근 약 1년을 받습니다.
+    분봉은 최근 800개(국내는 시간외 NXT 포함, 미국은 1분봉을 3·5분으로 묶음)를 받아 마지막 150개를 그립니다.
+    분봉의 EMA 5·9·20: 5 &gt; 9 &gt; 20이면 정배열(상승 추세), 반대면 역배열. ▲ 20EMA 눌림 = 상승 추세(9EMA &gt; 20EMA, 20EMA 상승)에서 20EMA 위에 있던 가격이 내려와 저가가 20EMA에 처음 닿고(0.2% 이내) 종가는 20EMA 위인 봉. 투자 판단의 참고용입니다.</p>
 </div>
 
 <script src="signals.js"></script>
@@ -164,21 +171,59 @@ const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleStri
 const compact = n => n >= 1e12 ? fmt(n / 1e12, 1) + "조" : n >= 1e8 ? fmt(n / 1e8, 0) + "억" : n >= 1e4 ? fmt(n / 1e4, 0) + "만" : fmt(n);
 const day = d => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
 const PERIODS = { "1M": 21, "3M": 63, "6M": 126, "1Y": 9999 };
-const S = { data: null, period: "6M", hover: null, stale: "" };  // stale: "" | "loading" | 새로 조회 실패 메시지
+const INTERVALS = { D: "일봉", 1: "1분", 3: "3분", 5: "5분" };
+const MINUTE_BARS = 150;  // 분봉 화면에 보이는 봉 수 (지표는 받은 분봉 전체로 계산)
+const EMAS = [5, 9, 20];
+const S = { data: null, period: "6M", iv: "D", hover: null, stale: "" };  // iv: 일봉 D | 분봉 1·3·5. stale: "" | "loading" | 새로 조회 실패 메시지
+const hm = t => `${t.slice(0, 2)}:${t.slice(2)}`;
 
 // ---------------------------------------------------------------- 보조지표 (계산은 signals.js: MAS, BB, RSI_N, MACD, sma, ema, rsi, macd, bollinger)
-const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false, rsi: false, macd: false };  // 시작할 때 서버의 chart_settings.json 값으로 바뀜
+const IND = { ma5: true, ma20: true, ma60: true, ma120: false, bb: false, rsi: false, macd: false, ema5: true, ema9: true, ema20: true };  // 시작할 때 서버의 chart_settings.json 값으로 바뀜
+
+// 분봉 n분 묶기 (미국은 KB가 1분봉만 줌): 같은 날 n분 칸마다 시가 = 첫 봉, 고가·저가, 종가 = 마지막 봉, 거래량·거래대금 합
+function group(cs, n) {
+  const out = [];
+  for (const c of cs) {
+    const m = +c.t.slice(0, 2) * 60 + +c.t.slice(2), b = m - m % n, t = String(Math.floor(b / 60)).padStart(2, "0") + String(b % 60).padStart(2, "0");
+    const g = out.at(-1);
+    if (g && g.d === c.d && g.t === t) Object.assign(g, { h: Math.max(g.h, c.h), l: Math.min(g.l, c.l), c: c.c, v: g.v + c.v, amt: g.amt + c.amt });
+    else out.push({ ...c, t });
+  }
+  return out;
+}
+
+// 분봉 단기 추세: EMA 5·9·20 정배열(5 > 9 > 20) = 상승 추세, 역배열 = 하락 추세.
+// 20EMA 눌림: 상승 추세(직전 봉 9EMA > 20EMA, 20EMA가 3봉 전보다 높음)에서 20EMA 위에 있던 가격이 내려와
+// 저가가 20EMA에 처음 닿고(0.2% 이내) 종가는 20EMA 위인 봉 = 진입 자리로 봄
+function emaTrend(cs) {
+  const cl = cs.map(c => c.c), e = Object.fromEntries(EMAS.map(n => [n, ema(cl, n)]));
+  const order = i => e[20][i] == null ? 0 : e[5][i] > e[9][i] && e[9][i] > e[20][i] ? 1 : e[5][i] < e[9][i] && e[9][i] < e[20][i] ? -1 : 0;
+  const pull = cs.map((c, i) => i >= 3 && e[20][i - 3] != null && e[9][i - 1] > e[20][i - 1] && e[20][i] > e[20][i - 3]
+    && cs[i - 1].l > e[20][i - 1] * 1.002 && c.l <= e[20][i] * 1.002 && c.c >= e[20][i]);  // 직전 봉은 20EMA 위에 떠 있다가 이 봉에서 처음 닿음
+  return { e, order, pull };
+}
+function trendBadges(cs, tr) {
+  const n = cs.length - 1, o = tr.order(n), e20 = tr.e[20][n];
+  if (e20 == null) return `<span class="sig">EMA 20을 그리기에 분봉이 부족합니다</span>`;
+  const gap = (cs[n].c / e20 - 1) * 100, lastPull = tr.pull.lastIndexOf(true);
+  return `<span class="sig ${o > 0 ? "buy" : o < 0 ? "sell" : ""}" title="EMA 5 ${fmt(tr.e[5][n], 2)} · 9 ${fmt(tr.e[9][n], 2)} · 20 ${fmt(e20, 2)}">${
+      o > 0 ? "▲ EMA 정배열 (상승 추세)" : o < 0 ? "▼ EMA 역배열 (하락 추세)" : "EMA 혼조"}</span>`
+    + (tr.pull[n] ? `<span class="sig buy">▲ 20EMA 눌림 (진입 자리)</span>` : "")
+    + `<span class="sig">20EMA 대비 ${gap > 0 ? "+" : ""}${fmt(gap, 2)}%</span>`
+    + (lastPull >= 0 && !tr.pull[n] ? `<span class="sig">최근 20EMA 눌림 ${+cs[lastPull].d.slice(4, 6)}/${+cs[lastPull].d.slice(6)} ${hm(cs[lastPull].t)}</span>` : "");
+}
 
 // 차트 설정(기간, 지표 체크)은 서버의 chart_settings.json에 저장해 다음에 열 때도 그대로 씁니다
 async function loadSettings() {
   try {
     const s = await getJson("api/settings");
     if (s.period in PERIODS) S.period = s.period;
+    if (s.interval in INTERVALS) S.iv = s.interval;
     for (const k in IND) if (typeof s[k] === "boolean") IND[k] = s[k];
   } catch { /* 저장된 설정을 못 읽어도 기본값으로 차트는 그림 */ }
 }
 function saveSettings() {
-  fetch("api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period: S.period, ...IND }) })
+  fetch("api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period: S.period, interval: S.iv, ...IND }) })
     .catch(() => {});  // 저장 실패해도 화면은 그대로 (다음에 열 때 이전 설정)
 }
 
@@ -298,7 +343,9 @@ let loadSeq = 0;
 async function load(params) {
   const seq = ++loadSeq;
   $("#chart-card").hidden = false;
-  $("#chart-body").innerHTML = `<div class="loading"><div class="spinner"></div>${esc(params.get("code"))} 일봉을 불러오고 있습니다.</div>`;
+  params = new URLSearchParams(params);
+  if (S.iv !== "D") params.set("minutes", S.iv);
+  $("#chart-body").innerHTML = `<div class="loading"><div class="spinner"></div>${esc(params.get("code"))} ${INTERVALS[S.iv]}${S.iv === "D" ? "" : "봉"}을 불러오고 있습니다.</div>`;
   const show = (d, stale) => {
     S.data = d; S.hover = null; S.stale = stale;
     document.title = `${d.name} 차트`;
@@ -337,10 +384,11 @@ async function loadRecent() {
 }
 
 function render() {
-  const d = S.data, all = d.candles;
-  if (!all.length) { $("#chart-body").innerHTML = `<div class="empty">일봉 데이터가 없습니다.</div>`; return; }
+  const d = S.data, minute = d.bars > 0, all = minute && d.bars < +S.iv ? group(d.candles, +S.iv) : d.candles;
+  if (!all.length) { $("#chart-body").innerHTML = `<div class="empty">${minute ? "분봉" : "일봉"} 데이터가 없습니다.</div>`; return; }
   const dp = d.currency === "USD" ? 2 : 0, unit = d.currency === "USD" ? "$" : "";
-  const cs = all.slice(-PERIODS[S.period]);
+  const cs = all.slice(minute ? -MINUTE_BARS : -PERIODS[S.period]);
+  const tr = minute ? emaTrend(all) : null;
   const last = all[all.length - 1], prev = all[all.length - 2];
   const chg = prev ? last.c - prev.c : 0, pct = prev ? chg / prev.c * 100 : 0;
   const ret = (last.c / cs[0].c - 1) * 100;
@@ -349,16 +397,20 @@ function render() {
   $("#chart-body").innerHTML = `
     <div class="head">
       <div>
-        <h2>${esc(d.name)} <span class="sub">${esc(d.code)} · ${esc(d.exchange)} · ${day(last.d)} 기준${S.stale === "loading" ? ` <span class="stale">· 이전 조회 값 · 새로 불러오는 중…</span>`
+        <h2>${esc(d.name)} <span class="sub">${esc(d.code)} · ${esc(d.exchange)} · ${minute ? `${INTERVALS[S.iv]}봉 · ` : ""}${day(last.d)}${last.t ? " " + hm(last.t) : ""} 기준${S.stale === "loading" ? ` <span class="stale">· 이전 조회 값 · 새로 불러오는 중…</span>`
           : S.stale ? ` <span class="stale bad">· 새로 조회하지 못해 이전 값을 보여 줍니다: ${esc(S.stale)}</span>` : ""}</span></h2>
         <div><span class="price">${unit}${fmt(last.c, dp)}</span>
-          <span class="chg ${cls(chg)}">${sign(chg)}${fmt(chg, dp)} (${sign(pct)}${fmt(pct, 2)}%)</span></div>
-        <div class="sigs">${sigBadges(signalsOf(all))}</div>
+          <span class="chg ${cls(chg)}" ${minute ? `title="직전 봉 대비"` : ""}>${sign(chg)}${fmt(chg, dp)} (${sign(pct)}${fmt(pct, 2)}%)</span></div>
+        <div class="sigs">${minute ? trendBadges(all, tr) : sigBadges(signalsOf(all))}</div>
       </div>
-      <div class="seg" role="group" aria-label="기간">${Object.keys(PERIODS).map(p => `<button data-p="${p}" aria-pressed="${p === S.period}">${p}</button>`).join("")}</div>
+      <div class="segs">
+        <div class="seg" role="group" aria-label="봉">${Object.entries(INTERVALS).map(([k, v]) => `<button data-iv="${k}" aria-pressed="${k === S.iv}">${v}</button>`).join("")}</div>
+        ${minute ? "" : `<div class="seg" role="group" aria-label="기간">${Object.keys(PERIODS).map(p => `<button data-p="${p}" aria-pressed="${p === S.period}">${p}</button>`).join("")}</div>`}
+      </div>
     </div>
-    <div class="inds" role="group" aria-label="보조지표"><span class="label">이평선</span>
-      ${MAS.map(n => `<label><input type="checkbox" data-ind="ma${n}" ${IND["ma" + n] ? "checked" : ""}><i style="background:var(--ma${n})"></i>${n}</label>`).join("")}
+    <div class="inds" role="group" aria-label="보조지표"><span class="label">${minute ? "지수이평" : "이평선"}</span>
+      ${minute ? EMAS.map(n => `<label><input type="checkbox" data-ind="ema${n}" ${IND["ema" + n] ? "checked" : ""}><i style="background:var(--ema${n})"></i>EMA ${n}</label>`).join("")
+        : MAS.map(n => `<label><input type="checkbox" data-ind="ma${n}" ${IND["ma" + n] ? "checked" : ""}><i style="background:var(--ma${n})"></i>${n}</label>`).join("")}
       <span class="label" style="margin-left:6px">밴드</span>
       <label><input type="checkbox" data-ind="bb" ${IND.bb ? "checked" : ""}><i style="background:var(--bb)"></i>볼린저 ${BB.n},${BB.k}</label>
       <span class="label" style="margin-left:6px">보조</span>
@@ -370,9 +422,15 @@ function render() {
       <div><span>기간 수익률</span><b class="${cls(ret)}">${sign(ret)}${fmt(ret, 2)}%</b></div>
       <div><span>기간 최고</span>${unit}${fmt(Math.max(...cs.map(c => c.h)), dp)}</div>
       <div><span>기간 최저</span>${unit}${fmt(Math.min(...cs.map(c => c.l)), dp)}</div>
-      <div><span>최근 거래대금</span>${unit}${compact(last.amt)}${d.currency === "USD" ? "" : "원"}</div>
+      <div><span>${minute ? "마지막 봉 거래대금" : "최근 거래대금"}</span>${unit}${compact(last.amt)}${d.currency === "USD" ? "" : "원"}</div>
     </div>`;
-  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { S.period = b.dataset.p; S.hover = null; saveSettings(); render(); });
+  document.querySelectorAll(".seg button[data-p]").forEach(b => b.onclick = () => { S.period = b.dataset.p; S.hover = null; saveSettings(); render(); });
+  document.querySelectorAll(".seg button[data-iv]").forEach(b => b.onclick = () => {
+    if (b.dataset.iv === S.iv) return;
+    S.iv = b.dataset.iv;
+    saveSettings();
+    load(new URLSearchParams(location.search));  // 일봉·분봉은 KB에서 따로 받음
+  });
   document.querySelectorAll(".inds input").forEach(c => c.onchange = () => {
     IND[c.dataset.ind] = c.checked;
     saveSettings();
@@ -381,14 +439,15 @@ function render() {
   });
   // 지표는 1년 전체로 계산한 뒤 보이는 구간만 잘라 씁니다 (짧은 기간에서도 120일선이 왼쪽 끝부터 나옴)
   const closes = all.map(c => c.c), from = all.length - cs.length;
-  const lines = MAS.filter(n => IND["ma" + n]).map(n => ({ key: "ma" + n, label: `MA${n}`, vs: sma(closes, n).slice(from) }));
+  const lines = minute ? EMAS.filter(n => IND["ema" + n]).map(n => ({ key: "ema" + n, label: `EMA${n}`, vs: tr.e[n].slice(from) }))
+    : MAS.filter(n => IND["ma" + n]).map(n => ({ key: "ma" + n, label: `MA${n}`, vs: sma(closes, n).slice(from) }));
   const band = IND.bb ? bollinger(closes, BB.n, BB.k).slice(from) : null;
   const osc = { rsi: IND.rsi && rsi(closes, RSI_N).slice(from), macd: IND.macd && macd(closes, MACD.fast, MACD.slow, MACD.signal).slice(from) };
-  draw(cs, dp, unit, lines, band, osc);
+  draw(cs, dp, unit, lines, band, osc, tr ? tr.pull.slice(from) : []);
 }
 
 // ---------------------------------------------------------------- 그리기 (SVG 캔들 + 거래량)
-function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
+function draw(cs, dp, unit, lines = [], band = null, osc = {}, marks = []) {
   const box = $("#plot"), W = box.clientWidth, H = Math.max(260, Math.min(420, W * 0.5));
   // 보조지표(RSI, MACD)는 거래량 아래에 칸을 하나씩 붙여 같은 가로축으로 그림
   const panels = ["rsi", "macd"].filter(k => osc[k]), PH = 84, PG = 16, total = H + panels.length * (PH + PG);
@@ -405,13 +464,17 @@ function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
   const col = c => c.c > c.o ? "var(--up)" : c.c < c.o ? "var(--down)" : "var(--muted)";
 
   const ticks = Array.from({ length: 5 }, (_, i) => lo + span * i / 4);
-  const months = cs.map((c, i) => [c, i]).filter(([c], i) => i && c.d.slice(4, 6) !== cs[i - 1].d.slice(4, 6));
+  // 가로축: 일봉은 달이 바뀌는 곳, 분봉은 날·시가 바뀌는 곳
+  const minute = cs[0].t != null;
+  const months = cs.map((c, i) => [c, i]).filter(([c], i) => i && (minute ? c.d !== cs[i - 1].d || c.t.slice(0, 2) !== cs[i - 1].t.slice(0, 2)
+    : c.d.slice(4, 6) !== cs[i - 1].d.slice(4, 6)));
   const every = Math.ceil(months.length / Math.max(1, Math.floor(W / 70)));
-  let svg = `<svg viewBox="0 0 ${W} ${total}" height="${total}" role="img" aria-label="일봉 차트">`;
+  let svg = `<svg viewBox="0 0 ${W} ${total}" height="${total}" role="img" aria-label="${minute ? "분봉" : "일봉"} 차트">`;
   svg += ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)"/>
     <text x="${W - padR + 6}" y="${y(t) + 4}">${fmt(t, dp)}</text>`).join("");
   svg += months.filter((_, k) => k % every === 0).map(([c, i]) => `<line x1="${x(i)}" x2="${x(i)}" y1="${padT}" y2="${H - 20}" stroke="var(--grid)" stroke-dasharray="2 3"/>
-    <text x="${x(i)}" y="${H - 4}" text-anchor="middle">${c.d.slice(4, 6) === "01" ? c.d.slice(0, 4) : +c.d.slice(4, 6) + "월"}</text>`).join("");
+    <text x="${x(i)}" y="${H - 4}" text-anchor="middle">${minute ? (c.d !== cs[i - 1].d ? `${+c.d.slice(4, 6)}/${+c.d.slice(6)}` : +c.t.slice(0, 2) + "시")
+      : c.d.slice(4, 6) === "01" ? c.d.slice(0, 4) : +c.d.slice(4, 6) + "월"}</text>`).join("");
   // 값이 없는(null) 날은 건너뛰어 끊긴 선으로
   const path = (vs, fy = y) => vs.map((v, i) => v == null ? "" : `${i && vs[i - 1] != null ? "L" : "M"}${x(i).toFixed(1)} ${fy(v).toFixed(1)}`).join("");
   if (band) {
@@ -424,6 +487,8 @@ function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
     <rect x="${x(i) - bw / 2}" y="${Math.min(y(c.o), y(c.c))}" width="${bw}" height="${Math.max(1, Math.abs(y(c.o) - y(c.c)))}" fill="${col(c)}"/>
     <rect x="${x(i) - bw / 2}" y="${vy(c.v)}" width="${bw}" height="${H - 20 - vy(c.v)}" fill="${col(c)}" opacity=".45"/>`).join("");
   svg += lines.map(l => `<path d="${path(l.vs)}" fill="none" stroke="var(--${l.key})" stroke-width="1.5" stroke-linejoin="round"/>`).join("");
+  // 20EMA 눌림 봉: 저가 아래 ▲
+  svg += marks.map((m, i) => m ? `<path d="M${x(i)} ${y(cs[i].l) + 4}l4 7h-8z" fill="var(--up)"><title>20EMA 눌림</title></path>` : "").join("");
   const last = cs[n - 1];
   svg += `<line x1="${padL}" x2="${W - padR}" y1="${y(last.c)}" y2="${y(last.c)}" stroke="${col(last)}" stroke-dasharray="3 3"/>
     <rect x="${W - padR + 2}" y="${y(last.c) - 9}" width="${padR - 4}" height="18" rx="4" fill="${col(last)}"/>
@@ -457,7 +522,7 @@ function draw(cs, dp, unit, lines = [], band = null, osc = {}) {
   const tip = $("#tip"), cross = $("#cross"), el = box.querySelector("svg");
   const show = i => {
     const c = cs[i], p = i ? cs[i - 1].c : c.o, r = (c.c / p - 1) * 100;
-    tip.innerHTML = `${day(c.d)} · 시 ${fmt(c.o, dp)} 고 ${fmt(c.h, dp)} 저 ${fmt(c.l, dp)} 종 <b class="${r > 0 ? "up" : r < 0 ? "down" : ""}">${unit}${fmt(c.c, dp)} (${r > 0 ? "+" : ""}${fmt(r, 2)}%)</b> · 거래량 ${compact(c.v)}`
+    tip.innerHTML = `${day(c.d)}${c.t ? " " + hm(c.t) : ""}${marks[i] ? ` <b class="up">20EMA 눌림</b>` : ""} · 시 ${fmt(c.o, dp)} 고 ${fmt(c.h, dp)} 저 ${fmt(c.l, dp)} 종 <b class="${r > 0 ? "up" : r < 0 ? "down" : ""}">${unit}${fmt(c.c, dp)} (${r > 0 ? "+" : ""}${fmt(r, 2)}%)</b> · 거래량 ${compact(c.v)}`
       + (hasInd ? "<br>" + lines.map(l => `<span class="ind" style="color:var(--${l.key})">${l.label} ${fmt(l.vs[i], dp)}</span>`).join("")
         + (band ? `<span class="ind" style="color:var(--bb)">BB 상 ${fmt(band[i]?.up, dp)} 중 ${fmt(band[i]?.mid, dp)} 하 ${fmt(band[i]?.lo, dp)}</span>` : "")
         + (osc.rsi ? `<span class="ind" style="color:var(--rsi)">RSI ${fmt(osc.rsi[i], 1)}</span>` : "")

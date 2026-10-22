@@ -26,7 +26,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/recurring               소수점 정기 구매 내역 (거래내역 소수단위매수, 최근 반년)
  *   GET /api/transactions            최근 1달 거래내역
  *   GET /api/search?q=               종목 검색 (국내 이름·종목번호, 미국 티커)
- *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년)
+ *   GET /api/chart?market=kr|us&code= 일봉 차트 (최근 약 1년). &minutes=1|3|5면 분봉
  *   GET /api/kosdaq-volume          코스닥 전 종목 이번 주·전주 하루 평균 거래량 (10분 캐시)
  *   GET /api/kosdaq-intraday        장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/kosdaq-sim             같은 기록으로 매수·매도 시뮬레이션 (market=kosdaq|russell, buy·sell = SimModules 모듈 이름,
@@ -139,8 +139,8 @@ class ApiController {
     @GetMapping("/chart")
     ResponseEntity<Map<String, Object>> chart(@RequestParam(defaultValue = "kr") String market, @RequestParam(defaultValue = "") String code,
                                               @RequestParam(defaultValue = "") String exchange,
-                                              @RequestParam(defaultValue = "1") String recent) throws IOException {
-        return ok(chart.chart(market, code, exchange, !"0".equals(recent)));  // recent=0: 최근 검색에 안 남김
+                                              @RequestParam(defaultValue = "1") String recent, @RequestParam(defaultValue = "0") int minutes) throws IOException {
+        return ok(chart.chart(market, code, exchange, !"0".equals(recent), minutes));  // recent=0: 최근 검색에 안 남김
     }
 
     @GetMapping("/kosdaq-volume")

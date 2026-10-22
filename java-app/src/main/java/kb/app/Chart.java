@@ -38,6 +38,7 @@ final class Chart {
 
     private static final long LIST_CACHE_MS = 3_600_000;  // 상장 종목 목록은 하루에 거의 안 바뀜
     static final String CHART_DAYS = "250";
+    static final String MINUTE_BARS = "800";  // 분봉 개수 (국내 1분봉은 시간외 포함 약 하루, 5분봉은 약 5일)
     private static final List<String> US_EXCHANGES = Arrays.asList("NAS", "NYS", "AMX");  // 나스닥, 뉴욕, 아멕스(NYSE Arca ETF 포함)
     private static final Pattern TICKER = Pattern.compile("[A-Z][A-Z.]{0,5}");
     private static final Pattern KR_CODE = Pattern.compile("[0-9A-Z]{6}");
@@ -57,7 +58,8 @@ final class Chart {
     // ------------------------------------------------------------------ 차트 설정 (chart.py settings/save_settings와 같은 파일·같은 규칙)
 
     private static final List<String> PERIODS = Arrays.asList("1M", "3M", "6M", "1Y");
-    private static final List<String> FLAGS = Arrays.asList("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd");
+    private static final List<String> FLAGS = Arrays.asList("ma5", "ma20", "ma60", "ma120", "bb", "rsi", "macd", "ema5", "ema9", "ema20");
+    private static final List<String> INTERVALS = Arrays.asList("D", "1", "3", "5");  // 일봉, 1·3·5분봉
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     static Map<String, Object> defaultSettings() {
@@ -70,6 +72,10 @@ final class Chart {
         d.put("bb", false);
         d.put("rsi", false);
         d.put("macd", false);
+        d.put("interval", "D");
+        d.put("ema5", true);
+        d.put("ema9", true);
+        d.put("ema20", true);
         return d;
     }
 
@@ -79,6 +85,10 @@ final class Chart {
         JsonElement p = d.get("period");
         if (p != null && p.isJsonPrimitive() && PERIODS.contains(p.getAsString())) {
             out.put("period", p.getAsString());
+        }
+        JsonElement iv = d.get("interval");
+        if (iv != null && iv.isJsonPrimitive() && INTERVALS.contains(iv.getAsString())) {
+            out.put("interval", iv.getAsString());
         }
         for (String k : FLAGS) {
             JsonElement v = d.get(k);
@@ -319,8 +329,18 @@ final class Chart {
         return out;
     }
 
-    /** GET /api/chart?market=kr|us&code=&exchange=[&recent=0]. save가 false(recent=0)면 최근 검색에 남기지 않음 (시그널 목록용). */
     Map<String, Object> chart(String market, String rawCode, String exchange, boolean save) throws IOException {
+        return chart(market, rawCode, exchange, save, 0);
+    }
+
+    /**
+     * GET /api/chart?market=kr|us&code=&exchange=[&recent=0][&minutes=1|3|5]. save가 false(recent=0)면 최근 검색에 남기지 않음 (시그널 목록용).
+     * minutes가 1·3·5면 분봉 (캔들에 시각 t). 국내는 그 분봉을, 미국은 KB가 1분봉만 줘서 1분봉을 주고 bars=1로 알림 (화면이 묶음). chart.py와 같음.
+     */
+    Map<String, Object> chart(String market, String rawCode, String exchange, boolean save, int minutes) throws IOException {
+        if (minutes != 0 && minutes != 1 && minutes != 3 && minutes != 5) {
+            throw new IllegalArgumentException("분봉은 1·3·5분입니다: " + minutes);
+        }
         String code = rawCode == null ? "" : rawCode.trim();
         Map<String, Object> out = new LinkedHashMap<>();
         if ("kr".equals(market)) {
@@ -330,8 +350,9 @@ final class Chart {
             Map<String, Object> m = client.call("IVM10050", Heatmap.body("is_cd", code));
             String board = Values.str(m.get("indx_nm")).startsWith("코스닥") ? "KOSDAQ" : "KOSPI";  // ETF는 indx_nm이 비어 KOSPI
             List<Map<String, Object>> rows = KBClient.records(client.call("IVS11560", Heatmap.body("info_ccd", "1",
-                    "mkt_clsf", "KOSDAQ".equals(board) ? "1" : "0", "chrt_clsf", "D", "minute_tck_indx", "",
-                    "is_cd", code, "inq_clsf", "2", "strt_dy", "", "inq_cnt", CHART_DAYS)), "out2");
+                    "mkt_clsf", "KOSDAQ".equals(board) ? "1" : "0", "chrt_clsf", minutes > 0 ? "B" : "D",
+                    "minute_tck_indx", minutes > 0 ? String.valueOf(minutes) : "",
+                    "is_cd", code, "inq_clsf", "2", "strt_dy", "", "inq_cnt", minutes > 0 ? MINUTE_BARS : CHART_DAYS)), "out2");
             String name = code;
             for (Map<String, Object> s : krStocks()) {
                 if (s.get("code").equals(code)) {
@@ -343,7 +364,8 @@ final class Chart {
             out.put("name", name);
             out.put("exchange", board);
             out.put("currency", "KRW");
-            out.put("candles", candles(rows, "p2", 10));  // 국내 차트 거래대금은 10원 단위
+            out.put("bars", minutes);
+            out.put("candles", candles(rows, "p2", minutes > 0 ? 1 : 10));  // 국내 일봉 거래대금은 10원 단위, 분봉은 원
             if (save) {
                 remember(out);
             }
@@ -369,9 +391,9 @@ final class Chart {
         for (String x : exchanges) {
             Map<String, Object> r;
             try {
-                r = client.call("GSC10060", Heatmap.body("chrt_clsf", "3",  // 3 = 일봉
+                r = client.call("GSC10060", Heatmap.body("chrt_clsf", minutes > 0 ? "2" : "3",  // 2 = 1분봉, 3 = 일봉
                         "mdfy_stk_prc_use_f", "", "is_cd", code, "clsf", "1",
-                        "srch_strt_dy", LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE), "rcrd_c", CHART_DAYS, "bndl", "",
+                        "srch_strt_dy", LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE), "rcrd_c", minutes > 0 ? MINUTE_BARS : CHART_DAYS, "bndl", "",
                         "krx_cd", x));
             } catch (KBApiException e) {
                 continue;
@@ -387,6 +409,7 @@ final class Chart {
                 out.put("name", name.isEmpty() ? code : name);
                 out.put("exchange", x);
                 out.put("currency", "USD");
+                out.put("bars", minutes > 0 ? 1 : 0);
                 out.put("candles", cs);
                 if (save) {
                     remember(out);
@@ -415,7 +438,17 @@ final class Chart {
             k.put("c", c);
             k.put("v", Values.num(r.get("vlm")));
             k.put("amt", Values.num(r.get("dl_tw_amt")) * valueScale);
-            byDay.put(d, k);
+            String t = "";
+            if (r.containsKey("tm")) {  // 분봉: 시각 HHMM (그 시장 현지 시간)
+                Object tm = r.get("tm");
+                String raw = tm instanceof Number ? String.valueOf(((Number) tm).longValue()) : Values.str(tm).trim();
+                t = ("000000" + raw).substring(raw.length()).substring(0, 4);
+                if (!t.chars().allMatch(Character::isDigit)) {
+                    continue;
+                }
+                k.put("t", t);
+            }
+            byDay.put(d + t, k);  // 같은 날(분봉은 같은 시각) 중복 제거, 오래된 것부터
         }
         return new ArrayList<>(byDay.values());
     }
