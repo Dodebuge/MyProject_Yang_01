@@ -178,6 +178,19 @@ class VolumeTest {
                 pick(w.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 0, "volume-open-up", "tp-sl", "", 0, 0, null), "date", "buyAt", "prevAt"));
     }
 
+    @Test
+    void vwapUpBuysOnlyAboveVolumeWeightedAverage() throws Exception {
+        // VWAP = 누적 거래대금 ÷ 누적 거래량: 09:30은 1010원 < 1050원이라 안 사고 10:00(1100원 > 1066.7원)에 삼. 거래대금이 없는 Z는 안 삼 (volume.py와 같음)
+        Ticks v = new Volume(new KBClient("", "", "", "", ""), Files.createTempDirectory("vwap").resolve("kosdaq.db")).ticks;
+        Object[][] at = {{"09:00", 1000, 100, 100_000}, {"09:30", 1010, 200, 210_000}, {"10:00", 1100, 300, 320_000}, {"15:40", 1100, 400, 430_000}};
+        for (Object[] x : at) {
+            double ch = (int) x[1] / 10.0 - 100;  // 전일 종가 1000원
+            v.save("2026-10-15T" + x[0], List.of(Arrays.<Object>asList("V", "V", 1000, 0.0, 100, 0), Arrays.<Object>asList("Z", "Z", 1000, 0.0, 100, 0)));
+            v.save("2026-10-16T" + x[0], List.of(Arrays.<Object>asList("V", "V", x[1], ch, x[2], x[3]), Arrays.<Object>asList("Z", "Z", x[1], ch, x[2], 0)));
+        }
+        assertEquals(List.of("V 10:00"), pick(v.simulate(40, 300_000, 0, 0, "15:00", 0.23, true, 0, "vwap-up", "tp-sl", "", 0, 0, null), "code", "buyAt"));
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> pick(Map<String, Object> r, String... keys) {
         List<String> out = new ArrayList<>();

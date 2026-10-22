@@ -320,10 +320,13 @@ public final class Ticks {
                         double px = num(r.get(2));
                         double pv = prev.containsKey(r.get(0)) ? num(prev.get(r.get(0)).get(4)) : 0;
                         double ch = num(r.get(3));
+                        double vlm = num(r.get(4));
+                        double value = r.size() > 5 ? num(r.get(5)) : 0;
+                        double vwap = vlm > 0 && value > 0 ? value / vlm : px;  // 거래대금 없으면 현재가 (VWAP 위로 안 봄)
                         if (bought.contains(r.get(0)) || pv <= 0 || px <= 0 || ch >= 29.5 || spac && Values.str(r.get(1)).contains("스팩") || amount < px
                                 || allowedToday != null && t.compareTo(allowedToday.getOrDefault(Values.str(r.get(0)), "99:99")) < 0
-                                || !buyRule.test(Map.of("price", px, "change", ch, "ratio", (num(r.get(4)) / pv - 1) * 100,
-                                "open", opens.getOrDefault(r.get(0), px)), o)) {
+                                || !buyRule.test(Map.of("price", px, "change", ch, "ratio", (vlm / pv - 1) * 100,
+                                "open", opens.getOrDefault(r.get(0), px), "value", value, "vwap", vwap), o)) {
                             since.remove(r.get(0));
                             continue;
                         }

@@ -287,7 +287,8 @@ class Ticks:
                         if (code in bought or not pv or not px or num(r[3]) >= 29.5 or (spac and "스팩" in r[1]) or amount < px
                                 or (allowed is not None and t < allowed.get(d, {}).get(code, "99:99"))
                                 or not buy_rule(s := {"price": px, "change": num(r[3]), "ratio": (num(r[4]) / pv - 1) * 100,
-                                                      "open": opens.get(code, px)}, o)):
+                                                      "open": opens.get(code, px), "value": (val := num(r[5]) if len(r) > 5 else 0),
+                                                      "vwap": val / num(r[4]) if num(r[4]) and val else px}, o)):  # 거래대금 없으면 현재가 (VWAP 위로 안 봄)
                             since.pop(code, None)
                             continue
                         began = since.setdefault(code, t)
@@ -425,6 +426,12 @@ if __name__ == "__main__":
         w.save(f"2026-10-19T{hm}", [row("A", px, ch, v)])
     assert [(x["date"], x["buyAt"], x["prevAt"]) for x in w.simulate(min_ratio=40, hold=0)["trades"]] == [("2026-10-19", "09:30", "2026-10-16 09:30")]
     assert w.intraday("2026-10-19", "09:30")["prev"] == {"date": "2026-10-16", "at": "09:30"}
+    # VWAP = 누적 거래대금 ÷ 누적 거래량: 09:30은 1010원 < VWAP 1050원이라 안 사고 10:00(1100원 > 1066.7원)에 삼. 거래대금이 없는 Z는 안 삼
+    v = Ticks("시험", Path(tempfile.mkdtemp()) / "v.db", "v_tick", KST, 5, dtime(9, 0), dtime(15, 40), lambda c, a: [])
+    for hm, px, vol, val in [("09:00", 1000, 100, 100_000), ("09:30", 1010, 200, 210_000), ("10:00", 1100, 300, 320_000), ("15:40", 1100, 400, 430_000)]:
+        v.save(f"2026-10-15T{hm}", [row("V", 1000, 0.0, 100), row("Z", 1000, 0.0, 100)])
+        v.save(f"2026-10-16T{hm}", [["V", "V", px, px / 10 - 100, vol, val], row("Z", px, px / 10 - 100, vol)])  # 전일 종가 1000원
+    assert [(x["code"], x["buyAt"]) for x in v.simulate(min_ratio=40, hold=0, buy="vwap-up")["trades"]] == [("V", "10:00")]
     if "--offline" in sys.argv:
         print("ok")
         sys.exit()

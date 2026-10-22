@@ -8,7 +8,8 @@ import java.util.Map;
 /**
  * 코스닥 매수 시뮬레이션 모듈 (sim_modules.py와 같은 이름·규칙). Ticks.simulate(엔진)가 이름(buy, sell)으로 골라 끼웁니다.
  * 새 규칙은 BUY·SELL에 한 줄 추가하면 모니터 화면 선택 목록에 바로 나옵니다.
- * 매수 조건 s: price(현재가), change(전일 대비 %), ratio(전일 같은 시각 대비 누적 거래량 증가 %), open(시가). o: min, tp, sl (화면 옵션).
+ * 매수 조건 s: price(현재가), change(전일 대비 %), ratio(전일 같은 시각 대비 누적 거래량 증가 %), open(시가),
+ * value(누적 거래대금), vwap(거래량가중평균가 = 누적 거래대금 ÷ 누적 거래량). o: min, tp, sl (화면 옵션).
  * 매도: 그 거래 tr(buyPrice 등, 상태를 남겨도 됨)와 현재가 px(0 아님)로 이유를 돌려주면 팔고, null이면 계속 들고 있음.
  */
 final class SimModules {
@@ -38,6 +39,10 @@ final class SimModules {
                 (s, o) -> s.get("ratio") >= o.get("min") && s.get("price") > s.get("open") && s.get("change") > 0));
         BUY.put("volume-up", new Module<Buy>("거래량 증가 + 상승 (시가 무시)", (s, o) -> s.get("ratio") >= o.get("min") && s.get("change") > 0));
         BUY.put("surge", new Module<Buy>("급등 초입: 거래량 500%↑ + 등락 5~15%", (s, o) -> s.get("ratio") >= 500 && s.get("change") >= 5 && s.get("change") < 15));
+        BUY.put("surge-vwap", new Module<Buy>("급등 초입 + VWAP 위",
+                (s, o) -> s.get("ratio") >= 500 && s.get("change") >= 5 && s.get("change") < 15 && s.get("price") > s.get("vwap")));
+        BUY.put("vwap-up", new Module<Buy>("거래량 증가 + VWAP 위 + 상승",
+                (s, o) -> s.get("ratio") >= o.get("min") && s.get("price") > s.get("vwap") && s.get("change") > 0));
         SELL.put("tp-sl", new Module<Sell>("익절·손절, 아니면 마지막 기록", SimModules::tpSl));
         SELL.put("trailing", new Module<Sell>("익절 · 고점 대비 손절(추적), 아니면 마지막 기록", SimModules::trailing));
     }
