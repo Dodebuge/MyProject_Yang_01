@@ -2,9 +2,12 @@ package kb.app;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -12,49 +15,74 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 코스닥 매수 시뮬레이션 모듈 (sim_modules.py와 같은 이름·규칙·파일). Ticks.simulate(엔진)가 이름(buy, sell)으로 골라 끼웁니다.
- * 매수 조건은 설정(sim_buy_rules.json, 없으면 DEFAULT_BUY)의 조건 목록이라 모니터 화면에서 추가·수정합니다:
+ * 코스닥 매수 시뮬레이션 모듈 (sim_modules.py와 같은 이름·규칙·파일). Ticks.run(엔진)이 이름(buy, sell)으로 골라 씁니다.
+ * C처럼 씁니다: 매수 조건은 struct Rule { id, label, Cond all[] } 배열이고, 값은 번호(PRICE, CHANGE …)로 찾는 double 배열.
+ *
+ * 매수 조건은 설정(sim_buy_rules.json, 없으면 DEFAULT_BUY)이라 모니터 화면에서 추가·수정합니다:
  * {id, label, all: [{left: 값, op: > >= < <=, right: 숫자 | 값 | "min"}]} (모두 만족하면 매수 조건).
- * 값 = price(현재가), change(전일 대비 %), ratio(전일 같은 시각 대비 누적 거래량 증가 %), open(시가), value(누적 거래대금),
- * vwap(거래량가중평균가 = 누적 거래대금 ÷ 누적 거래량). "min" = 화면의 거래량 기준 %.
- * 매도는 코드 모듈(SELL): 그 거래 tr(buyPrice 등, 상태를 남겨도 됨)와 현재가 px(0 아님)로 이유를 돌려주면 팔고, null이면 계속 들고 있음.
+ * 값 = price(현재가), change(전일 대비 %), ratio(전일 같은 시각 대비 누적 거래량 증가 %), open(시가), vwap(거래량가중평균가), value(누적 거래대금).
+ * "min" = 화면의 거래량 기준 %.
+ * 매도는 함수 테이블(SELL_FN): 거래(Ticks.Trade)와 지금 가격으로 이유를 돌려주면 팔고, null이면 계속 들고 있음.
  */
 final class SimModules {
-    interface Buy {
-        boolean test(Map<String, Double> s, Map<String, Double> o);
+
+    private SimModules() {
     }
 
-    interface Sell {
-        String check(Map<String, Object> tr, double px, Map<String, Double> o);
+    // ------------------------------------------------------------------ 값 번호 (C의 enum field)
+
+    static final int PRICE = 0;
+    static final int CHANGE = 1;
+    static final int RATIO = 2;
+    static final int OPEN = 3;
+    static final int VWAP = 4;
+    static final int VALUE = 5;
+    static final int NFIELD = 6;
+    static final String[] FIELD_ID = {"price", "change", "ratio", "open", "vwap", "value"};
+    static final String[] FIELD_NAME = {"현재가", "등락률 %", "거래량 증가율 %", "시가", "VWAP", "누적 거래대금"};
+
+    // 비교 연산 (enum op)
+    static final int GT = 0;
+    static final int GE = 1;
+    static final int LT = 2;
+    static final int LE = 3;
+    static final String[] OP_ID = {">", ">=", "<", "<="};
+
+    // 오른쪽 값의 종류 (enum operand_kind)
+    static final int R_NUM = 0;
+    static final int R_FIELD = 1;
+    static final int R_MIN = 2;
+
+    /** 조건 하나: s[left] op 오른쪽 */
+    static final class Cond {
+        int left;
+        int op;
+        int rkind;
+        double rnum;   // rkind == R_NUM
+        int rfield;    // rkind == R_FIELD
     }
 
-    static final class Module<F> {
-        final String label;
-        final F rule;
-
-        Module(String label, F rule) {
-            this.label = label;
-            this.rule = rule;
-        }
+    /** 매수 조건 하나: all[]을 모두 만족하면 참 */
+    static final class Rule {
+        String id;
+        String label;
+        Cond[] all;
     }
 
-    /** 매수 조건 파일 (AppServlet·KbApplication이 데이터 폴더로 정함). null이면 기본 규칙만 (단위 테스트) */
-    static volatile Path rulesFile;
-
-    static final Map<String, String> FIELDS = new LinkedHashMap<>();
-    static final List<String> OPS = List.of(">", ">=", "<", "<=");
     static final int MAX_RULES = 30;
     static final int MAX_CONDS = 10;
     private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,39}");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    /** 매수 조건 파일 (AppConfig가 데이터 폴더로 정함). null이면 기본 규칙만 (단위 테스트) */
+    static volatile Path rulesFile;
+
     // surge: 10-20·10-21 -0.86%·+1.43%, surge-vwap: 10-20~10-22 알림 종목 +1.12%. surge300(화면 기본): 거래량 기준을 300%로 낮춘 surge,
     // 10-20~10-22 알림 종목 · 유지 30 · 익절 7 · 손절 5를 1분봉으로 다시 재면 10건 +1.64%. surge300은 Java 서버만 (sim_modules.py에는 없음)
     private static final String DEFAULT_BUY = "["
@@ -71,106 +99,194 @@ final class SimModules {
             + "{\"id\": \"vwap-up\", \"label\": \"거래량 증가 + VWAP 위 + 상승\", \"all\": [{\"left\": \"ratio\", \"op\": \">=\", \"right\": \"min\"},"
             + " {\"left\": \"price\", \"op\": \">\", \"right\": \"vwap\"}, {\"left\": \"change\", \"op\": \">\", \"right\": 0}]}]";
 
-    static final Map<String, Module<Sell>> SELL = new LinkedHashMap<>();
+    // ------------------------------------------------------------------ 매수 조건 검사
 
-    static {
-        FIELDS.put("price", "현재가");
-        FIELDS.put("change", "등락률 %");
-        FIELDS.put("ratio", "거래량 증가율 %");
-        FIELDS.put("open", "시가");
-        FIELDS.put("vwap", "VWAP");
-        FIELDS.put("value", "누적 거래대금");
-        SELL.put("tp-sl", new Module<Sell>("익절·손절, 아니면 마지막 기록", SimModules::tpSl));
-        SELL.put("trailing", new Module<Sell>("익절 · 고점 대비 손절(추적), 아니면 마지막 기록", SimModules::trailing));
+    /** s = 그 시각 그 종목의 값 (FIELD 번호로), min = 화면의 거래량 기준 %. 조건을 모두 만족하면 true */
+    static boolean test(Rule r, double[] s, double min) {
+        for (int i = 0; i < r.all.length; i++) {
+            Cond c = r.all[i];
+            double left = s[c.left];
+            double right;
+            if (c.rkind == R_NUM) {
+                right = c.rnum;
+            } else if (c.rkind == R_MIN) {
+                right = min;
+            } else {
+                right = s[c.rfield];
+            }
+            boolean ok;
+            switch (c.op) {
+                case GT: ok = left > right; break;
+                case GE: ok = left >= right; break;
+                case LT: ok = left < right; break;
+                default: ok = left <= right;
+            }
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
     }
 
-    private SimModules() {
+    // ------------------------------------------------------------------ 매도 모듈 (함수 테이블)
+
+    interface Sell {
+        String check(Ticks.Trade tr, double px, double tp, double sl);
     }
 
-    static String tpSl(Map<String, Object> tr, double px, Map<String, Double> o) {
-        double buy = (double) tr.get("buyPrice");
-        if (o.get("tp") > 0 && px >= buy * (1 + o.get("tp") / 100)) {
+    static String tpSl(Ticks.Trade tr, double px, double tp, double sl) {
+        if (tp > 0 && px >= tr.buyPrice * (1 + tp / 100)) {
             return "익절";
         }
-        return o.get("sl") > 0 && px <= buy * (1 - o.get("sl") / 100) ? "손절" : null;
+        if (sl > 0 && px <= tr.buyPrice * (1 - sl / 100)) {
+            return "손절";
+        }
+        return null;
     }
 
-    static String trailing(Map<String, Object> tr, double px, Map<String, Double> o) {
-        double buy = (double) tr.get("buyPrice");
-        double peak = Math.max(tr.containsKey("peak") ? (double) tr.get("peak") : buy, px);  // 산 뒤 기록 중 최고 현재가
-        tr.put("peak", peak);
-        if (o.get("tp") > 0 && px >= buy * (1 + o.get("tp") / 100)) {
+    static String trailing(Ticks.Trade tr, double px, double tp, double sl) {
+        tr.peak = Math.max(tr.peak > 0 ? tr.peak : tr.buyPrice, px);  // 산 뒤 기록 중 최고 현재가
+        if (tp > 0 && px >= tr.buyPrice * (1 + tp / 100)) {
             return "익절";
         }
-        return o.get("sl") > 0 && px <= peak * (1 - o.get("sl") / 100) ? "고점 대비 손절" : null;
+        if (sl > 0 && px <= tr.peak * (1 - sl / 100)) {
+            return "고점 대비 손절";
+        }
+        return null;
     }
 
-    /** 매수 조건 규칙 목록 검사. 잘못되면 IllegalArgumentException (화면에 그대로 보임). */
-    static List<Map<String, Object>> validRules(JsonElement rules) {
-        if (rules == null || !rules.isJsonArray() || rules.getAsJsonArray().size() < 1 || rules.getAsJsonArray().size() > MAX_RULES) {
-            throw new IllegalArgumentException("매수 조건은 1~" + MAX_RULES + "개입니다.");
+    static final String[] SELL_ID = {"tp-sl", "trailing"};
+    static final String[] SELL_LABEL = {"익절·손절, 아니면 마지막 기록", "익절 · 고점 대비 손절(추적), 아니면 마지막 기록"};
+    static final Sell[] SELL_FN = {SimModules::tpSl, SimModules::trailing};
+
+    static Sell sell(String name) {
+        for (int i = 0; i < SELL_ID.length; i++) {
+            if (SELL_ID[i].equals(name)) {
+                return SELL_FN[i];
+            }
         }
-        List<Map<String, Object>> out = new ArrayList<>();
-        Set<String> ids = new HashSet<>();
-        for (JsonElement e : rules.getAsJsonArray()) {
-            String id = e.isJsonObject() ? text(e.getAsJsonObject().get("id")) : "";
-            if (!ID.matcher(id).matches() || !ids.add(id)) {
-                throw new IllegalArgumentException("매수 조건 이름(id)은 영문 소문자·숫자·-로 40자까지, 서로 달라야 합니다: " + id);
+        throw new IllegalArgumentException("없는 매도 모듈입니다: " + name);
+    }
+
+    // ------------------------------------------------------------------ 매수 조건 파일
+
+    private static int indexOf(String[] names, String v) {
+        for (int i = 0; i < names.length; i++) {
+            if (names[i].equals(v)) {
+                return i;
             }
-            String label = text(e.getAsJsonObject().get("label")).trim().replaceAll("\\s+", " ");
-            label = label.isEmpty() ? id : label.substring(0, Math.min(60, label.length()));
-            JsonElement all = e.getAsJsonObject().get("all");
-            if (all == null || !all.isJsonArray() || all.getAsJsonArray().size() < 1 || all.getAsJsonArray().size() > MAX_CONDS) {
-                throw new IllegalArgumentException(label + ": 조건은 1~" + MAX_CONDS + "개입니다.");
-            }
-            List<Map<String, Object>> cs = new ArrayList<>();
-            for (JsonElement x : all.getAsJsonArray()) {
-                String left = x.isJsonObject() ? text(x.getAsJsonObject().get("left")) : "";
-                String op = x.isJsonObject() ? text(x.getAsJsonObject().get("op")) : "";
-                JsonElement r = x.isJsonObject() ? x.getAsJsonObject().get("right") : null;
-                Object right = null;
-                if (r != null && r.isJsonPrimitive() && r.getAsJsonPrimitive().isNumber() && Double.isFinite(r.getAsDouble())) {
-                    double v = r.getAsDouble();
-                    right = v == Math.rint(v) && Math.abs(v) < 1e15 ? (Object) (long) v : (Object) v;  // 정수는 정수로 저장 (Python과 같은 파일)
-                } else if (r != null && r.isJsonPrimitive() && r.getAsJsonPrimitive().isString()
-                        && (FIELDS.containsKey(r.getAsString()) || "min".equals(r.getAsString()))) {
-                    right = r.getAsString();
-                }
-                if (!FIELDS.containsKey(left) || !OPS.contains(op) || right == null) {
-                    throw new IllegalArgumentException(label + ": 조건이 올바르지 않습니다: " + left + " " + op + " " + (r == null ? "" : r));
-                }
-                Map<String, Object> c = new LinkedHashMap<>();
-                c.put("left", left);
-                c.put("op", op);
-                c.put("right", right);
-                cs.add(c);
-            }
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("id", id);
-            rule.put("label", label);
-            rule.put("all", cs);
-            out.add(rule);
         }
-        return out;
+        return -1;
     }
 
     private static String text(JsonElement v) {
         return v != null && v.isJsonPrimitive() ? v.getAsString() : "";
     }
 
+    /** JSON 규칙 목록 -> Rule 배열. 잘못되면 IllegalArgumentException (화면에 그대로 보임). */
+    static Rule[] parse(JsonElement json) {
+        if (json == null || !json.isJsonArray() || json.getAsJsonArray().size() < 1 || json.getAsJsonArray().size() > MAX_RULES) {
+            throw new IllegalArgumentException("매수 조건은 1~" + MAX_RULES + "개입니다.");
+        }
+        JsonArray arr = json.getAsJsonArray();
+        Rule[] out = new Rule[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            JsonObject o = arr.get(i).isJsonObject() ? arr.get(i).getAsJsonObject() : new JsonObject();
+            Rule r = new Rule();
+            r.id = text(o.get("id"));
+            boolean dup = false;
+            for (int k = 0; k < i; k++) {
+                dup |= out[k].id.equals(r.id);
+            }
+            if (!ID.matcher(r.id).matches() || dup) {
+                throw new IllegalArgumentException("매수 조건 이름(id)은 영문 소문자·숫자·-로 40자까지, 서로 달라야 합니다: " + r.id);
+            }
+            String label = text(o.get("label")).trim().replaceAll("\\s+", " ");
+            r.label = label.isEmpty() ? r.id : label.substring(0, Math.min(60, label.length()));
+            JsonElement all = o.get("all");
+            if (all == null || !all.isJsonArray() || all.getAsJsonArray().size() < 1 || all.getAsJsonArray().size() > MAX_CONDS) {
+                throw new IllegalArgumentException(r.label + ": 조건은 1~" + MAX_CONDS + "개입니다.");
+            }
+            r.all = new Cond[all.getAsJsonArray().size()];
+            for (int j = 0; j < r.all.length; j++) {
+                JsonElement x = all.getAsJsonArray().get(j);
+                JsonObject xo = x.isJsonObject() ? x.getAsJsonObject() : new JsonObject();
+                Cond c = new Cond();
+                c.left = indexOf(FIELD_ID, text(xo.get("left")));
+                c.op = indexOf(OP_ID, text(xo.get("op")));
+                c.rkind = -1;
+                JsonElement right = xo.get("right");
+                if (right != null && right.isJsonPrimitive()) {
+                    JsonPrimitive p = right.getAsJsonPrimitive();
+                    if (p.isNumber() && Double.isFinite(p.getAsDouble())) {
+                        c.rkind = R_NUM;
+                        c.rnum = p.getAsDouble();
+                    } else if (p.isString() && "min".equals(p.getAsString())) {
+                        c.rkind = R_MIN;
+                    } else if (p.isString() && indexOf(FIELD_ID, p.getAsString()) >= 0) {
+                        c.rkind = R_FIELD;
+                        c.rfield = indexOf(FIELD_ID, p.getAsString());
+                    }
+                }
+                if (c.left < 0 || c.op < 0 || c.rkind < 0) {
+                    throw new IllegalArgumentException(r.label + ": 조건이 올바르지 않습니다: " + text(xo.get("left")) + " " + text(xo.get("op"))
+                            + " " + (right == null ? "" : right));
+                }
+                r.all[j] = c;
+            }
+            out[i] = r;
+        }
+        return out;
+    }
+
+    /** Rule -> 파일·화면 JSON {id, label, all: [{left, op, right}]}. 정수는 정수로 (Python과 같은 파일) */
+    static Map<String, Object> toJson(Rule r) {
+        List<Map<String, Object>> cs = new ArrayList<>();
+        for (Cond c : r.all) {
+            Object right;
+            if (c.rkind == R_NUM) {
+                right = c.rnum == Math.rint(c.rnum) && Math.abs(c.rnum) < 1e15 ? (Object) (long) c.rnum : (Object) c.rnum;
+            } else if (c.rkind == R_MIN) {
+                right = "min";
+            } else {
+                right = FIELD_ID[c.rfield];
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("left", FIELD_ID[c.left]);
+            m.put("op", OP_ID[c.op]);
+            m.put("right", right);
+            cs.add(m);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", r.id);
+        m.put("label", r.label);
+        m.put("all", cs);
+        return m;
+    }
+
     /** 저장된 매수 조건 (파일이 없거나 깨졌으면 기본 규칙). */
-    static List<Map<String, Object>> buyRules() {
+    static Rule[] rules() {
         Path f = rulesFile;
         if (f != null) {
             try {
-                return validRules(JsonParser.parseString(new String(Files.readAllBytes(f), StandardCharsets.UTF_8)));
+                return parse(JsonParser.parseString(new String(Files.readAllBytes(f), StandardCharsets.UTF_8)));
             } catch (NoSuchFileException | JsonParseException | IllegalArgumentException e) {
                 // 기본 규칙
             } catch (IOException e) {
                 System.out.println("[시뮬레이션] " + f.getFileName() + " 읽기 실패, 기본 매수 조건을 씀: " + e.getMessage());
             }
         }
-        return validRules(JsonParser.parseString(DEFAULT_BUY));
+        return parse(JsonParser.parseString(DEFAULT_BUY));
+    }
+
+    /** 이름의 매수 조건 */
+    static Rule buy(String name) {
+        for (Rule r : rules()) {
+            if (r.id.equals(name)) {
+                return r;
+            }
+        }
+        throw new IllegalArgumentException("없는 매수 조건입니다: " + name);
     }
 
     /** POST /api/kosdaq-sim-modules {"buy": [...]} : 검사해 통째로 저장하고 catalog()를 돌려줍니다. */
@@ -184,63 +300,43 @@ final class SimModules {
         if (d == null || !d.isJsonObject()) {
             throw new IllegalArgumentException("매수 조건은 {\"buy\": [...]} 이어야 합니다.");
         }
-        List<Map<String, Object>> rules = validRules(d.getAsJsonObject().get("buy"));
+        Rule[] rules = parse(d.getAsJsonObject().get("buy"));
         Path f = rulesFile;
         if (f == null) {
             throw new IllegalStateException("매수 조건 파일 위치가 정해지지 않았습니다");
         }
+        List<Map<String, Object>> json = new ArrayList<>();
+        for (Rule r : rules) {
+            json.add(toJson(r));
+        }
         Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
-        Files.write(tmp, (GSON.toJson(rules) + "\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(tmp, (GSON.toJson(json) + "\n").getBytes(StandardCharsets.UTF_8));
         Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING);  // 반쯤 쓴 파일을 읽지 않게 통째로 교체
         return catalog();
     }
 
-    /** 이름의 매수 조건. s = 그 시각 종목 값(FIELDS), o = {min, tp, sl}. */
-    @SuppressWarnings("unchecked")
-    static Buy buy(String name) {
-        for (Map<String, Object> rule : buyRules()) {
-            if (rule.get("id").equals(name)) {
-                List<Map<String, Object>> conds = (List<Map<String, Object>>) rule.get("all");
-                return (s, o) -> {
-                    for (Map<String, Object> c : conds) {
-                        Object r = c.get("right");
-                        double left = s.get((String) c.get("left"));
-                        double right = r instanceof Number ? ((Number) r).doubleValue() : "min".equals(r) ? o.get("min") : s.get((String) r);
-                        boolean ok;
-                        switch ((String) c.get("op")) {
-                            case ">": ok = left > right; break;
-                            case ">=": ok = left >= right; break;
-                            case "<": ok = left < right; break;
-                            default: ok = left <= right;
-                        }
-                        if (!ok) {
-                            return false;
-                        }
-                    }
-                    return true;
-                };
-            }
-        }
-        throw new IllegalArgumentException("없는 매수 조건입니다: " + name);
-    }
-
-    static Sell sell(String name) {
-        Module<Sell> m = SELL.get(name);
-        if (m == null) {
-            throw new IllegalArgumentException("없는 매도 모듈입니다: " + name);
-        }
-        return m.rule;
-    }
-
     /** GET /api/kosdaq-sim-modules -> {buy: [{id, label, all}], sell: [{id, label}], fields: {값: 이름}, ops} (화면 선택 목록·편집) */
     static Map<String, Object> catalog() {
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("buy", buyRules());
+        List<Map<String, Object>> buys = new ArrayList<>();
+        for (Rule r : rules()) {
+            buys.add(toJson(r));
+        }
         List<Map<String, Object>> sells = new ArrayList<>();
-        SELL.forEach((id, m) -> sells.add(new LinkedHashMap<>(Map.of("id", id, "label", m.label))));
+        for (int i = 0; i < SELL_ID.length; i++) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", SELL_ID[i]);
+            m.put("label", SELL_LABEL[i]);
+            sells.add(m);
+        }
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (int i = 0; i < NFIELD; i++) {
+            fields.put(FIELD_ID[i], FIELD_NAME[i]);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("buy", buys);
         out.put("sell", sells);
-        out.put("fields", FIELDS);
-        out.put("ops", OPS);
+        out.put("fields", fields);
+        out.put("ops", List.of(OP_ID));
         return out;
     }
 }

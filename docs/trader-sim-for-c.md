@@ -6,6 +6,12 @@
 - 매수 시뮬레이션: `Ticks.java`(엔진, `simulate`·`live`)와 `SimModules.java`(매수 조건·매도 모듈)
 
 C 코드 블록은 **이해를 돕기 위한 의사 코드**이며, 실제로 컴파일되는 코드가 아닙니다.
+실제 Java 코드도 같은 모양으로 씁니다.
+
+- 자동매매: `Trader.Position` + `enum St`, `Trader.Cfg`(`Mkt`·`Pair`·`Etf`·`Sim`), `Trader.Cand`
+- 시뮬레이션: `Ticks.Params`·`Row`·`Trade`, `SimModules.Rule`·`Cond`, 값 번호(`PRICE` …)로 찾는 `double[]`, 매도 함수 테이블 `SELL_FN`
+
+그래서 아래 함수 이름과 필드 이름을 코드에서 그대로 찾을 수 있습니다.
 함수 이름은 Java 메서드 이름을 `파일_메서드`로 바꿨습니다. 예: `Trader.tickMarket` → `trader_tick_market`.
 오류 처리는 대부분 생략했습니다. Java에서 예외(`throw`)로 빠져나가는 곳은 `/* 예외 */`로만 표시합니다.
 

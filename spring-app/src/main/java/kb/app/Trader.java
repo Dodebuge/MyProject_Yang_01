@@ -148,6 +148,151 @@ class Trader {
         }
     }
 
+    // ------------------------------------------------------------------ 구조체 (C의 struct)
+
+    /** 포지션 상태 (trader_position.status) */
+    enum St { BUYING, OPEN, SELLING, CLOSED, FAILED }
+
+    /** trader_position 한 행 (struct position). 비어 있을 수 있는 숫자 칸은 Double·Long (null = DB의 NULL) */
+    static final class Position {
+        long id;
+        String market;
+        String day;          // 그 시장의 거래일
+        String symbol;
+        String name;
+        String source;       // 직접 고름 | 시그널 | 미장 연동 | 시뮬레이션
+        St status;
+        Double orderQty;     // 주문 수량
+        Double est;          // 예상(체결 뒤엔 실제) 금액
+        Double qty;          // 체결 수량
+        Double avg;          // 평균 체결가
+        Double amount;       // 체결 금액
+        String buyClient;    // 매수 멱등성 키 (clientOrderId)
+        String buyOrder;     // 토스 주문번호 (응답을 받아야 생김)
+        Long buySent;        // 처음 보낸 시각 ms
+        String sellClient;
+        String sellOrder;
+        Long sellSent;
+        Double sellQty;
+        Double sellAvg;
+        String reason;
+        String note;
+        String closed;
+        String bought;       // 매수 체결 시각
+    }
+
+    /** 매수 후보 (struct cand) */
+    static final class Cand {
+        String symbol;
+        String name;
+        String source;
+
+        Cand(String symbol, String name, String source) {
+            this.symbol = symbol;
+            this.name = name;
+            this.source = source;
+        }
+    }
+
+    /** 시장별 설정 */
+    static final class Mkt {
+        double budget;       // 하루 최대 매수금액
+        int maxStocks;       // 하루 최대 종목 수
+        boolean auto;        // 시그널 알림 종목 자동 매수
+    }
+
+    /** 미장 연동으로 살 ETF */
+    static final class Etf {
+        String symbol;
+        String name;
+        long qty;
+        double takeProfit;   // 비율 (3% = 0.03)
+        double stopLoss;
+    }
+
+    static final class Pair {
+        boolean enabled;
+        boolean closeSell;   // 장마감에 팔지 (false면 보유하고 익절·손절만)
+        Etf up;              // 미국 티커가 모두 상승이면
+        Etf inverse;         // 모두 하락이면
+    }
+
+    static final class Sim {
+        boolean enabled;
+        String market;       // KR | US
+        double budget;       // 하루 최대 매수 합계
+        Map<String, Object> params;  // 시뮬레이션 화면 값 (엔진 Ticks.live에 그대로)
+        double tp;           // params의 익절·손절 % (0이면 안 함)
+        double sl;
+        String sell;         // params의 매도 모듈
+        int maxBuys;
+    }
+
+    /** 설정 (struct config). trader_config의 JSON을 한 번 풀어 씀 */
+    static final class Cfg {
+        boolean enabled;
+        double takeProfit;   // 비율
+        double stopLoss;
+        Mkt kr;
+        Mkt us;
+        Pair pair;
+        Sim sim;
+
+        Mkt market(String m) {
+            return "KR".equals(m) ? kr : us;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Mkt mkt(Object o) {
+        Map<String, Object> m = (Map<String, Object>) o;
+        Mkt x = new Mkt();
+        x.budget = Values.num(m.get("budget"));
+        x.maxStocks = (int) Values.num(m.get("maxStocks"));
+        x.auto = Boolean.TRUE.equals(m.get("auto"));
+        return x;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Etf etf(Object o) {
+        Map<String, Object> m = (Map<String, Object>) o;
+        Etf x = new Etf();
+        x.symbol = Values.str(m.get("symbol"));
+        x.name = Values.str(m.get("name"));
+        x.qty = Values.lng(m.get("qty"));
+        x.takeProfit = Values.num(m.get("takeProfit")) / 100;
+        x.stopLoss = Values.num(m.get("stopLoss")) / 100;
+        return x;
+    }
+
+    /** config() JSON -> Cfg */
+    @SuppressWarnings("unchecked")
+    static Cfg cfg(Map<String, Object> c) {
+        Cfg x = new Cfg();
+        x.enabled = Boolean.TRUE.equals(c.get("enabled"));
+        x.takeProfit = Values.num(c.get("takeProfit")) / 100;
+        x.stopLoss = Values.num(c.get("stopLoss")) / 100;
+        x.kr = mkt(c.get("KR"));
+        x.us = mkt(c.get("US"));
+        Map<String, Object> pc = (Map<String, Object>) c.get("pair");
+        x.pair = new Pair();
+        x.pair.enabled = Boolean.TRUE.equals(pc.get("enabled"));
+        x.pair.closeSell = Boolean.TRUE.equals(pc.get("closeSell"));
+        x.pair.up = etf(pc.get("up"));
+        x.pair.inverse = etf(pc.get("inverse"));
+        Map<String, Object> sc = (Map<String, Object>) c.get("sim");
+        x.sim = new Sim();
+        x.sim.enabled = Boolean.TRUE.equals(sc.get("enabled"));
+        x.sim.market = Values.str(sc.get("market"));
+        x.sim.budget = Values.num(sc.get("budget"));
+        x.sim.params = (Map<String, Object>) sc.get("params");
+        x.sim.tp = Values.num(x.sim.params.get("tp"));
+        x.sim.sl = Values.num(x.sim.params.get("sl"));
+        x.sim.sell = Values.str(x.sim.params.get("sell"));
+        x.sim.maxBuys = (int) Values.num(x.sim.params.get("maxBuys"));
+        return x;
+    }
+
     /** api가 null이면(토스 키 없음) 화면에 안내만 하고 아무것도 하지 않습니다. logFile: 자세한 주문 기록 (trader.log) */
     Trader(Api api, JdbcTemplate db, Path logFile, Supplier<ZonedDateTime> clock) {
         this.api = api;
@@ -406,26 +551,23 @@ class Trader {
 
     /**
      * 이 보유분의 {익절, 손절} 비율. 미장 연동 종목은 같은 종목번호인 KODEX 200(up)·인버스(inverse) 설정의 %,
-     * 산 뒤에 설정 종목을 바꿔 맞는 것이 없으면 자동매매 화면의 % (tp, sl).
+     * 산 뒤에 설정 종목을 바꿔 맞는 것이 없으면 자동매매 화면의 %. 시뮬레이션 종목은 시뮬레이션 화면의 %
+     * (0이면 안 함, 손절은 tp-sl 모듈일 때만: 추적 손절은 기록마다 신호로).
      */
-    @SuppressWarnings("unchecked")
-    private static double[] limits(Map<String, Object> p, Map<String, Object> pc, Map<String, Object> sc, double tp, double sl) {
-        if (SIM.equals(p.get("source"))) {  // 시뮬레이션 화면의 익절·손절 % (0이면 안 함, 손절은 tp-sl 모듈일 때만: 추적 손절은 기록마다 신호로)
-            Map<String, Object> sp = (Map<String, Object>) sc.get("params");
-            double stp = Values.num(sp.get("tp"));
-            double ssl = Values.num(sp.get("sl"));
-            return new double[]{stp > 0 ? stp / 100 : Double.POSITIVE_INFINITY,
-                    "tp-sl".equals(sp.get("sell")) && ssl > 0 ? ssl / 100 : Double.POSITIVE_INFINITY};
+    private static double[] limits(Position p, Cfg c) {
+        if (SIM.equals(p.source)) {
+            return new double[]{c.sim.tp > 0 ? c.sim.tp / 100 : Double.POSITIVE_INFINITY,
+                    "tp-sl".equals(c.sim.sell) && c.sim.sl > 0 ? c.sim.sl / 100 : Double.POSITIVE_INFINITY};
         }
-        if (PAIR.equals(p.get("source"))) {
-            for (String k : new String[]{"up", "inverse"}) {
-                Map<String, Object> e = (Map<String, Object>) pc.get(k);
-                if (Values.str(e.get("symbol")).equals(Values.str(p.get("symbol")))) {
-                    return new double[]{Values.num(e.get("takeProfit")) / 100, Values.num(e.get("stopLoss")) / 100};
-                }
+        if (PAIR.equals(p.source)) {
+            if (c.pair.up.symbol.equals(p.symbol)) {
+                return new double[]{c.pair.up.takeProfit, c.pair.up.stopLoss};
+            }
+            if (c.pair.inverse.symbol.equals(p.symbol)) {
+                return new double[]{c.pair.inverse.takeProfit, c.pair.inverse.stopLoss};
             }
         }
-        return new double[]{tp, sl};
+        return new double[]{c.takeProfit, c.stopLoss};
     }
 
     /** 익절·손절 %: 0.1~100 */
@@ -552,9 +694,9 @@ class Trader {
         if (!leader) {
             return;
         }
-        Map<String, Object> cfg;
+        Cfg cfg;
         try {
-            cfg = config();
+            cfg = cfg(config());
         } catch (DataAccessException e) {
             log("ALL", "trader.db 오류: " + e.getMessage());
             return;
@@ -572,8 +714,8 @@ class Trader {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private void tickMarket(String m, Map<String, Object> cfg) throws IOException {
+    /** 시장 하나: 체결 확인 -> 장 시간 -> 매도(마감 정리·전량 매도·익절·손절) -> 매수(미장 연동·시뮬레이션·고른 종목·시그널) 순 */
+    private void tickMarket(String m, Cfg cfg) throws IOException {
         refreshPending(m);
         Session s = session(m);
         ZonedDateTime now = now();
@@ -593,107 +735,111 @@ class Trader {
             setPhase(m, "장 마감");
             return;
         }
-        List<Map<String, Object>> open = positions(m, "status = 'OPEN'");
-        Map<String, Object> pc = (Map<String, Object>) cfg.get("pair");
-        boolean holdPairs = !Boolean.TRUE.equals(pc.get("closeSell"));  // 미장 연동 종목은 장마감에 팔지 않고 보유
-        if (!now.isBefore(cutoff)) {  // 마감 10분 전: 미체결 매수 취소, 전량 매도, 새 매수 없음
+        List<Position> open = positions(m, "status = 'OPEN'");
+        boolean holdPairs = !cfg.pair.closeSell;  // 미장 연동 종목은 장마감에 팔지 않고 보유
+
+        // 마감 10분 전: 미체결 매수 취소, 전량 매도, 새 매수 없음
+        if (!now.isBefore(cutoff)) {
             setPhase(m, "마감 정리 (새 매수 없음, 남은 종목 전량 매도" + (holdPairs ? ", 미장 연동 종목은 보유" : "") + ")");
-            for (Map<String, Object> p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
+            for (Position p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
                 cancel(m, p);
             }
-            for (Map<String, Object> p : open) {
-                if (!(holdPairs && PAIR.equals(p.get("source")))) {
+            for (Position p : open) {
+                if (!(holdPairs && PAIR.equals(p.source))) {
                     sell(m, p, "장마감");
                 }
             }
             return;
         }
+
+        // 화면의 '전량 매도'
         boolean halted = getFlag("halt:" + m + ":" + s.day) != null;
-        if (halted || !Boolean.TRUE.equals(cfg.get("enabled"))) {  // 켜져 있으면 아래에서 매수 상황(대기 이유)으로 정함
+        if (halted || !cfg.enabled) {  // 켜져 있으면 아래에서 매수 상황(대기 이유)으로 정함
             setPhase(m, halted ? "매수 중단 (전량 매도 요청)" : "꺼짐 (새 매수 없음, 보유분 익절·손절만)");
         }
         if (halted) {
-            for (Map<String, Object> p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
+            for (Position p : positions(m, "status = 'BUYING' AND buy_order IS NOT NULL")) {
                 cancel(m, p);
             }
-            for (Map<String, Object> p : open) {
+            for (Position p : open) {
                 sell(m, p, "수동 전량 매도");
             }
             return;
         }
-        // 익절·손절 (전날 못 판 종목은 바로 매도). 미장 연동 종목은 미장 연동 %로
-        double tp = Values.num(cfg.get("takeProfit")) / 100;
-        double sl = Values.num(cfg.get("stopLoss")) / 100;
-        Map<String, Double> prices = prices(m, open.stream().map(p -> Values.str(p.get("symbol"))).toArray(String[]::new));
-        for (Map<String, Object> p : open) {
-            if (!s.day.equals(p.get("day")) && !(holdPairs && PAIR.equals(p.get("source")))) {  // 보유로 둔 미장 연동 종목은 익절·손절만
+
+        // 익절·손절 (전날 못 판 종목은 바로 매도). 시세는 한 번에
+        String[] symbols = new String[open.size()];
+        for (int i = 0; i < open.size(); i++) {
+            symbols[i] = open.get(i).symbol;
+        }
+        Map<String, Double> prices = prices(m, symbols);
+        for (Position p : open) {
+            if (!s.day.equals(p.day) && !(holdPairs && PAIR.equals(p.source))) {  // 보유로 둔 미장 연동 종목은 익절·손절만
                 sell(m, p, "전날 미청산");
                 continue;
             }
-            Double price = prices.get(Values.str(p.get("symbol")));
-            double avg = Values.num(p.get("avg"));
+            Double price = prices.get(p.symbol);
+            double avg = n(p.avg);
             if (price == null || avg <= 0) {
                 continue;
             }
             double r = price / avg - 1;
-            double[] limit = limits(p, pc, (Map<String, Object>) cfg.get("sim"), tp, sl);
+            double[] limit = limits(p, cfg);
             if (r >= limit[0]) {
                 sell(m, p, "익절 " + pct(r));
             } else if (r <= -limit[1]) {
                 sell(m, p, "손절 " + pct(r));
             }
         }
+
         if ("KR".equals(m)) {
-            buyWatch(s, now, pc);
+            buyWatch(s, now, cfg.pair);
         }
         simTick(m, s, cfg);
-        if (!Boolean.TRUE.equals(cfg.get("enabled"))) {
+        if (!cfg.enabled) {
             return;
         }
-        // 새 매수: 내가 고른 종목, 그다음 시그널 알림 종목 (알림 순서)
-        Map<String, Object> mc = (Map<String, Object>) cfg.get(m);
-        double budget = Values.num(mc.get("budget"));
-        int maxStocks = (int) Values.num(mc.get("maxStocks"));
-        List<String[]> candidates = new ArrayList<>();
+
+        // 새 매수 후보: 내가 고른 종목, 그다음 시그널 알림 종목 (알림 순서)
+        Mkt mc = cfg.market(m);
+        List<Cand> cands = new ArrayList<>();
         for (Map<String, Object> r : rows("SELECT symbol, name FROM trader_pick WHERE market = ? ORDER BY added, rowid", m)) {
-            candidates.add(new String[]{Values.str(r.get("symbol")), Values.str(r.get("name")), "직접 고름"});
+            cands.add(new Cand(Values.str(r.get("symbol")), Values.str(r.get("name")), "직접 고름"));
         }
-        if (Boolean.TRUE.equals(mc.get("auto"))) {
+        if (mc.auto) {
             for (Map<String, Object> r : rows("SELECT symbol, name FROM trader_signal WHERE market = ? AND day = ? ORDER BY at, rowid", m, s.day)) {
-                candidates.add(new String[]{Values.str(r.get("symbol")), Values.str(r.get("name")), "시그널"});
+                cands.add(new Cand(Values.str(r.get("symbol")), Values.str(r.get("name")), "시그널"));
             }
         }
         String name = "KR".equals(m) ? "국내" : "미국";
-        if (candidates.isEmpty()) {  // 왜 사지 않는지 화면·로그에 (바뀔 때 한 번)
+        if (cands.isEmpty()) {  // 왜 사지 않는지 화면·로그에 (바뀔 때 한 번)
             setPhase(m, "매매 중 · 매수 대상 없음: 직접 고른 " + name + " 종목이 없고 "
-                    + (Boolean.TRUE.equals(mc.get("auto")) ? "오늘 " + name + " 시그널 알림이 아직 없음" : "시그널 자동 매수가 꺼져 있음"));
+                    + (mc.auto ? "오늘 " + name + " 시그널 알림이 아직 없음" : "시그널 자동 매수가 꺼져 있음"));
             return;
         }
-        String waiting = "매매 중 · 오늘 매수 대상 " + candidates.size() + "종목을 모두 처리함 (같은 종목은 하루 한 번)";
-        Boolean up = null;  // 지수 전일 대비 상승: 실제로 살 종목이 있을 때만 확인 (시세 1번)
-        for (String[] c : candidates) {
-            if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
+        String waiting = "매매 중 · 오늘 매수 대상 " + cands.size() + "종목을 모두 처리함 (같은 종목은 하루 한 번)";
+        int up = -1;  // 지수 전일 대비 상승 (-1 = 아직 모름): 실제로 살 종목이 있을 때만 확인 (시세 1번)
+        for (Cand c : cands) {
+            if (boughtToday(m, s.day, c.symbol)) {
                 continue;  // 오늘 이미 샀거나 시도함
             }
-            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'"
-                    + " AND source NOT IN (?, ?)", m, s.day, PAIR, SIM);  // 미장 연동·시뮬레이션은 따로 셈
-            double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
-            if (today.size() >= maxStocks || spent >= budget) {
-                waiting = "매매 중 · " + (today.size() >= maxStocks ? "오늘 최대 종목 수(" + maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
+            double[] spent = spentToday(m, s.day, null);  // 미장 연동·시뮬레이션은 따로 셈
+            if (spent[0] >= mc.maxStocks || spent[1] >= mc.budget) {
+                waiting = "매매 중 · " + (spent[0] >= mc.maxStocks ? "오늘 최대 종목 수(" + mc.maxStocks + ") 도달" : "오늘 최대 매수금액 다 씀")
                         + ", 남은 매수 대상은 사지 않음";
                 break;
             }
-            if (up == null) {
-                up = indexUp(m, s.day);
+            if (up < 0) {
+                up = indexUp(m, s.day) ? 1 : 0;
             }
-            if (!up) {  // 다음 확인(5초 뒤)에 다시 봐서 오르면 매수
+            if (up == 0) {  // 다음 확인(5초 뒤)에 다시 봐서 오르면 매수
                 waiting = "매매 중 · " + INDEX.get(m)[1] + " 지수가 전일 대비 상승이 아니라 새 매수 대기 (상승하면 매수)";
                 break;
             }
-            double amount = Math.min(budget / maxStocks, budget - spent);
-            Double price = prices(m, c[0]).get(c[0]);
+            double amount = Math.min(mc.budget / mc.maxStocks, mc.budget - spent[1]);
+            Double price = prices(m, c.symbol).get(c.symbol);
             if (price == null || price <= 0) {
-                waiting = "매매 중 · " + c[1] + "(" + c[0] + ") 현재가를 받지 못해 다시 시도";
+                waiting = "매매 중 · " + c.name + "(" + c.symbol + ") 현재가를 받지 못해 다시 시도";
                 continue;  // 현재가를 못 받음: 다음 확인에 다시
             }
             long qty = (long) Math.floor(amount / price);
@@ -706,14 +852,33 @@ class Trader {
         setPhase(m, waiting);
     }
 
+    /** 그 시장·날에 이 종목을 이미 샀거나 시도했는지 (출처와 상관없이 하루 한 번) */
+    private boolean boughtToday(String m, String day, String symbol) {
+        return !rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, day, symbol).isEmpty();
+    }
+
+    /**
+     * 오늘 산(실패 빼고) {종목 수, 금액 합계}. source가 null이면 미장 연동·시뮬레이션을 뺀 일반 매수, 아니면 그 출처만.
+     */
+    private double[] spentToday(String m, String day, String source) {
+        List<Map<String, Object>> today = source == null
+                ? rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source NOT IN (?, ?)", m, day, PAIR, SIM)
+                : rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?", m, day, source);
+        double sum = 0;
+        for (Map<String, Object> r : today) {
+            sum += Values.num(r.get("est"));
+        }
+        return new double[]{today.size(), sum};
+    }
+
     /**
      * 시뮬레이션 전략: SIM_CHECK_SECONDS마다 신호(Ticks.live)를 받아, 새 기록 시각이면 판다는 보유분을 매도하고 산다는 종목을 매수.
      * 같은 기록은 한 번만, 같은 종목은 하루 한 번 (trader_position UNIQUE). 오늘 기록이 아니거나 늦으면 주문하지 않음.
      */
     @SuppressWarnings("unchecked")
-    private void simTick(String m, Session s, Map<String, Object> cfg) throws IOException {
-        Map<String, Object> sc = (Map<String, Object>) cfg.get("sim");
-        if (!Boolean.TRUE.equals(sc.get("enabled")) || !m.equals(sc.get("market"))) {
+    private void simTick(String m, Session s, Cfg cfg) throws IOException {
+        Sim sc = cfg.sim;
+        if (!sc.enabled || !m.equals(sc.market)) {
             return;
         }
         if (strategy == null) {
@@ -725,14 +890,12 @@ class Trader {
             return;
         }
         simCheckedAt = t;
-        double budget = Values.num(sc.get("budget"));
-        Map<String, Object> p = new LinkedHashMap<>((Map<String, Object>) sc.get("params"));
-        int maxBuys = (int) Values.num(p.get("maxBuys"));
-        if (budget <= 0 || maxBuys < 1) {
+        if (sc.budget <= 0 || sc.maxBuys < 1) {
             setSimPhase(m, "투자 금액·하루 최대 종목 수가 없어 대기");
             return;
         }
-        p.put("amount", budget / maxBuys);  // 엔진도 종목당 금액보다 비싼 종목은 뺌
+        Map<String, Object> p = new LinkedHashMap<>(sc.params);
+        p.put("amount", sc.budget / sc.maxBuys);  // 엔진도 종목당 금액보다 비싼 종목은 뺌
         Map<String, Object> sig = strategy.live(m, p);
         String at = Values.str(sig.get("at"));
         if (!s.day.equals(sig.get("date"))) {
@@ -747,35 +910,38 @@ class Trader {
         }
         String key = m + " " + s.day + " " + at;
         if (key.equals(simDoneAt)) {
-            return;
+            return;  // 같은 기록은 한 번만
         }
         simDoneAt = key;
+
+        // 엔진이 판다고 한 보유분
         Map<String, Object> sells = map(sig.get("sell"));
         int sold = 0;
-        for (Map<String, Object> pos : rows("SELECT * FROM trader_position WHERE market = ? AND status = 'OPEN' AND source = ? ORDER BY id", m, SIM)) {
-            Object why = sells.get(Values.str(pos.get("symbol")));
+        for (Position pos : positions(m, "status = 'OPEN' AND source = ?", SIM)) {
+            Object why = sells.get(pos.symbol);
             if (why != null) {
                 sell(m, pos, "시뮬레이션 " + why);
                 sold++;
             }
         }
+
+        // 엔진이 이 기록 시각에 산다고 한 종목
         int bought = 0;
         String note = "";
-        for (Object o : sig.get("buy") instanceof List ? (List<Object>) sig.get("buy") : new ArrayList<>()) {
+        List<Object> buys = sig.get("buy") instanceof List ? (List<Object>) sig.get("buy") : new ArrayList<>();
+        for (Object o : buys) {
             Map<String, Object> b = map(o);
-            String[] c = {Values.str(b.get("code")).trim().toUpperCase(), Values.str(b.get("name")), SIM};
-            if (!rows("SELECT id FROM trader_position WHERE market = ? AND day = ? AND symbol = ?", m, s.day, c[0]).isEmpty()) {
+            Cand c = new Cand(Values.str(b.get("code")).trim().toUpperCase(), Values.str(b.get("name")), SIM);
+            if (boughtToday(m, s.day, c.symbol)) {
                 continue;  // 오늘 이미 샀거나 시도함 (다른 출처 포함)
             }
-            List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?",
-                    m, s.day, SIM);
-            double spent = today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum();
-            if (today.size() >= maxBuys || spent >= budget) {
-                note = " · 오늘 " + (today.size() >= maxBuys ? "최대 종목 수(" + maxBuys + ")" : "투자 금액") + "를 다 써서 남은 신호는 사지 않음";
+            double[] spent = spentToday(m, s.day, SIM);
+            if (spent[0] >= sc.maxBuys || spent[1] >= sc.budget) {
+                note = " · 오늘 " + (spent[0] >= sc.maxBuys ? "최대 종목 수(" + sc.maxBuys + ")" : "투자 금액") + "를 다 써서 남은 신호는 사지 않음";
                 break;
             }
-            double amount = Math.min(budget / maxBuys, budget - spent);
-            Double price = prices(m, c[0]).get(c[0]);
+            double amount = Math.min(sc.budget / sc.maxBuys, sc.budget - spent[1]);
+            Double price = prices(m, c.symbol).get(c.symbol);
             if (price == null || price <= 0) {
                 failed(m, s.day, c, "현재가를 받지 못함 (토스에 없는 종목일 수 있음)");
                 continue;
@@ -822,55 +988,50 @@ class Trader {
      * 모두 상승이면 pair.up(KODEX 200), 모두 하락이면 pair.inverse(KODEX 인버스)를 지정 수량 시장가 매수. 섞이거나 보합이 있으면 안 삼.
      * 아직 확인하지 못한 티커가 있으면 판단을 미룸. 같은 종목은 하루 한 번 (trader_position UNIQUE).
      */
-    @SuppressWarnings("unchecked")
-    private void buyWatch(Session s, ZonedDateTime now, Map<String, Object> pc) throws IOException {
+    private void buyWatch(Session s, ZonedDateTime now, Pair pc) throws IOException {
         List<String> tickers = watchList();
-        String text;
-        if (!Boolean.TRUE.equals(pc.get("enabled"))) {
-            text = "꺼짐 (새 매수 없음, 보유분 익절·손절" + (Boolean.TRUE.equals(pc.get("closeSell")) ? "·장마감 매도)" : "만)");
+        String text = null;
+        if (!pc.enabled) {
+            text = "꺼짐 (새 매수 없음, 보유분 익절·손절" + (pc.closeSell ? "·장마감 매도)" : "만)");
         } else if (tickers.isEmpty()) {
             text = "켜짐 · 미국 티커가 없음";
         } else if (!now.isBefore(s.open.plusMinutes(PAIR_WINDOW_MINUTES))) {
             text = "켜짐 · 오늘 매수 시간(장 시작 후 " + PAIR_WINDOW_MINUTES + "분) 지남";
-        } else {
-            text = null;
-            int up = 0;
-            int down = 0;
-            for (String signal : tickers) {
-                Map<String, Object> chk;
-                try {
-                    chk = pairCheck(signal);  // 이미 확인한 티커는 기억한 값
-                } catch (IOException e) {
-                    text = "켜짐 · " + signal + " 미장 종가를 받지 못해 다시 시도 (" + e.getMessage() + ")";
-                    break;
-                }
-                if (chk == null) {
-                    text = "켜짐 · " + signal + " 미장 종가가 부족해 다시 시도";
-                    break;
-                }
-                double c = Values.num(chk.get("change"));
-                up += c > 0 ? 1 : 0;
-                down += c < 0 ? 1 : 0;
+        }
+        int up = 0;
+        int down = 0;
+        for (int i = 0; text == null && i < tickers.size(); i++) {
+            String signal = tickers.get(i);
+            Map<String, Object> chk;
+            try {
+                chk = pairCheck(signal);  // 이미 확인한 티커는 기억한 값
+            } catch (IOException e) {
+                text = "켜짐 · " + signal + " 미장 종가를 받지 못해 다시 시도 (" + e.getMessage() + ")";
+                break;
             }
-            if (text == null) {
-                String k = up == tickers.size() ? "up" : down == tickers.size() ? "inverse" : null;
-                if (k == null) {
-                    text = "켜짐 · 미국 티커 " + tickers.size() + "개 중 상승 " + up + " · 하락 " + down + " → 모두 같은 방향이 아니라 오늘은 안 삼";
+            if (chk == null) {
+                text = "켜짐 · " + signal + " 미장 종가가 부족해 다시 시도";
+                break;
+            }
+            double c = Values.num(chk.get("change"));
+            up += c > 0 ? 1 : 0;
+            down += c < 0 ? 1 : 0;
+        }
+        if (text == null) {
+            Etf e = up == tickers.size() ? pc.up : down == tickers.size() ? pc.inverse : null;
+            if (e == null) {
+                text = "켜짐 · 미국 티커 " + tickers.size() + "개 중 상승 " + up + " · 하락 " + down + " → 모두 같은 방향이 아니라 오늘은 안 삼";
+            } else {
+                String label = "켜짐 · 미국 티커 " + tickers.size() + "개 모두 " + (e == pc.up ? "상승" : "하락") + " → " + e.name + "(" + e.symbol + ")";
+                if (boughtToday("KR", s.day, e.symbol)) {
+                    text = label + " 오늘 매수함";
                 } else {
-                    Map<String, Object> e = (Map<String, Object>) pc.get(k);
-                    String symbol = Values.str(e.get("symbol"));
-                    String label = "켜짐 · 미국 티커 " + tickers.size() + "개 모두 " + ("up".equals(k) ? "상승" : "하락") + " → " + e.get("name") + "(" + symbol + ")";
-                    if (!rows("SELECT id FROM trader_position WHERE market = 'KR' AND day = ? AND symbol = ?", s.day, symbol).isEmpty()) {
-                        text = label + " 오늘 매수함";
+                    Double price = prices("KR", e.symbol).get(e.symbol);
+                    if (price == null || price <= 0) {
+                        text = label + " 현재가를 받지 못해 다시 시도";
                     } else {
-                        Double price = prices("KR", symbol).get(symbol);
-                        if (price == null || price <= 0) {
-                            text = label + " 현재가를 받지 못해 다시 시도";
-                        } else {
-                            long qty = Values.lng(e.get("qty"));
-                            buy("KR", s.day, new String[]{symbol, Values.str(e.get("name")), PAIR}, qty, qty * price);
-                            text = label + " 매수함";
-                        }
+                        buy("KR", s.day, new Cand(e.symbol, e.name, PAIR), e.qty, e.qty * price);
+                        text = label + " 매수함";
                     }
                 }
             }
@@ -938,67 +1099,78 @@ class Trader {
 
     // ------------------------------------------------------------------ 주문
 
-    private void buy(String m, String day, String[] c, long qty, double est) throws IOException {
-        String client = "kb-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
-        // 주문 전에 기록: 응답을 못 받아도 같은 키로 다시 보내 확인
+    /** 새 clientOrderId (멱등성 키): 같은 키로 다시 보내도 토스가 한 주문으로 봄 (10분) */
+    private static String newKey() {
+        return "kb-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
+    }
+
+    /** 매수: ① 주문 전에 BUYING으로 기록 ② 전송. 응답을 못 받아도 같은 키로 다시 보내 확인 (두 번 체결 안 됨) */
+    private void buy(String m, String day, Cand c, long qty, double est) throws IOException {
+        String key = newKey();
         db.update("INSERT INTO trader_position (market, day, symbol, name, source, status, order_qty, est, qty,"
                 + " buy_client, buy_sent, opened) VALUES (?, ?, ?, ?, ?, 'BUYING', ?, ?, 0, ?, ?, ?)",
-                m, day, c[0], c[1], c[2], (double) qty, est, client, System.currentTimeMillis(), now().format(AT));
-        log(m, "매수 주문: " + c[1] + "(" + c[0] + ") " + qty + "주 · 약 " + round(est) + " · " + c[2]);
-        Map<String, Object> p = rows("SELECT * FROM trader_position WHERE buy_client = ?", client).get(0);
+                m, day, c.symbol, c.name, c.source, (double) qty, est, key, System.currentTimeMillis(), now().format(AT));
+        log(m, "매수 주문: " + c.name + "(" + c.symbol + ") " + qty + "주 · 약 " + round(est) + " · " + c.source);
+        Position p = position(rows("SELECT * FROM trader_position WHERE buy_client = ?", key).get(0));
         sendBuy(m, p, false);
     }
 
-    private void sendBuy(String m, Map<String, Object> p, boolean resend) {
+    private void sendBuy(String m, Position p, boolean resend) {
         try {
-            Map<String, Object> r = order(m, Values.str(p.get("buy_client")), Values.str(p.get("symbol")), "BUY", Values.num(p.get("order_qty")), resend);
-            update(p, "buy_order", Values.str(r.get("orderId")));
+            Map<String, Object> r = order(m, p.buyClient, p.symbol, "BUY", n(p.orderQty), resend);
+            p.buyOrder = Values.str(r.get("orderId"));
+            save(p);
         } catch (TossClient.TossApiException e) {
             if (e.status == 409 || e.status >= 500) {
                 return;  // 처리 중·서버 오류: 다음 확인에 같은 키로 다시
             }
-            update(p, "status", "FAILED");
-            update(p, "note", e.getMessage());
-            log(m, "매수 실패: " + p.get("name") + "(" + p.get("symbol") + ") " + e.getMessage());
+            p.status = St.FAILED;
+            p.note = e.getMessage();
+            save(p);
+            log(m, "매수 실패: " + p.name + "(" + p.symbol + ") " + e.getMessage());
         } catch (IOException e) {
             // 응답을 못 받음: 다음 확인에 같은 clientOrderId로 다시 보내 결과를 받음 (두 번 체결 안 됨)
         }
     }
 
-    private void sell(String m, Map<String, Object> p, String reason) throws IOException {
-        double qty = Values.num(p.get("qty"));
-        Map<String, Object> sq = map(api.get("/api/v1/sellable-quantity", param("symbol", Values.str(p.get("symbol"))), true));
+    /** 매도: 판매 가능 수량을 확인하고 ① SELLING으로 기록 ② 전송 */
+    private void sell(String m, Position p, String reason) throws IOException {
+        double qty = n(p.qty);
+        Map<String, Object> sq = map(api.get("/api/v1/sellable-quantity", param("symbol", p.symbol), true));
         double sellable = Values.num(sq.get("sellableQuantity"));
         if (sellable <= 0) {
-            update(p, "status", "CLOSED");
-            update(p, "reason", reason);
-            update(p, "note", "판매 가능 수량 0 (직접 판 것으로 봄)");
-            update(p, "closed", now().format(AT));
-            log(m, p.get("name") + "(" + p.get("symbol") + ") 판매 가능 수량 0 → 정리만 함");
+            p.status = St.CLOSED;
+            p.reason = reason;
+            p.note = "판매 가능 수량 0 (직접 판 것으로 봄)";
+            p.closed = now().format(AT);
+            save(p);
+            log(m, p.name + "(" + p.symbol + ") 판매 가능 수량 0 → 정리만 함");
             return;
         }
-        String client = "kb-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
-        update(p, "status", "SELLING");
-        update(p, "sell_client", client);
-        update(p, "sell_qty", Math.min(qty, sellable));
-        update(p, "sell_sent", System.currentTimeMillis());
-        update(p, "reason", reason);
-        log(m, "매도 주문: " + p.get("name") + "(" + p.get("symbol") + ") " + fmtQty(Math.min(qty, sellable)) + "주 · " + reason);
-        sendSell(m, rows("SELECT * FROM trader_position WHERE id = ?", p.get("id")).get(0), false);
+        p.status = St.SELLING;
+        p.sellClient = newKey();
+        p.sellQty = Math.min(qty, sellable);
+        p.sellSent = System.currentTimeMillis();
+        p.reason = reason;
+        save(p);
+        log(m, "매도 주문: " + p.name + "(" + p.symbol + ") " + fmtQty(p.sellQty) + "주 · " + reason);
+        sendSell(m, p, false);
     }
 
-    private void sendSell(String m, Map<String, Object> p, boolean resend) {
+    private void sendSell(String m, Position p, boolean resend) {
         try {
-            Map<String, Object> r = order(m, Values.str(p.get("sell_client")), Values.str(p.get("symbol")), "SELL", Values.num(p.get("sell_qty")), resend);
-            update(p, "sell_order", Values.str(r.get("orderId")));
+            Map<String, Object> r = order(m, p.sellClient, p.symbol, "SELL", n(p.sellQty), resend);
+            p.sellOrder = Values.str(r.get("orderId"));
+            save(p);
         } catch (TossClient.TossApiException e) {
             if (e.status == 409 || e.status >= 500) {
                 return;  // 다음 확인에 같은 키로 다시
             }
-            update(p, "status", "OPEN");  // 매도 실패: 보유로 되돌려 다음 확인에 다시 판단
-            update(p, "sell_client", null);
-            update(p, "note", "매도 실패: " + e.getMessage());
-            log(m, "매도 실패: " + p.get("name") + "(" + p.get("symbol") + ") " + e.getMessage());
+            p.status = St.OPEN;  // 매도 실패: 보유로 되돌려 다음 확인에 다시 판단
+            p.sellClient = null;
+            p.note = "매도 실패: " + e.getMessage();
+            save(p);
+            log(m, "매도 실패: " + p.name + "(" + p.symbol + ") " + e.getMessage());
         } catch (IOException e) {
             // 응답을 못 받음: 다음 확인에 같은 키로 다시
         }
@@ -1028,11 +1200,11 @@ class Trader {
         }
     }
 
-    private void cancel(String m, Map<String, Object> p) {
-        trace(m, "취소 요청: 매수 " + p.get("symbol") + " 주문번호 " + p.get("buy_order"));
+    private void cancel(String m, Position p) {
+        trace(m, "취소 요청: 매수 " + p.symbol + " 주문번호 " + p.buyOrder);
         try {
-            api.post("/api/v1/orders/" + p.get("buy_order") + "/cancel", new LinkedHashMap<>(), true);
-            log(m, "미체결 매수 취소: " + p.get("name") + "(" + p.get("symbol") + ")");
+            api.post("/api/v1/orders/" + p.buyOrder + "/cancel", new LinkedHashMap<>(), true);
+            log(m, "미체결 매수 취소: " + p.name + "(" + p.symbol + ")");
         } catch (IOException e) {
             trace(m, "취소 결과: " + e.getMessage());
             if (!(e instanceof TossClient.TossApiException) || ((TossClient.TossApiException) e).status >= 500) {
@@ -1045,14 +1217,16 @@ class Trader {
 
     /** 매수·매도 주문의 체결을 확인하고, 응답을 못 받은 주문은 같은 키로 다시 보냅니다. */
     private void refreshPending(String m) {
-        for (Map<String, Object> p : positions(m, "status IN ('BUYING', 'SELLING')")) {
-            boolean buying = "BUYING".equals(p.get("status"));
-            String orderId = Values.str(p.get(buying ? "buy_order" : "sell_order"));
-            if (orderId.isEmpty()) {
-                if (System.currentTimeMillis() - Values.lng(p.get(buying ? "buy_sent" : "sell_sent")) > RESEND_LIMIT_MS) {
-                    update(p, "note", "주문 결과를 10분 동안 확인하지 못함: 토스 앱에서 확인하세요");
-                    update(p, "status", buying ? "FAILED" : "OPEN");
-                    log(m, "주문 확인 실패: " + p.get("name") + "(" + p.get("symbol") + ") 토스 앱에서 확인하세요");
+        for (Position p : positions(m, "status IN ('BUYING', 'SELLING')")) {
+            boolean buying = p.status == St.BUYING;
+            String orderId = buying ? p.buyOrder : p.sellOrder;
+            if (orderId == null || orderId.isEmpty()) {  // 주문번호가 없다 = 응답을 못 받았음
+                Long sent = buying ? p.buySent : p.sellSent;
+                if (System.currentTimeMillis() - (sent == null ? 0 : sent) > RESEND_LIMIT_MS) {
+                    p.note = "주문 결과를 10분 동안 확인하지 못함: 토스 앱에서 확인하세요";
+                    p.status = buying ? St.FAILED : St.OPEN;
+                    save(p);
+                    log(m, "주문 확인 실패: " + p.name + "(" + p.symbol + ") 토스 앱에서 확인하세요");
                 } else if (buying) {
                     sendBuy(m, p, true);
                 } else {
@@ -1071,43 +1245,49 @@ class Trader {
             double filled = Values.num(ex.get("filledQuantity"));
             double avg = Values.num(ex.get("averageFilledPrice"));
             double amount = Values.num(ex.get("filledAmount"));
-            boolean done = Arrays.asList("FILLED", "CANCELED", "REJECTED", "REPLACED").contains(st);
+            boolean done = "FILLED".equals(st) || "CANCELED".equals(st) || "REJECTED".equals(st) || "REPLACED".equals(st);
             if (buying) {
-                update(p, "qty", filled);
+                p.qty = filled;
                 if (filled > 0) {
-                    update(p, "avg", avg);
-                    update(p, "amount", amount);
+                    p.avg = avg;
+                    p.amount = amount;
                 }
+                if (done && filled > 0) {
+                    p.est = amount > 0 ? amount : filled * avg;
+                    p.bought = filledAt(ex.get("filledAt"));  // 매수 내역: 체결 시각
+                    p.status = St.OPEN;
+                } else if (done) {
+                    p.status = St.FAILED;
+                    p.note = "매수 " + st;
+                }
+                save(p);
                 if (done) {
-                    if (filled > 0) {
-                        update(p, "est", amount > 0 ? amount : filled * avg);
-                        update(p, "bought", filledAt(ex.get("filledAt")));  // 매수 내역: 체결 시각
-                        update(p, "status", "OPEN");
-                        log(m, "매수 체결: " + p.get("name") + "(" + p.get("symbol") + ") " + fmtQty(filled) + "주 · 평균 " + avg);
-                    } else {
-                        update(p, "status", "FAILED");
-                        update(p, "note", "매수 " + st);
-                        log(m, "매수 " + st + ": " + p.get("name") + "(" + p.get("symbol") + ")");
-                    }
+                    log(m, filled > 0 ? "매수 체결: " + p.name + "(" + p.symbol + ") " + fmtQty(filled) + "주 · 평균 " + avg
+                            : "매수 " + st + ": " + p.name + "(" + p.symbol + ")");
                 }
-            } else if (done) {
-                double left = Values.num(p.get("qty")) - filled;
-                if (filled > 0) {
-                    update(p, "sell_avg", avg);
-                }
-                if (left > 1e-9 && !"FILLED".equals(st)) {  // 일부만 팔림: 남은 수량은 보유로 되돌려 다시 판단
-                    update(p, "qty", left);
-                    update(p, "status", "OPEN");
-                    update(p, "sell_order", null);
-                    update(p, "sell_client", null);
-                    log(m, "매도 " + st + ": " + p.get("name") + "(" + p.get("symbol") + ") 남은 " + fmtQty(left) + "주 다시 판단");
-                } else {
-                    update(p, "status", "CLOSED");
-                    update(p, "closed", now().format(AT));
-                    double buyAvg = Values.num(p.get("avg"));
-                    log(m, "매도 체결: " + p.get("name") + "(" + p.get("symbol") + ") 평균 " + avg
-                            + (buyAvg > 0 ? " · 손익 " + pct(avg / buyAvg - 1) : "") + " · " + p.get("reason"));
-                }
+                continue;
+            }
+            if (!done) {
+                continue;
+            }
+            double left = n(p.qty) - filled;
+            if (filled > 0) {
+                p.sellAvg = avg;
+            }
+            if (left > 1e-9 && !"FILLED".equals(st)) {  // 일부만 팔림: 남은 수량은 보유로 되돌려 다시 판단
+                p.qty = left;
+                p.status = St.OPEN;
+                p.sellOrder = null;
+                p.sellClient = null;
+                save(p);
+                log(m, "매도 " + st + ": " + p.name + "(" + p.symbol + ") 남은 " + fmtQty(left) + "주 다시 판단");
+            } else {
+                p.status = St.CLOSED;
+                p.closed = now().format(AT);
+                save(p);
+                double buyAvg = n(p.avg);
+                log(m, "매도 체결: " + p.name + "(" + p.symbol + ") 평균 " + avg
+                        + (buyAvg > 0 ? " · 손익 " + pct(avg / buyAvg - 1) : "") + " · " + p.reason);
             }
         }
     }
@@ -1206,10 +1386,10 @@ class Trader {
         return clock.get().withZoneSameInstant(SEOUL);
     }
 
-    private void failed(String m, String day, String[] c, String why) {
+    private void failed(String m, String day, Cand c, String why) {
         db.update("INSERT OR IGNORE INTO trader_position (market, day, symbol, name, source, status, est, qty,"
-                + " note, opened) VALUES (?, ?, ?, ?, ?, 'FAILED', 0, 0, ?, ?)", m, day, c[0], c[1], c[2], why, now().format(AT));
-        log(m, "매수 건너뜀: " + c[1] + "(" + c[0] + ") " + why);
+                + " note, opened) VALUES (?, ?, ?, ?, ?, 'FAILED', 0, 0, ?, ?)", m, day, c.symbol, c.name, c.source, why, now().format(AT));
+        log(m, "매수 건너뜀: " + c.name + "(" + c.symbol + ") " + why);
     }
 
     // ------------------------------------------------------------------ 화면 상태
@@ -1274,10 +1454,9 @@ class Trader {
                 x.put("open", s == null || s.open == null ? null : s.open.format(AT));
                 x.put("cutoff", s == null || s.close == null ? null : s.close.minusMinutes(CUTOFF_MINUTES).format(AT));
                 x.put("close", s == null || s.close == null ? null : s.close.format(AT));
-                List<Map<String, Object>> today = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED'"
-                        + " AND source NOT IN (?, ?)", m, day, PAIR, SIM);  // 미장 연동·시뮬레이션은 따로 셈
-                x.put("spent", today.stream().mapToDouble(r -> Values.num(r.get("est"))).sum());
-                x.put("count", today.size());
+                double[] spent = spentToday(m, day, null);  // 미장 연동·시뮬레이션은 따로 셈
+                x.put("spent", spent[1]);
+                x.put("count", (int) spent[0]);
                 x.put("halted", getFlag("halt:" + m + ":" + day) != null);
                 x.put("signals", rows("SELECT symbol, name, at FROM trader_signal WHERE market = ? AND day = ? ORDER BY at", m, day));
                 ms.put(m, x);
@@ -1304,14 +1483,13 @@ class Trader {
             out.put("pairWindowMinutes", PAIR_WINDOW_MINUTES);
             Map<String, Object> sc = (Map<String, Object>) ((Map<String, Object>) out.get("config")).get("sim");
             String sm = Values.str(sc.get("market"));
-            List<Map<String, Object>> simToday = rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?",
-                    sm, todayKey(sm), SIM);
+            double[] simSpent = spentToday(sm, todayKey(sm), SIM);
             Map<String, Object> simOut = new LinkedHashMap<>();
             simOut.put("phase", api == null ? "토스 미설정" : !Boolean.TRUE.equals(sc.get("enabled")) ? "꺼짐 (새 매수 없음, 산 종목은 익절·손절·장마감 매도)"
                     : leader ? simPhase : "다른 서버가 주문 중이거나 확인 전");
             simOut.put("day", todayKey(sm));
-            simOut.put("spent", simToday.stream().mapToDouble(r -> Values.num(r.get("est"))).sum());
-            simOut.put("count", simToday.size());
+            simOut.put("spent", simSpent[1]);
+            simOut.put("count", (int) simSpent[0]);
             simOut.put("connected", strategy != null);
             out.put("sim", simOut);
             // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
@@ -1347,13 +1525,63 @@ class Trader {
         return !r.isEmpty() && owner.equals(r.get(0).get("owner"));
     }
 
-    private List<Map<String, Object>> positions(String m, String where) {
-        return rows("SELECT * FROM trader_position WHERE market = ? AND " + where + " ORDER BY id", m);
+    /** 그 시장의 where 포지션들 (id 순) */
+    private List<Position> positions(String m, String where, Object... args) {
+        Object[] all = new Object[args.length + 1];
+        all[0] = m;
+        System.arraycopy(args, 0, all, 1, args.length);
+        List<Position> out = new ArrayList<>();
+        for (Map<String, Object> r : rows("SELECT * FROM trader_position WHERE market = ? AND " + where + " ORDER BY id", all)) {
+            out.add(position(r));
+        }
+        return out;
     }
 
-    private void update(Map<String, Object> p, String col, Object v) {
-        db.update("UPDATE trader_position SET " + col + " = ? WHERE id = ?", v, p.get("id"));
-        p.put(col, v);
+    /** DB 행 -> Position */
+    private static Position position(Map<String, Object> r) {
+        Position p = new Position();
+        p.id = Values.lng(r.get("id"));
+        p.market = Values.str(r.get("market"));
+        p.day = Values.str(r.get("day"));
+        p.symbol = Values.str(r.get("symbol"));
+        p.name = Values.str(r.get("name"));
+        p.source = Values.str(r.get("source"));
+        p.status = St.valueOf(Values.str(r.get("status")));
+        p.orderQty = dbl(r.get("order_qty"));
+        p.est = dbl(r.get("est"));
+        p.qty = dbl(r.get("qty"));
+        p.avg = dbl(r.get("avg"));
+        p.amount = dbl(r.get("amount"));
+        p.buyClient = (String) r.get("buy_client");
+        p.buyOrder = (String) r.get("buy_order");
+        p.buySent = r.get("buy_sent") == null ? null : Values.lng(r.get("buy_sent"));
+        p.sellClient = (String) r.get("sell_client");
+        p.sellOrder = (String) r.get("sell_order");
+        p.sellSent = r.get("sell_sent") == null ? null : Values.lng(r.get("sell_sent"));
+        p.sellQty = dbl(r.get("sell_qty"));
+        p.sellAvg = dbl(r.get("sell_avg"));
+        p.reason = (String) r.get("reason");
+        p.note = (String) r.get("note");
+        p.closed = (String) r.get("closed");
+        p.bought = (String) r.get("bought");
+        return p;
+    }
+
+    /** Position의 바뀌는 칸을 DB에 씀 (주문 흐름에서 바꾸는 칸 전부, 한 문장) */
+    private void save(Position p) {
+        db.update("UPDATE trader_position SET status = ?, est = ?, qty = ?, avg = ?, amount = ?, buy_order = ?, sell_client = ?, sell_order = ?,"
+                        + " sell_sent = ?, sell_qty = ?, sell_avg = ?, reason = ?, note = ?, closed = ?, bought = ? WHERE id = ?",
+                p.status.name(), p.est, p.qty, p.avg, p.amount, p.buyOrder, p.sellClient, p.sellOrder,
+                p.sellSent, p.sellQty, p.sellAvg, p.reason, p.note, p.closed, p.bought, p.id);
+    }
+
+    private static Double dbl(Object v) {
+        return v == null ? null : Values.num(v);
+    }
+
+    /** NULL이면 0 */
+    private static double n(Double v) {
+        return v == null ? 0 : v;
     }
 
     private String getFlag(String k) {
