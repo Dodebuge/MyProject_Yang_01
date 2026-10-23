@@ -23,7 +23,7 @@ Environment=PORT=8080
 ExecStartPre=-/opt/kb_openapi_sample/spring-app/run.sh prepare
 TimeoutStartSec=600
 # run.sh prepare가 만든 푼 jar와 CDS 아카이브로 빠르게 시작합니다. app.jsa가 없으면 CDS 없이 그냥 실행됩니다.
-ExecStart=/usr/bin/java -Xmx512m -XX:SharedArchiveFile=/opt/kb_openapi_sample/spring-app/target/app/app.jsa -XX:TieredStopAtLevel=1 -jar /opt/kb_openapi_sample/spring-app/target/app/kb-openapi-spring.jar
+ExecStart=/usr/bin/java -Xmx512m -XX:SharedArchiveFile=/opt/kb_openapi_sample/spring-app/build/app/app.jsa -XX:TieredStopAtLevel=1 -jar /opt/kb_openapi_sample/spring-app/build/app/kb-openapi-spring.jar
 User=kbapp
 Restart=on-failure
 RestartSec=5

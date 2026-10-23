@@ -17,7 +17,7 @@ Environment=LANG=en_US.UTF-8
 # 코드·화면이 jar보다 새로우면 다시 빌드 (deploy.sh가 먼저 빌드하므로 보통은 바로 끝남). '-': 빌드가 실패해도 기존 jar로 시작
 ExecStartPre=-/home/jetson/yang/MyProject_Yang_01/spring-app/run.sh prepare
 TimeoutStartSec=600
-ExecStart=/usr/bin/java -XX:SharedArchiveFile=target/app/app.jsa -XX:TieredStopAtLevel=1 -jar target/app/kb-openapi-spring.jar
+ExecStart=/usr/bin/java -XX:SharedArchiveFile=build/app/app.jsa -XX:TieredStopAtLevel=1 -jar build/app/kb-openapi-spring.jar
 Restart=on-failure
 RestartSec=5
 

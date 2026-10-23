@@ -16,8 +16,8 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 /**
  * -Drussell.live=true 를 주면 데이터 폴더의 russell2000.csv 종목을 실제 KB에서 찾아 봅니다 (KB 시세 약 2,000번 조회, 10초 남짓).
- *   ./mvnw test -Dtest=RussellTest -Drussell.live=true                                (spring-app 폴더에서, 저장소 루트의 .env·CSV)
- *   ./mvnw test -Dtest=RussellTest -Drussell.live=true -Dkb.data.dir=/opt/kb_openapi_sample
+ *   ./gradlew test --tests RussellTest -Drussell.live=true                                (spring-app 폴더에서, 저장소 루트의 .env·CSV)
+ *   ./gradlew test --tests RussellTest -Drussell.live=true -Dkb.data.dir=/opt/kb_openapi_sample
  */
 class RussellTest {
 

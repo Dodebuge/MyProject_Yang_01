@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
 /**
  * 토스증권 OpenAPI 연결 검사. 실제로 토스를 호출하므로 평소 빌드(mvn package)에서는 건너뜁니다.
  *
- *   ./mvnw test -Dtoss.live=true                  (spring-app 폴더에서)
- *   ./mvnw test -Dtoss.live=true -Dkb.data.dir=/opt/kb_openapi_sample
+ *   ./gradlew test -Dtoss.live=true                  (spring-app 폴더에서)
+ *   ./gradlew test -Dtoss.live=true -Dkb.data.dir=/opt/kb_openapi_sample
  *
  * 키는 서버와 같은 곳에서 찾습니다: 환경변수 > {dataDir}/.env (저장소 루트 .env)
  * dataDir 기본값은 KB_DATA_DIR 환경변수, 없으면 저장소 루트(spring-app의 상위 폴더).

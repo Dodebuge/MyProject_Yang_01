@@ -1,6 +1,6 @@
 #!/bin/sh
 # Jetson 배포 (GitHub Actions self-hosted runner가 실행, 손으로 실행해도 됨):
-#   테스트 -> 빌드(run.sh prepare) -> 서비스 재시작 -> 9080 응답 확인. 테스트·빌드가 실패하면 재시작하지 않아 기존 서버가 그대로 돕니다.
+#   테스트 -> 빌드(run.sh prepare) -> (서비스 파일이 바뀌었으면 설치) -> 서비스 재시작 -> 9080 응답 확인. 테스트·빌드가 실패하면 재시작하지 않아 기존 서버가 그대로 돕니다.
 # git pull은 워크플로가 먼저 합니다 (손으로 할 때: git pull --ff-only 뒤 이 스크립트).
 set -eu
 DIR=/home/jetson/yang/MyProject_Yang_01
@@ -9,10 +9,17 @@ cd "$DIR"
 echo "== $(git log --oneline -1)"
 
 echo "== 테스트"
-./spring-app/mvnw -q -B -f spring-app/pom.xml test
+./spring-app/gradlew -q --no-daemon -p spring-app test
 
 echo "== 빌드"
 ./spring-app/run.sh prepare
+
+# 저장소의 서비스 파일(실행 경로 등)이 설치된 것과 다르면 바꿔 넣음
+if ! cmp -s deploy/jetson/$SERVICE.service /etc/systemd/system/$SERVICE.service; then
+  echo "== 서비스 파일 갱신"
+  sudo install -m 644 deploy/jetson/$SERVICE.service /etc/systemd/system/$SERVICE.service
+  sudo systemctl daemon-reload
+fi
 
 echo "== 재시작"
 sudo systemctl restart "$SERVICE"

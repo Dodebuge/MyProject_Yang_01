@@ -16,8 +16,8 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 /**
  * -Dmysql.live=true 를 주면 .env의 MYSQL_* 로 실제 DB 접속·쓰기·읽기도 확인합니다 (시험 쓰기는 되돌림).
- *   ./mvnw test -Dtest=SnapshotsTest -Dmysql.live=true                                (spring-app 폴더에서, 저장소 루트 .env)
- *   ./mvnw test -Dtest=SnapshotsTest -Dmysql.live=true -Dkb.data.dir=/opt/kb_openapi_sample
+ *   ./gradlew test --tests SnapshotsTest -Dmysql.live=true                                (spring-app 폴더에서, 저장소 루트 .env)
+ *   ./gradlew test --tests SnapshotsTest -Dmysql.live=true -Dkb.data.dir=/opt/kb_openapi_sample
  */
 class SnapshotsTest {
 

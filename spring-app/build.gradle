@@ -1,0 +1,74 @@
+// Spring Boot 버전 (내장 Tomcat, 실행 JAR 하나).
+//   ./gradlew bootJar        -> build/libs/kb-openapi-spring.jar
+//   ./gradlew test           -> 단위 테스트 (실호출 테스트는 -Dtoss.live=true 등으로만)
+// Java·Kotlin 소스는 모두 src/main/java (Kotlin을 먼저, 그다음 Java를 컴파일).
+// 화면(HTML)은 저장소 루트의 *.html·*.js를 static/에, docs/*.html을 static/docs/에 넣습니다.
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '1.9.25'           // Spring Boot 3.5가 관리하는 Kotlin과 같은 버전
+    id 'org.springframework.boot' version '3.5.16'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'kb'
+version = '1.0'
+
+// 빌드하는 JDK(Jetson 21, PC 17)와 상관없이 Java 17용으로 (툴체인은 JDK를 따로 받아야 해서 쓰지 않음)
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core'   // Volume·Russell의 KB 동시 조회 (Values.parallelIO)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc' // SQLite(kb.db·kosdaq.db 등)·MySQL: JdbcTemplate, @Transactional
+    implementation 'com.google.code.gson:gson'                        // KB 응답 읽기
+    implementation 'org.xerial:sqlite-jdbc'
+    implementation 'com.mysql:mysql-connector-j'                      // 보유 금액 4시간 기록 (MYSQL_HOST가 있을 때만 접속)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+processResources {
+    from('..') {
+        include 'home.html', 'heatmap.html', 'me.html', 'chart.html', 'volume.html', 'trader.html', 'monitor.html', 'signals.js', 'sw.js'
+        into 'static'
+    }
+    // 첫 화면의 '구조 문서': Archify 구조도·순서도 → /docs/*.html (검증용 *.visual-check.html 제외)
+    from('../docs') {
+        include '*.html'
+        exclude '*.visual-check.html'
+        into 'static/docs'
+    }
+}
+
+bootJar {
+    archiveFileName = 'kb-openapi-spring.jar'
+}
+jar {
+    enabled = false  // build/libs에 실행 JAR 하나만
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // 실제 KB·토스·MySQL을 부르는 테스트 스위치: ./gradlew test --tests RussellTest -Drussell.live=true
+    ['toss.live', 'russell.live', 'mysql.live', 'kb.data.dir'].each { k ->
+        def v = System.getProperty(k)
+        if (v != null) {
+            systemProperty k, v
+        }
+    }
+}

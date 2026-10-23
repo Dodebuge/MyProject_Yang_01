@@ -1,5 +1,5 @@
 #!/bin/sh
-# Spring Boot 버전 실행 (Linux/macOS). 처음 한 번은 Maven과 의존성을 받느라 1~2분 걸립니다.
+# Spring Boot 버전 실행 (Linux/macOS). 처음 한 번은 Gradle과 의존성을 받느라 1~2분 걸립니다.
 #   ./run.sh                  -> http://localhost:8080
 #   PORT=8000 ./run.sh        -> 다른 포트
 #   ./run.sh prepare          -> 빌드·CDS 준비만 하고 끝냄 (systemd 서비스 배포 전에 실행)
@@ -8,24 +8,18 @@
 # .env(appKey/appSecret)는 저장소 루트에서 읽습니다 (KB_DATA_DIR로 바꿀 수 있음).
 #
 # 시작을 빠르게 하는 세 가지:
-#   1) 소스·화면·docs가 jar보다 새로울 때만 빌드합니다 (매번 Maven을 돌리지 않음).
+#   1) 소스·화면·docs가 jar보다 새로울 때만 빌드합니다 (매번 Gradle을 돌리지 않음).
 #   2) jar를 풀어 두고 CDS(클래스 데이터 공유) 아카이브를 한 번 만들어 재사용합니다.
 #   3) -XX:TieredStopAtLevel=1: JIT를 가볍게 해서 시작을 줄입니다 (KB 응답을 기다리는 앱이라 성능 차이는 작음).
 set -e
 cd "$(dirname "$0")"
 export KB_DATA_DIR="${KB_DATA_DIR:-$(cd .. && pwd)}"
-JAR=target/kb-openapi-spring.jar
-APP=target/app   # 푼 jar(kb-openapi-spring.jar + lib/)와 CDS 아카이브(app.jsa)
+JAR=build/libs/kb-openapi-spring.jar
+APP=build/app   # 푼 jar(kb-openapi-spring.jar + lib/)와 CDS 아카이브(app.jsa)
 
-# IDE(VS Code Java·Eclipse)가 Kotlin 없이 Eclipse 컴파일러로 만든 class가 target/classes에 섞였으면
-# ('Unresolved compilation problem'), Maven이 그것을 최신으로 보고 jar에 넣으므로 처음부터 다시 빌드합니다.
-# pom.xml의 ide 프로필로 IDE는 이제 target-ide/에 빌드하지만, 그 전에 생긴 파일을 치우려고 남겨 둡니다.
-if grep -rqs "Unresolved compilation" target/classes; then
-  echo "target/classes에 IDE가 Kotlin 없이 만든 class가 있어 다시 빌드합니다." >&2
-  rm -rf target
-fi
-if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
-  ./mvnw -q -B -DskipTests package
+# --no-daemon: 서버(Jetson)에 빌드용 JVM이 남아 메모리를 쓰지 않게
+if [ ! -f "$JAR" ] || [ -n "$(find build.gradle settings.gradle gradle.properties src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
+  ./gradlew -q --no-daemon bootJar
 fi
 
 # jar가 바뀌면 다시 풀고, 앱을 한 번 띄웠다 끝내며(onRefresh) 읽은 클래스를 app.jsa로 저장합니다.

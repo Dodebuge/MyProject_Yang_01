@@ -3,7 +3,7 @@ package kb.app;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
-/** 화면 주소. HTML은 빌드할 때 저장소 루트에서 static/으로 복사됩니다 (pom.xml). */
+/** 화면 주소. HTML은 빌드할 때 저장소 루트에서 static/으로 복사됩니다 (build.gradle processResources). */
 @Controller
 class PageController {
 

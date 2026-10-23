@@ -2,10 +2,12 @@
 __pycache__/
 etf_snapshot.json
 deploy/tomcat-proxy/kb.war
-java-app/target/
+spring-app/build/
+spring-app/.gradle/
 spring-app/target/
-java-app/target-ide/
-spring-app/target-ide/
+spring-app/bin/
+.idea/
+*.iml
 kb.db
 kb.db-*
 kosdaq.db

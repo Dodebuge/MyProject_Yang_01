@@ -47,7 +47,7 @@ python dividends.py --csv dividends.csv  # 상세 내역 CSV 저장 (엑셀용)
 
 ## 웹 화면
 
-Spring Boot로 실행합니다 (JDK 17 이상만 있으면 됨, Maven은 `mvnw`가 자동으로 받음).
+Spring Boot로 실행합니다 (JDK 17 이상만 있으면 됨, Gradle은 `gradlew`가 자동으로 받음).
 
 ```bash
 spring-app\run.cmd              # Windows → http://localhost:8080
@@ -184,7 +184,7 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 - **주간 평균**: 종목별 일봉(`GSC10060`)으로 이번 주·전주 하루 평균 거래량을 비교합니다(`/api/russell-volume`, 10분 캐시).
 - 점검: `python russell.py --offline`(CSV 읽기·거래소 이름·기록 시각 자체 점검), `python russell.py`(실제 조회해 상위 20개 출력)
 - CSV를 넣은 뒤 종목이 KB에서 다 찾아지는지 확인: `python russell.py --check` 또는 Java 단위 테스트
-  `./mvnw test -Dtest=RussellTest -Drussell.live=true`(spring-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
+  `./gradlew test --tests RussellTest -Drussell.live=true`(spring-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
   몇 종목 중 몇 종목을 찾았는지, 표기를 바꿔 찾은 종목(`MOGA -> NYS:MOG.A`), 못 찾은 종목을 출력하고, 95% 미만이면 실패합니다.
 
 ## 시그널 알림 (ntfy 휴대폰 알림, 브라우저 알림)
