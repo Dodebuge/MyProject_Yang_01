@@ -24,7 +24,7 @@ if grep -rqs "Unresolved compilation" target/classes; then
   echo "target/classes에 IDE가 Kotlin 없이 만든 class가 있어 다시 빌드합니다." >&2
   rm -rf target
 fi
-if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../java-app/src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
+if [ ! -f "$JAR" ] || [ -n "$(find pom.xml src ../*.html ../docs -newer "$JAR" -print -quit)" ]; then
   ./mvnw -q -B -DskipTests package
 fi
 

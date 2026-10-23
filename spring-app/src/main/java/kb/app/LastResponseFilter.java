@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -15,7 +14,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * 마지막 API 응답 (화면 첫 로딩용). AppServlet과 같은 동작을 컨트롤러 앞에서 처리합니다.
+ * 마지막 API 응답 (화면 첫 로딩용). 컨트롤러 앞에서 처리합니다.
  *   ?cached=1 : last_api/*.txt의 마지막으로 성공한 응답을 KB 조회 없이 바로 돌려줌 (없으면 404)
  *   그 밖     : 컨트롤러 응답이 200이면 last_api/*.txt에 저장
  */
@@ -24,8 +23,8 @@ class LastResponseFilter extends OncePerRequestFilter {
 
     private final LastResponse last;
 
-    LastResponseFilter(@Value("${kb.data-dir}") Path dataDir) {
-        this.last = new LastResponse(dataDir.resolve("last_api"));
+    LastResponseFilter(KbProperties props) {
+        this.last = new LastResponse(props.data("last_api"));
     }
 
     @Override

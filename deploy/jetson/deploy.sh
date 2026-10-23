@@ -8,8 +8,8 @@ SERVICE=kb-openapi-spring
 cd "$DIR"
 echo "== $(git log --oneline -1)"
 
-echo "== 테스트 (java-app)"
-./spring-app/mvnw -q -B -f java-app/pom.xml test
+echo "== 테스트"
+./spring-app/mvnw -q -B -f spring-app/pom.xml test
 
 echo "== 빌드"
 ./spring-app/run.sh prepare

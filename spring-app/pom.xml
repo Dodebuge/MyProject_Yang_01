@@ -4,7 +4,7 @@
     mvn -q package                     -> target/kb-openapi-spring.jar
     java -jar target/kb-openapi-spring.jar
 
-  핵심 로직(KBClient, Heatmap, Dividends)은 ../java-app/src/main/java를 함께 컴파일해 그대로 씁니다.
+  Java·Kotlin 소스는 모두 src/main/java (Kotlin을 먼저, 그다음 Java를 컴파일).
   화면(HTML)은 저장소 루트의 home.html, heatmap.html, me.html을 static/에 넣습니다.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -28,7 +28,7 @@
   </properties>
 
   <dependencies>
-    <!-- java-app의 .kt (Kotlin·Java 혼합, 버전은 Spring Boot가 관리: 1.9.25) -->
+    <!-- .kt (Kotlin·Java 혼합, 버전은 Spring Boot가 관리: 1.9.25) -->
     <dependency>
       <groupId>org.jetbrains.kotlin</groupId>
       <artifactId>kotlin-stdlib</artifactId>
@@ -41,6 +41,11 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <!-- SQLite(kb.db·kosdaq.db 등)·MySQL 접근: JdbcTemplate, @Transactional -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
     </dependency>
     <!-- KBClient가 KB 응답을 읽을 때 씁니다 (버전은 Spring Boot가 관리). -->
     <dependency>
@@ -56,6 +61,11 @@
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
     </dependency>
   </dependencies>
 
@@ -93,23 +103,6 @@
       </resource>
     </resources>
     <plugins>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>build-helper-maven-plugin</artifactId>
-        <version>3.6.1</version>
-        <executions>
-          <execution>
-            <id>shared-core</id>
-            <phase>generate-sources</phase>
-            <goals><goal>add-source</goal></goals>
-            <configuration>
-              <sources>
-                <source>${project.basedir}/../java-app/src/main/java</source>
-              </sources>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
       <!-- Kotlin을 먼저 컴파일(Java 소스도 읽음)하고, 그다음 Java를 컴파일. jvmTarget은 Spring Boot가 java.version으로 맞춤 -->
       <plugin>
         <groupId>org.jetbrains.kotlin</groupId>
@@ -119,10 +112,14 @@
             <id>compile</id>
             <goals><goal>compile</goal></goals>
             <configuration>
-              <sourceDirs>
-                <sourceDir>${project.basedir}/src/main/java</sourceDir>
-                <sourceDir>${project.basedir}/../java-app/src/main/java</sourceDir>
-              </sourceDirs>
+              <sourceDirs><sourceDir>${project.basedir}/src/main/java</sourceDir></sourceDirs>
+            </configuration>
+          </execution>
+          <execution>
+            <id>test-compile</id>
+            <goals><goal>test-compile</goal></goals>
+            <configuration>
+              <sourceDirs><sourceDir>${project.basedir}/src/test/java</sourceDir></sourceDirs>
             </configuration>
           </execution>
         </executions>

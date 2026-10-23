@@ -26,10 +26,10 @@ Jetson(공유기 안, `jetson@192.168.35.41`)에 GitHub Actions **self-hosted ru
 runner가 GitHub에 먼저 접속하는 방식이라 공유기 포트를 열 필요가 없습니다.
 
 - 워크플로: `.github/workflows/deploy-jetson.yml` (`runs-on: [self-hosted, jetson]`)
-  - `java-app/` `spring-app/` 화면(`*.html` `*.js`) `docs/` `deploy/jetson/`이 바뀐 push만 배포합니다 (Python만 바뀌면 안 함).
+  - `spring-app/` 화면(`*.html` `*.js`) `docs/` `deploy/jetson/`이 바뀐 push만 배포합니다 (Python만 바뀌면 안 함).
   - **코스닥 장중(평일 08:50~15:40 KST)에는 기다렸다가 장 마감 뒤 배포**합니다. 기다리는 중에 새 push가 오면 이전 것은 취소되고 마지막 것만 배포합니다.
   - Actions 화면의 **Run workflow**(now 체크)로 장중에도 바로 배포할 수 있습니다.
-  - 순서: `git pull --ff-only` -> `deploy/jetson/deploy.sh`(java-app 테스트 -> `run.sh prepare` 빌드 -> `systemctl restart` -> 9080 응답 확인).
+  - 순서: `git pull --ff-only` -> `deploy/jetson/deploy.sh`(spring-app 테스트 -> `run.sh prepare` 빌드 -> `systemctl restart` -> 9080 응답 확인).
     테스트·빌드가 실패하면 재시작하지 않아 기존 서버가 그대로 돕니다.
 - 서버: systemd 서비스 `kb-openapi-spring` (`deploy/jetson/kb-openapi-spring.service`, User=jetson, 9080, 데이터 `/home/jetson/yang/MyProject_Yang_01`).
   로그 `journalctl -u kb-openapi-spring -f`, 손으로 배포 `git pull --ff-only && sh deploy/jetson/deploy.sh`.

@@ -13,14 +13,13 @@
 | `home.html` | 첫 화면: 히트맵 / 내정보 선택 |
 | `chart.py` / `chart.html` | 종목 검색(이름·종목번호·미국 티커) + 일봉 차트 (같은 서버의 `/chart`) |
 | `alerts.py` / `signals.py` | 코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림 (ntfy 휴대폰 알림, 브라우저 알림). `signals.py`는 `signals.js`와 같은 규칙의 서버용 |
-| `trader.html` + `java-app/.../Trader.java` | 토스 자동매매 (실제 주문, Spring·Java 서버 전용, `/trader`) |
+| `trader.html` + `spring-app/.../Trader.java` | 토스 자동매매 (실제 주문, Spring·Java 서버 전용, `/trader`) |
 | `signals.js` | 보조지표(이평선·볼린저·RSI·MACD)와 기술적 시그널 계산. 차트·거래량 화면이 함께 씀 (`/signals.js`) |
 | `volume.py` / `russell.py` / `volume.html` | 코스닥·러셀 2000 거래량 증가 종목 (같은 서버의 `/volume`) |
 | `monitor.py` / `monitor.html` | 시장 모니터: 지수 히트맵(추종 ETF) + 시그널 알림 (같은 서버의 `/monitor`). 서버가 지수·추가 종목 시세를 5분마다 `kb.db`의 `monitor_quotes`에 저장해 화면이 바로 그림 (`/api/monitor-quotes`) |
 | `me.html` | 내정보: 보유 종목 현황 + 정기 구매 + 최근 1달 거래내역 + 배당 내역 |
 | `deploy/` | 리눅스 서버 배포: Tomcat 10 프록시 WAR + Python 서버 systemd 서비스 ([deploy/README.md](deploy/README.md)) |
-| `java-app/` | Python 없이 Tomcat 10에서 도는 Java 버전 ([java-app/README.md](java-app/README.md)) |
-| `spring-app/` | Spring Boot 버전, 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)) |
+| `spring-app/` | Spring Boot 버전(Java·Kotlin), 내장 Tomcat 실행 JAR ([spring-app/README.md](spring-app/README.md)). 예전 Tomcat WAR 버전(`java-app/`)은 여기로 합쳤습니다 |
 | `../toss_openapi_sample/` | 같은 화면을 토스증권 OpenAPI로 만든 버전 ([toss_openapi_sample/README.md](../toss_openapi_sample/README.md), 리눅스 테스트 방법 포함) |
 | `heatmap.py` / `heatmap.html` | 국내·미국 섹터 히트맵 (같은 서버의 `/heatmap`) |
 
@@ -185,7 +184,7 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 - **주간 평균**: 종목별 일봉(`GSC10060`)으로 이번 주·전주 하루 평균 거래량을 비교합니다(`/api/russell-volume`, 10분 캐시).
 - 점검: `python russell.py --offline`(CSV 읽기·거래소 이름·기록 시각 자체 점검), `python russell.py`(실제 조회해 상위 20개 출력)
 - CSV를 넣은 뒤 종목이 KB에서 다 찾아지는지 확인: `python russell.py --check` 또는 Java 단위 테스트
-  `../spring-app/mvnw test -Dtest=RussellTest -Drussell.live=true`(java-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
+  `./mvnw test -Dtest=RussellTest -Drussell.live=true`(spring-app 폴더에서, 서버면 `-Dkb.data.dir=/opt/kb_openapi_sample` 추가).
   몇 종목 중 몇 종목을 찾았는지, 표기를 바꿔 찾은 종목(`MOGA -> NYS:MOG.A`), 못 찾은 종목을 출력하고, 95% 미만이면 실패합니다.
 
 ## 시그널 알림 (ntfy 휴대폰 알림, 브라우저 알림)
