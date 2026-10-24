@@ -34,6 +34,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET·POST /api/kosdaq-sim-modules 시뮬레이션 매수 조건(sim_buy_rules.json, POST는 목록 통째로)·매도 모듈 목록
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
  *   GET·POST /api/trader             토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader)
+ *   GET·POST /api/paper              모의투자 가상 계좌: 상태, 주문·취소·정산·초기화 (Paper)
  *   GET /api/alerts[?since=id]       코스닥·러셀 2000 증가율 top 30의 새 상승 시그널 알림
  *   GET /api/recent                  최근 검색 종목 (recent_searches.txt, 최대 10개)
  *   GET·POST /api/settings           차트 설정 (chart_settings.json: 기간, 이평선·볼린저밴드 체크)
@@ -54,10 +55,12 @@ class ApiController {
     private final Alerts alerts;
     private final Trader trader;
     private final Monitor monitor;
+    private final Paper paper;
 
     ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell, Alerts alerts, Trader trader,
-                  Monitor monitor) {
+                  Monitor monitor, Paper paper) {
         this.monitor = monitor;
+        this.paper = paper;
         this.heatmap = heatmap;
         this.dividends = dividends;
         this.chart = chart;
@@ -195,6 +198,17 @@ class ApiController {
     @PostMapping("/trader")
     ResponseEntity<Map<String, Object>> traderCommand(@RequestBody Map<String, Object> body) throws IOException {
         return ok(trader.command(body));
+    }
+
+    @GetMapping("/paper")
+    ResponseEntity<Map<String, Object>> paper() throws IOException {
+        return ok(paper.status());
+    }
+
+    /** {"action": "order"|"cancel"|"settle"|"reset", ...} (Paper.command) */
+    @PostMapping("/paper")
+    ResponseEntity<Map<String, Object>> paperCommand(@RequestBody Map<String, Object> body) throws IOException {
+        return ok(paper.command(body));
     }
 
     @GetMapping("/alerts")

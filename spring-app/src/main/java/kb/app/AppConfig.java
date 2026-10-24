@@ -96,6 +96,12 @@ class AppConfig {
         return Sqlite.jdbc(p.data("trader.db"));
     }
 
+    /** 모의투자 가상 계좌·주문·정산 (Paper) */
+    @Bean
+    JdbcTemplate paperDb(KbProperties p) {
+        return Sqlite.jdbc(p.data("paper.db"));
+    }
+
     /** 코스닥 전 종목 1분봉 */
     @Bean
     JdbcTemplate minutesDb(KbProperties p) {
