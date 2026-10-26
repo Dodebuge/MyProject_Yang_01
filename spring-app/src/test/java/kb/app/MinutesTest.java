@@ -57,8 +57,8 @@ class MinutesTest {
     /** 목록의 홀수 번째는 토스: 끝난 시각 -> 시작 시각, 거래량 0인 분 빼고, 거래대금은 추정, 페이지는 그날 첫 봉 앞까지. 토스가 실패하면 KB로. */
     @Test
     void splitsStocksBetweenKbAndToss() throws Exception {
-        List<String> kb = new ArrayList<>();
-        List<Map<String, String>> tossCalls = new ArrayList<>();
+        List<String> kb = java.util.Collections.synchronizedList(new ArrayList<>());  // KB·토스를 여러 스레드가 동시에 부름
+        List<Map<String, String>> tossCalls = java.util.Collections.synchronizedList(new ArrayList<>());
         Map<String, Object> page1 = Map.of("candles", List.of(c("2026-10-22T09:03:00.000+09:00", 0), c("2026-10-22T09:02:00.000+09:00", 30)),
                 "nextBefore", "p2");
         Map<String, Object> page2 = Map.of("candles", List.of(c("2026-10-22T09:01:00.000+09:00", 10), c("2026-10-21T20:00:00.000+09:00", 5)),
