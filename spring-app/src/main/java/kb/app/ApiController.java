@@ -2,6 +2,8 @@ package kb.app;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.CacheControl;
@@ -31,6 +33,20 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *   GET /api/kosdaq-intraday        장중 5분 기록(kosdaq.db)으로 같은 시각 거래량의 전일·전주 대비
  *   GET /api/kosdaq-sim             같은 기록으로 매수·매도 시뮬레이션 (market=kosdaq|russell, buy·sell = SimModules 모듈 이름,
  *                                   start·maxHold·maxBuys, alerts=1이면 알림 종목만 알림 시각부터)
+ *   GET /api/kosdaq-scalp           1분봉(minutes.db)으로 1분 이내 단타 시뮬레이션 (Scalp). days=2026-10-23,2026-10-26 (비우면 마지막 2일),
+ *                                   grid=1이면 값 조합을 격자 탐색해 손익 상위 top개, wick15=1이면 매수 신호를 15분봉 상단 꼬리 없음으로,
+ *                                   vwap=1이면 KB 실제 거래대금 종목만 + 신호 봉 종가 > VWAP,
+ *                                   big=3이면 15분봉 장대양봉(몸통 3%↑), maSell=20이면 1분봉 20분 이평이 꺾일 때 시장가 매도
+ *                                   (예: big=3&start=09:30&tp=0&sl=0&hold=400&minValue=0&maSell=20),
+ *                                   maBelow=60이면 1분봉 종가가 60분 이평 아래로 내려갈 때 시장가 매도,
+ *                                   ride=1이면 종가가 maBelow 이평 위면 사고 익절하면 다시 사고 이평 아래면 팔고 끝
+ *                                   (예: ride=1&prevVol=300&maBelow=30&tp=3&sl=0&hold=400&minValue=0&dip=1.5),
+ *                                   dip=1.5면 익절 뒤 판 값 −1.5%에 지정가로 다시 삼, aligned=1이면 첫 매수는 1분봉 이평 정배열(5>20>60>120)일 때만,
+ *                                   dayStop=30000·dayLoss=30000이면 그날 실현 손익이 +3만원 이상·−3만원 이하가 된 뒤에는 새로 안 삼,
+ *                                   budget=300000이면 동시에 들고 있는 매수 금액을 30만원까지만 (amount=300000과 같이),
+ *                                   maxGap=5·maxDayUp=20이면 이평 +5%·당일 시가 +20%보다 위에서는 안 삼 (ride),
+ *                                   prevVol=100이면 전날 같은 시각까지 누적 거래량 대비 +100% 이상인 종목만 (전날 1분봉 필요, 출처가 같은 종목만)
+ *                                   (예: wick15=1&start=09:30&tp=5&sl=3&hold=400&minValue=0)
  *   GET·POST /api/kosdaq-sim-modules 시뮬레이션 매수 조건(sim_buy_rules.json, POST는 목록 통째로)·매도 모듈 목록
  *   GET /api/russell-volume, /api/russell-intraday  러셀 2000 (russell2000.csv 종목) 같은 모양
  *   GET·POST /api/trader             토스 자동매매 상태, 설정·매수 대상·전량 매도 (Trader)
@@ -54,9 +70,11 @@ class ApiController {
     private final Alerts alerts;
     private final Trader trader;
     private final Monitor monitor;
+    private final MinuteBars minuteBars;
 
     ApiController(Heatmap heatmap, Dividends dividends, Chart chart, Snapshots snapshots, Volume volume, Russell russell, Alerts alerts, Trader trader,
-                  Monitor monitor) {
+                  Monitor monitor, MinuteBars minuteBars) {
+        this.minuteBars = minuteBars;
         this.monitor = monitor;
         this.heatmap = heatmap;
         this.dividends = dividends;
@@ -171,6 +189,64 @@ class ApiController {
         }
         return ok(ticks.simulate(min, amount, tp, sl, until, cost, !"0".equals(spac), hold, buy, sell, start, maxHold, maxBuys,
                 "1".equals(alerts) ? this.alerts.firstTimes(market) : null));
+    }
+
+    /** 1분봉 단타: 봉 거래량 앞 lookback봉 평균 × volX↑ + 봉 상승 up%↑ + 봉 거래대금 minValue 백만원↑이면 다음 봉 시가에 사서 hold분 안에 익절·손절·시간 매도 */
+    @GetMapping("/kosdaq-scalp")
+    ResponseEntity<Map<String, Object>> kosdaqScalp(@RequestParam(defaultValue = "") String days, @RequestParam(defaultValue = "5") double volX,
+                                                    @RequestParam(defaultValue = "20") int lookback, @RequestParam(defaultValue = "1") double up,
+                                                    @RequestParam(defaultValue = "200") double minValue, @RequestParam(defaultValue = "1") double tp,
+                                                    @RequestParam(defaultValue = "1") double sl, @RequestParam(defaultValue = "1") int hold,
+                                                    @RequestParam(defaultValue = "0.23") double cost, @RequestParam(defaultValue = "1000000") double amount,
+                                                    @RequestParam(defaultValue = "09:05") String start, @RequestParam(defaultValue = "15:15") String until,
+                                                    @RequestParam(defaultValue = "0") String grid, @RequestParam(defaultValue = "20") int minTrades,
+                                                    @RequestParam(defaultValue = "30") int top, @RequestParam(defaultValue = "0") String wick15,
+                                                    @RequestParam(defaultValue = "0") String vwap, @RequestParam(defaultValue = "0") double big,
+                                                    @RequestParam(defaultValue = "0") int maSell, @RequestParam(defaultValue = "0") double prevVol,
+                                                    @RequestParam(defaultValue = "0") int maBelow, @RequestParam(defaultValue = "0") String ride,
+                                                    @RequestParam(defaultValue = "0") double dip, @RequestParam(defaultValue = "0") String aligned,
+                                                    @RequestParam(defaultValue = "0") double maxGap, @RequestParam(defaultValue = "0") double maxDayUp,
+                                                    @RequestParam(defaultValue = "0") double dayStop, @RequestParam(defaultValue = "0") double dayLoss,
+                                                    @RequestParam(defaultValue = "0") double budget) {
+        List<String> stored = minuteBars.days();
+        List<String> pick = days.isBlank() ? stored.subList(Math.max(0, stored.size() - 2), stored.size()) : List.of(days.split(","));
+        Map<String, List<Scalp.Stock>> data = new LinkedHashMap<>();
+        for (String d : pick) {
+            if (!stored.contains(d.trim())) {
+                throw new IllegalArgumentException("1분봉이 없는 날짜입니다: " + d);
+            }
+            data.put(d.trim(), minuteBars.stocks(d.trim()));
+        }
+        if (!start.matches("\\d\\d:\\d\\d") || !until.matches("\\d\\d:\\d\\d")) {
+            throw new IllegalArgumentException("시각은 HH:MM 입니다");
+        }
+        Scalp.Params p = new Scalp.Params();
+        p.volX = volX;
+        p.lookback = lookback;
+        p.up = up;
+        p.minValue = minValue;
+        p.tp = tp;
+        p.sl = sl;
+        p.hold = hold;
+        p.cost = cost;
+        p.amount = amount;
+        p.start = Scalp.mins(start.replace(":", ""));
+        p.until = Scalp.mins(until.replace(":", ""));
+        p.wick15 = "1".equals(wick15);
+        p.vwap = "1".equals(vwap);
+        p.big = big;
+        p.maSell = maSell;
+        p.prevVol = prevVol;
+        p.maBelow = maBelow;
+        p.ride = "1".equals(ride);
+        p.dip = dip;
+        p.aligned = "1".equals(aligned);
+        p.maxGap = maxGap;
+        p.maxDayUp = maxDayUp;
+        p.dayStop = dayStop;
+        p.dayLoss = dayLoss;
+        p.budget = budget;
+        return ok("1".equals(grid) ? Scalp.grid(data, p, minTrades, top) : Scalp.simulate(data, p));
     }
 
     @GetMapping("/kosdaq-sim-modules")

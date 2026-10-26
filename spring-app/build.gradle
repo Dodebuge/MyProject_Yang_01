@@ -65,7 +65,7 @@ jar {
 tasks.named('test') {
     useJUnitPlatform()
     // 실제 KB·토스·MySQL을 부르는 테스트 스위치: ./gradlew test --tests RussellTest -Drussell.live=true
-    ['toss.live', 'russell.live', 'mysql.live', 'kb.data.dir'].each { k ->
+    ['toss.live', 'russell.live', 'mysql.live', 'scalp.live', 'kb.data.dir'].each { k ->
         def v = System.getProperty(k)
         if (v != null) {
             systemProperty k, v

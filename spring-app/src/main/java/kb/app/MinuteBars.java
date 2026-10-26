@@ -44,6 +44,17 @@ class MinuteBars {
         db.update("DELETE FROM kosdaq_min1 WHERE day < ?", day.minusDays(KEEP_DAYS).toString());
     }
 
+    /** 저장된 날짜 (오래된 순) */
+    List<String> days() {
+        return db.queryForList("SELECT DISTINCT day FROM kosdaq_min1 ORDER BY day", String.class);
+    }
+
+    /** day의 전 종목 (Scalp 단타 시뮬레이션). 거래가 없던 종목은 뺌 */
+    List<Scalp.Stock> stocks(String day) {
+        return db.query("SELECT code, name, source, bars FROM kosdaq_min1 WHERE day = ? AND bars <> '[]'",
+                (rs, i) -> Scalp.parse(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), day);
+    }
+
     /** 저장된 한 종목·하루 1분봉 (없으면 빈 목록). 시험·분석용 */
     @SuppressWarnings("unchecked")
     List<List<Object>> load(LocalDate day, String code) {

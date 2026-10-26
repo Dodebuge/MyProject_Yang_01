@@ -774,4 +774,83 @@ class TraderTest {
         trader.tick();
         assertTrue(asked.isEmpty());
     }
+
+    // ------------------------------------------------------------------ 단타 전략
+
+    private final List<Map<String, Object>> scalpSignals = new ArrayList<>();  // 가짜 Scalp.live 신호 (분마다 차례로)
+    private final List<java.util.Set<String>> scalpHeld = new ArrayList<>();
+
+    private void scalpConfig(boolean enabled) throws Exception {
+        Map<String, Object> scalp = new HashMap<>();
+        scalp.put("enabled", enabled);
+        scalp.put("params", Map.of("amount", 300_000, "budget", 300_000, "dayStop", 20_000, "dayLoss", 10_000, "tp", 2, "sl", 2));
+        trader.command(Map.of("action", "config", "config", Map.of("scalp", scalp)));
+        trader.scalper = (params, held) -> {
+            scalpHeld.add(new java.util.HashSet<>(held));
+            return scalpSignals.isEmpty() ? scalpSignal("09:00", List.of(), Map.of()) : scalpSignals.remove(0);
+        };
+    }
+
+    private static Map<String, Object> scalpSignal(String at, List<Object> buy, Map<String, Object> sell) {
+        return Map.of("date", "2026-10-19", "at", at, "buy", buy, "sell", sell, "checked", 3);
+    }
+
+    private static Map<String, Object> cand(String code, double price) {
+        return Map.of("code", code, "name", code, "price", price);
+    }
+
+    /** 한 번 30만 원·보유 한도 30만 원, 신호로 사고 '이평 아래'로 팔고, 손절 2%는 5초마다, 하루 −1만 원이면 그날 새 매수 멈춤 */
+    @Test
+    void scalpBuysWithinBudgetSellsOnSignalAndStopsAfterDayLoss() throws Exception {
+        scalpConfig(true);
+        toss.price.put("000660", 100_000.0);
+        toss.price.put("035720", 50_000.0);
+        scalpSignals.add(scalpSignal("09:00", List.of(cand("005930", 70_000), cand("000660", 100_000)), Map.of()));
+        trader.tick();
+        assertEquals(List.of("BUY 005930 4"), toss.sides(), "30만 원 ÷ 7만 원 = 4주, 다음 종목은 보유 한도(30만 원)를 넘어 안 삼");
+        assertEquals("단타", positions().get(0).get("source"));
+        trader.tick();  // 같은 분: 신호를 다시 묻지 않고 체결만 확인
+        assertEquals(1, scalpHeld.size());
+        assertEquals("OPEN", positions().get(0).get("status"));
+
+        now = now.plusMinutes(1);
+        toss.price.put("005930", 69_000.0);  // −1.4%: 손절(2%) 전
+        scalpSignals.add(scalpSignal("09:00", List.of(cand("000660", 100_000)), Map.of("005930", "이평 아래")));
+        trader.tick();
+        assertEquals(java.util.Set.of("005930"), scalpHeld.get(1), "들고 있는 종목을 엔진에 넘김");
+        assertEquals(List.of("BUY 005930 4", "SELL 005930 4"), toss.sides(), "파는 중인 금액도 보유 한도에 들어가 아직 안 삼");
+
+        now = now.plusMinutes(1);
+        scalpSignals.add(scalpSignal("09:00", List.of(cand("000660", 100_000)), Map.of()));
+        trader.tick();  // 매도 체결(실현 약 −4,635원) 뒤 000660 3주
+        assertEquals(List.of("BUY 005930 4", "SELL 005930 4", "BUY 000660 3"), toss.sides());
+        assertEquals("단타 이평 아래", positions().get(0).get("reason"));
+        trader.tick();
+        toss.price.put("000660", 97_900.0);  // −2.1%: 5초마다 보는 손절
+        trader.tick();
+        assertEquals("SELL 000660 3", toss.sides().get(3));
+
+        now = now.plusMinutes(1);
+        scalpSignals.add(scalpSignal("09:00", List.of(cand("035720", 50_000)), Map.of()));
+        trader.tick();  // 실현 약 −11,610원 <= −1만 원 -> 멈춤
+        assertEquals(4, toss.sides().size(), "하루 손실 한도를 넘어 새로 안 삼");
+        Map<?, ?> st = (Map<?, ?>) trader.status().get("scalp");
+        assertEquals(true, st.get("stopped"));
+        assertTrue((double) st.get("realized") < -10_000);
+        assertEquals(0.0, ((Map<?, ?>) ((Map<?, ?>) trader.status().get("markets")).get("KR")).get("spent"), "일반 자동매매 금액과 따로 셈");
+    }
+
+    @Test
+    void scalpIsOffByDefaultAndNeedsStopLoss() throws Exception {
+        trader.scalper = (params, held) -> {
+            throw new AssertionError("꺼져 있으면 신호를 묻지 않음");
+        };
+        trader.tick();
+        Map<String, Object> scalp = new HashMap<>();
+        scalp.put("params", Map.of("sl", 0));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config", Map.of("scalp", scalp))));
+        Map<String, Object> big = new HashMap<>();
+        big.put("params", Map.of("amount", 500_000, "budget", 300_000));
+        assertThrows(IllegalArgumentException.class, () -> trader.command(Map.of("action", "config", "config", Map.of("scalp", big))));
+    }
 }

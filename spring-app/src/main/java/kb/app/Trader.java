@@ -15,10 +15,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -55,6 +57,11 @@ import org.springframework.stereotype.Service;
  *     시뮬레이션 엔진(Ticks.live)을 오늘 기록으로 돌려, 그 시각에 산다고 나온 종목을 시장가 매수하고 판다고 나온 보유분을 매도.
  *     투자 금액 = 하루 최대 매수 합계, 종목당 금액 = 투자 금액 ÷ 하루 최대 종목 수. 익절 %·손절 %(tp-sl 모듈)는 5초마다도 확인.
  *     위의 최대 매수금액·종목 수·지수 조건과 따로 셈. 기록이 늦으면(기록 간격 + 10분) 주문하지 않음
+ *   - 단타 전략 (scalp, 따로 켜고 끔, 코스닥만): 1분마다 Scalp.live 신호로 시장가 매수, 판다고 나온 보유분(1분봉 종가 <= 30분 이평) 시장가 매도.
+ *     후보는 5분 기록의 전날 같은 시각 대비 거래량 +prevVol% 이상 종목, 첫 매수 조건은 시뮬레이션(Scalp 이평 타기)과 같음.
+ *     익절·손절 %는 5초마다 현재가로 시장가. 한 번에 amount원, 들고 있는 단타 매수 금액 합계는 budget원까지.
+ *     그날 단타 실현 손익(비용 SCALP_COST 뺀 추정)이 +dayStop원 이상 또는 −dayLoss원 이하가 되면 그날 새 매수 멈춤 (보유분은 계속 팖).
+ *     같은 종목은 하루 한 번 (trader_position UNIQUE): 시뮬레이션의 익절 뒤 눌림 재매수(dip)는 하지 않음.
  * 안전장치:
  *   - 같은 종목은 시장별 하루 한 번만 매수 (trader.db UNIQUE)
  *   - 주문마다 clientOrderId(멱등성 키): 응답을 못 받아 다시 보내도 두 번 체결되지 않음 (10분 안)
@@ -73,6 +80,11 @@ class Trader {
         Map<String, Object> live(String market, Map<String, Object> params) throws IOException;
     }
 
+    /** 단타 전략 신호 (Scalp.live): 설정 scalp.params와 들고 있는 종목 -> {date, at(5분 기록 시각), buy: [{code, name, price}], sell: {종목: 이유}, checked} */
+    interface Scalper {
+        Map<String, Object> signal(Map<String, Object> params, Set<String> held) throws IOException;
+    }
+
     /** 토스 API (TossClient). 시험은 가짜로 바꿔 끼웁니다. */
     interface Api {
         Object get(String path, Map<String, String> params, boolean account) throws IOException;
@@ -86,6 +98,9 @@ class Trader {
     static final int TICK_SECONDS = 5;
     static final String PAIR = "미장 연동";       // 미장 연동 매수의 source
     static final String SIM = "시뮬레이션";       // 시뮬레이션 전략 매수의 source
+    static final String SCALP = "단타";          // 단타 전략 매수의 source
+    static final double SCALP_COST = 0.0023;      // 단타 실현 손익 추정에 뺄 비용 (매도 금액의 세금·수수료, 시뮬레이션과 같음)
+    static final int SCALP_MAX_CANDS = 20;        // 1분봉을 볼 후보 수 (KB 조회 수)
     static final int SIM_CHECK_SECONDS = 30;      // 시뮬레이션 신호 확인 간격 (새 기록은 5분·30분마다)
     static final int PAIR_WINDOW_MINUTES = 30;   // 코스피 장 시작 후 몇 분 안에만 미장 연동 매수 (서버가 늦게 켜져 오후에 사지 않게)
     static final int CUTOFF_MINUTES = 10;            // 정규장 마감 몇 분 전에 전량 매도·매수 중단
@@ -126,6 +141,10 @@ class Trader {
     private volatile String simDoneAt;  // 이미 처리한 기록 'KR 2026-10-21 10:05'
     /** 시뮬레이션 전략 신호 (서버가 코스닥·러셀 기록으로 연결). null이면 시뮬레이션 전략은 대기만 */
     volatile Strategy strategy;
+    /** 단타 전략 신호 (서버가 코스닥 기록·KB 1분봉으로 연결). null이면 단타 전략은 대기만 */
+    volatile Scalper scalper;
+    private volatile String scalpPhase = "확인 전";
+    private volatile String scalpDoneAt;  // 이미 처리한 분 '2026-10-27 615'
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
     private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
@@ -228,6 +247,17 @@ class Trader {
         int maxBuys;
     }
 
+    static final class Scal {
+        boolean enabled;
+        Map<String, Object> params;  // Scalp.params로 엔진에 그대로
+        double amount;       // 한 번 매수 금액 (원)
+        double budget;       // 들고 있는 단타 매수 금액 합계 한도 (원)
+        double dayStop;      // 그날 실현 손익 +이 금액 이상이면 새 매수 멈춤 (0 = 안 봄)
+        double dayLoss;      // −이 금액 이하이면 멈춤
+        double tp;           // 익절·손절 % (5초마다 현재가로 시장가)
+        double sl;
+    }
+
     /** 설정 (struct config). trader_config의 JSON을 한 번 풀어 씀 */
     static final class Cfg {
         boolean enabled;
@@ -237,6 +267,7 @@ class Trader {
         Mkt us;
         Pair pair;
         Sim sim;
+        Scal scalp;
 
         Mkt market(String m) {
             return "KR".equals(m) ? kr : us;
@@ -290,6 +321,17 @@ class Trader {
         x.sim.sl = Values.num(x.sim.params.get("sl"));
         x.sim.sell = Values.str(x.sim.params.get("sell"));
         x.sim.maxBuys = (int) Values.num(x.sim.params.get("maxBuys"));
+        Map<String, Object> kc = (Map<String, Object>) c.get("scalp");
+        x.scalp = new Scal();
+        x.scalp.enabled = Boolean.TRUE.equals(kc.get("enabled"));
+        x.scalp.params = (Map<String, Object>) kc.get("params");
+        Scalp.Params sp = Scalp.params(x.scalp.params);
+        x.scalp.amount = sp.amount;
+        x.scalp.budget = sp.budget;
+        x.scalp.dayStop = sp.dayStop;
+        x.scalp.dayLoss = sp.dayLoss;
+        x.scalp.tp = sp.tp;
+        x.scalp.sl = sp.sl;
         return x;
     }
 
@@ -311,9 +353,11 @@ class Trader {
 
     /** 토스 키가 없으면 꺼짐. 시뮬레이션 전략은 AppConfig.simStrategy (코스닥·러셀 기록) */
     @Autowired
-    Trader(Optional<TossClient> toss, @Qualifier("traderDb") JdbcTemplate db, KbProperties props, Supplier<ZonedDateTime> clock, Strategy strategy) {
+    Trader(Optional<TossClient> toss, @Qualifier("traderDb") JdbcTemplate db, KbProperties props, Supplier<ZonedDateTime> clock, Strategy strategy,
+           Scalper scalper) {
         this(toss.orElse(null), db, props.data("trader.log"), clock);
         this.strategy = strategy;
+        this.scalper = scalper;
         if (api == null) {
             log.info("[자동매매] 토스 API 키가 없어 꺼져 있습니다 (.env의 TOSS_OPENAPI_CLIENT_ID/SECRET)");
             return;
@@ -362,6 +406,10 @@ class Trader {
         sim.put("budget", 0.0);      // 투자 금액 = 하루 최대 매수 합계 (KR 원, US 달러)
         sim.put("params", new LinkedHashMap<>());  // 시뮬레이션 화면 값 (simParams)
         c.put("sim", sim);
+        Map<String, Object> scalp = new LinkedHashMap<>();
+        scalp.put("enabled", false);  // 단타 전략 실제 매매 (위 enabled·pair·sim과 따로, 코스닥만)
+        scalp.put("params", scalpParams(new LinkedHashMap<>()));
+        c.put("scalp", scalp);
         return c;
     }
 
@@ -507,10 +555,52 @@ class Trader {
                 simParams((Map<String, Object>) dst.get("params"));  // 켤 때 저장된 값도 다시 검사
             }
         }
+        if (in.get("scalp") instanceof Map) {
+            Map<String, Object> src = (Map<String, Object>) in.get("scalp");
+            Map<String, Object> dst = (Map<String, Object>) c.get("scalp");
+            if (src.get("params") instanceof Map) {
+                Map<String, Object> merged = new LinkedHashMap<>((Map<String, Object>) dst.get("params"));
+                merged.putAll((Map<String, Object>) src.get("params"));
+                dst.put("params", scalpParams(merged));
+            }
+            if (src.containsKey("enabled")) {
+                dst.put("enabled", Boolean.TRUE.equals(src.get("enabled")));
+            }
+        }
         setFlag("config", GSON.toJson(c));
         log("ALL", "설정 저장: " + (Boolean.TRUE.equals(c.get("enabled")) ? "켜짐" : "꺼짐") + " · 익절 " + c.get("takeProfit")
                 + "% · 손절 " + c.get("stopLoss") + "% · 국내 " + c.get("KR") + " · 미국 " + c.get("US") + " · 미장 연동 " + c.get("pair")
-                + " · 시뮬레이션 " + c.get("sim"));
+                + " · 시뮬레이션 " + c.get("sim") + " · 단타 " + c.get("scalp"));
+    }
+
+    /** 단타 설정 검사. 손절은 꼭 있어야 하고(실제 돈), 한 번 금액 <= 보유 한도 */
+    static Map<String, Object> scalpParams(Map<String, Object> in) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        Object[][] nums = {{"amount", "한 번 매수 금액", 300_000}, {"budget", "보유 한도", 300_000}, {"dayStop", "하루 수익 멈춤", 20_000},
+            {"dayLoss", "하루 손실 멈춤", 10_000}, {"tp", "익절 %", 2}, {"sl", "손절 %", 2}, {"prevVol", "전날 대비 거래량 %", 200},
+            {"maBelow", "이평 분", 30}, {"maxDayUp", "당일 시가 대비 %", 20}};
+        for (Object[] k : nums) {
+            double v = number(in.getOrDefault((String) k[0], k[2]), (String) k[1]);
+            if (v < 0) {
+                throw new IllegalArgumentException(k[1] + " 값은 0 이상이어야 합니다: " + v);
+            }
+            p.put((String) k[0], v);
+        }
+        if (Values.num(p.get("amount")) <= 0 || Values.num(p.get("amount")) > Values.num(p.get("budget"))) {
+            throw new IllegalArgumentException("단타 한 번 매수 금액은 0보다 크고 보유 한도 이하여야 합니다.");
+        }
+        if (Values.num(p.get("sl")) <= 0 || Values.num(p.get("tp")) <= 0 || Values.num(p.get("maBelow")) < 1) {
+            throw new IllegalArgumentException("단타 익절 %·손절 %·이평 분은 0보다 커야 합니다.");
+        }
+        for (String k : new String[]{"start", "until"}) {
+            String v = Values.str(in.getOrDefault(k, "start".equals(k) ? "09:05" : "14:50")).trim();
+            if (!v.matches("([01][0-9]|2[0-3]):[0-5][0-9]")) {
+                throw new IllegalArgumentException("단타 " + ("start".equals(k) ? "매수 시작" : "매수 마감") + " 시각이 올바르지 않습니다: " + v);
+            }
+            p.put(k, v);
+        }
+        p.put("aligned", !Boolean.FALSE.equals(in.get("aligned")));
+        return p;
     }
 
     /** 시뮬레이션 화면 값 검사 (Ticks.live에 그대로 넘김). 하루 최대 종목 수는 1~50: 종목당 금액 = 투자 금액 ÷ 이 값 */
@@ -558,6 +648,9 @@ class Trader {
         if (SIM.equals(p.source)) {
             return new double[]{c.sim.tp > 0 ? c.sim.tp / 100 : Double.POSITIVE_INFINITY,
                     "tp-sl".equals(c.sim.sell) && c.sim.sl > 0 ? c.sim.sl / 100 : Double.POSITIVE_INFINITY};
+        }
+        if (SCALP.equals(p.source)) {
+            return new double[]{c.scalp.tp / 100, c.scalp.sl / 100};
         }
         if (PAIR.equals(p.source)) {
             if (c.pair.up.symbol.equals(p.symbol)) {
@@ -796,6 +889,7 @@ class Trader {
             buyWatch(s, now, cfg.pair);
         }
         simTick(m, s, cfg);
+        scalpTick(m, s, cfg, now);
         if (!cfg.enabled) {
             return;
         }
@@ -862,13 +956,125 @@ class Trader {
      */
     private double[] spentToday(String m, String day, String source) {
         List<Map<String, Object>> today = source == null
-                ? rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source NOT IN (?, ?)", m, day, PAIR, SIM)
+                ? rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source NOT IN (?, ?, ?)", m, day, PAIR, SIM, SCALP)
                 : rows("SELECT est FROM trader_position WHERE market = ? AND day = ? AND status <> 'FAILED' AND source = ?", m, day, source);
         double sum = 0;
         for (Map<String, Object> r : today) {
             sum += Values.num(r.get("est"));
         }
         return new double[]{today.size(), sum};
+    }
+
+    /** 그날 단타 실현 손익 추정: 판 것마다 매도 금액 × (1 − SCALP_COST) − 매수 평균가 × 판 수량 */
+    private double scalpRealized(String m, String day) {
+        double sum = 0;
+        for (Map<String, Object> r : rows("SELECT sell_qty, sell_avg, avg FROM trader_position WHERE market = ? AND day = ? AND source = ?"
+                + " AND status = 'CLOSED' AND sell_avg > 0 AND avg > 0", m, day, SCALP)) {
+            double q = Values.num(r.get("sell_qty"));
+            sum += q * Values.num(r.get("sell_avg")) * (1 - SCALP_COST) - q * Values.num(r.get("avg"));
+        }
+        return sum;
+    }
+
+    /**
+     * 단타 전략 (코스닥, 1분에 한 번): 신호(Scalp.live)로 판다는 보유분을 시장가 매도, 하루 한도 안이면 산다는 종목을 시장가 매수.
+     * 5분 기록이 오늘 것이 아니거나 15분 넘게 늦으면 주문하지 않음. 같은 종목은 하루 한 번 (trader_position UNIQUE).
+     */
+    @SuppressWarnings("unchecked")
+    private void scalpTick(String m, Session s, Cfg cfg, ZonedDateTime now) throws IOException {
+        Scal sc = cfg.scalp;
+        if (!sc.enabled || !"KR".equals(m)) {
+            return;
+        }
+        if (scalper == null) {
+            setScalpPhase(m, "이 서버에 코스닥 기록·1분봉이 연결되지 않아 대기");
+            return;
+        }
+        ZonedDateTime local = now.withZoneSameInstant(SEOUL);
+        int min = local.getHour() * 60 + local.getMinute();
+        String key = s.day + " " + min;
+        if (key.equals(scalpDoneAt)) {
+            return;  // 1분에 한 번 (끝난 1분봉으로 판단)
+        }
+        scalpDoneAt = key;
+
+        double realized = scalpRealized(m, s.day);
+        String stopKey = "scalpStop:" + m + ":" + s.day;
+        boolean stopped = getFlag(stopKey) != null;
+        if (!stopped && (sc.dayStop > 0 && realized >= sc.dayStop || sc.dayLoss > 0 && realized <= -sc.dayLoss)) {
+            setFlag(stopKey, "1");
+            stopped = true;
+            log(m, "단타: 오늘 실현 손익 약 " + round(realized) + "원 → 오늘 새 매수 멈춤 (보유분은 계속 판단)");
+        }
+        List<Position> open = positions(m, "status = 'OPEN' AND source = ?", SCALP);
+        Set<String> held = new HashSet<>();
+        for (Position p : open) {
+            held.add(p.symbol);
+        }
+        Map<String, Object> sig = scalper.signal(sc.params, held);
+        String at = Values.str(sig.get("at"));
+        if (!s.day.equals(sig.get("date")) || at.length() < 5) {
+            setScalpPhase(m, "매매 중 · 오늘 코스닥 5분 기록이 아직 없음");
+            return;
+        }
+        int late = min - (Integer.parseInt(at.substring(0, 2)) * 60 + Integer.parseInt(at.substring(3, 5)));
+        if (late > 15) {
+            setScalpPhase(m, "매매 중 · 마지막 5분 기록(" + at + ")이 " + late + "분 전이라 주문하지 않음 (기록이 멈췄는지 확인)");
+            return;
+        }
+
+        Map<String, Object> sells = map(sig.get("sell"));
+        int sold = 0;
+        for (Position pos : open) {
+            Object why = sells.get(pos.symbol);
+            if (why != null) {
+                sell(m, pos, "단타 " + why);
+                sold++;
+            }
+        }
+        String head = "매매 중 · 실현 손익 약 " + round(realized) + "원";
+        if (stopped) {
+            setScalpPhase(m, head + " · 오늘 한도 도달로 새 매수 멈춤 · 매도 " + sold);
+            return;
+        }
+        int bought = 0;
+        String note = "";
+        List<Object> buys = sig.get("buy") instanceof List ? (List<Object>) sig.get("buy") : new ArrayList<>();
+        for (Object o : buys) {
+            Map<String, Object> b = map(o);
+            Cand c = new Cand(Values.str(b.get("code")).trim().toUpperCase(), Values.str(b.get("name")), SCALP);
+            if (boughtToday(m, s.day, c.symbol)) {
+                continue;  // 오늘 이미 샀거나 시도함 (다른 출처 포함)
+            }
+            double holding = 0;  // 들고 있거나 사고파는 중인 단타 매수 금액
+            for (Map<String, Object> r : rows("SELECT est FROM trader_position WHERE market = ? AND source = ? AND status IN ('BUYING', 'OPEN', 'SELLING')",
+                    m, SCALP)) {
+                holding += Values.num(r.get("est"));
+            }
+            if (holding + sc.amount > sc.budget) {
+                note = " · 보유 한도(" + round(sc.budget) + "원)라 남은 신호는 사지 않음";
+                break;
+            }
+            Double price = prices(m, c.symbol).get(c.symbol);
+            if (price == null || price <= 0) {
+                continue;  // 다음 분에 다시
+            }
+            long qty = (long) Math.floor(sc.amount / price);
+            if (qty < 1) {
+                continue;
+            }
+            buy(m, s.day, c, qty, qty * price);
+            bought++;
+        }
+        setScalpPhase(m, head + " · 매수 " + bought + " · 매도 " + sold + note);
+    }
+
+    /** 단타 상황. 손익·매수·매도 수가 바뀔 때만 기록 (분마다 같으면 남기지 않음) */
+    private void setScalpPhase(String m, String text) {
+        if (!text.equals(scalpPhase)) {
+            scalpPhase = text;
+            log(m, "단타: " + text);
+        }
     }
 
     /**
@@ -1492,6 +1698,15 @@ class Trader {
             simOut.put("count", (int) simSpent[0]);
             simOut.put("connected", strategy != null);
             out.put("sim", simOut);
+            Map<String, Object> kc = (Map<String, Object>) ((Map<String, Object>) out.get("config")).get("scalp");
+            Map<String, Object> scalpOut = new LinkedHashMap<>();
+            scalpOut.put("phase", api == null ? "토스 미설정" : !Boolean.TRUE.equals(kc.get("enabled")) ? "꺼짐 (새 매수 없음, 산 종목은 익절·손절·장마감 매도)"
+                    : leader ? scalpPhase : "다른 서버가 주문 중이거나 확인 전");
+            scalpOut.put("day", todayKey("KR"));
+            scalpOut.put("realized", scalpRealized("KR", todayKey("KR")));
+            scalpOut.put("stopped", getFlag("scalpStop:KR:" + todayKey("KR")) != null);
+            scalpOut.put("connected", scalper != null);
+            out.put("scalp", scalpOut);
             // 매수 내역: 체결된 매수 전부 (날짜와 상관없이, 최신 먼저 500건). 실패·미체결은 빼고
             List<Map<String, Object>> history = rows("SELECT id, market, day, symbol, name, source, status, qty, avg, amount, est, bought,"
                     + " sell_qty, sell_avg, reason, closed FROM trader_position WHERE bought IS NOT NULL ORDER BY bought DESC, id DESC LIMIT 500");

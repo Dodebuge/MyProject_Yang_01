@@ -213,7 +213,7 @@ class Minutes {
     }
 
     /** 한 종목의 day 1분봉 [[HHMM, 시가, 고가, 저가, 종가, 거래량, 거래대금]]. 그날 봉이 없으면 빈 목록(거래 없음), KB 오류가 이어지면 null. */
-    private List<List<Object>> bars(String code, LocalDate day) {
+    List<List<Object>> bars(String code, LocalDate day) {
         String d = day.format(DateTimeFormatter.BASIC_ISO_DATE);
         for (int attempt = 0; attempt < 3; attempt++) {
             try {

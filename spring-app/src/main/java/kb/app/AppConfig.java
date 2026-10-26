@@ -2,6 +2,9 @@ package kb.app;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -57,6 +60,31 @@ class AppConfig {
     Trader.Strategy simStrategy(Volume volume, Russell russell, Alerts alerts) {
         return (m, p) -> ("KR".equals(m) ? volume.ticks : russell.ticks).live(p,
                 Boolean.TRUE.equals(p.get("alerts")) ? alerts.firstTimes("KR".equals(m) ? "kosdaq" : "russell") : null);
+    }
+
+    /**
+     * 자동매매 단타 전략 신호: 코스닥 5분 기록(마지막 기록의 전날 같은 시각 대비 거래량)으로 후보를 고르고,
+     * 후보·보유 종목의 오늘 KB 1분봉(4개씩 동시에)으로 Scalp.live -> {date, at, buy, sell, checked}
+     */
+    @Bean
+    @SuppressWarnings("unchecked")
+    Trader.Scalper scalper(Volume volume, Minutes minutes, Supplier<ZonedDateTime> clock) {
+        return (params, held) -> {
+            Map<String, Object> rec = volume.ticks.intraday("", "");
+            ZonedDateTime now = clock.get().withZoneSameInstant(ZoneId.of("Asia/Seoul"));
+            List<Map<String, Object>> stocks = rec.get("stocks") instanceof List ? (List<Map<String, Object>>) rec.get("stocks") : List.of();
+            Map<String, Object> out = Scalp.live(stocks, codes -> {
+                List<List<List<Object>>> got = Values.parallel(codes, 4, code -> minutes.bars(code, now.toLocalDate()));
+                Map<String, List<List<Object>>> m = new HashMap<>();
+                for (int i = 0; i < codes.size(); i++) {
+                    m.put(codes.get(i), got.get(i));
+                }
+                return m;
+            }, Scalp.params(params), now.getHour() * 60 + now.getMinute(), held, Trader.SCALP_MAX_CANDS);
+            out.put("date", rec.get("date"));
+            out.put("at", rec.get("at"));
+            return out;
+        };
     }
 
     // ------------------------------------------------------------------ SQLite (Python 서버와 같은 파일)
