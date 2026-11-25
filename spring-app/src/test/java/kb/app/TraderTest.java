@@ -840,6 +840,29 @@ class TraderTest {
         assertEquals(0.0, ((Map<?, ?>) ((Map<?, ?>) trader.status().get("markets")).get("KR")).get("spent"), "일반 자동매매 금액과 따로 셈");
     }
 
+    /** SLI: 정규장 중 끝까지 성공한 확인·단타 처리를 분마다 한 번 trader_beat에, 그날 정규장(KST)을 trader_session에 */
+    @Test
+    void recordsBeatsForSli() throws Exception {
+        scalpConfig(true);
+        trader.tick();
+        trader.tick();  // 같은 분: 한 번만
+        now = now.plusMinutes(1);
+        trader.tick();
+        var j = Sqlite.jdbc(db);
+        assertEquals(List.of("2026-10-19 09:01", "2026-10-19 09:02"),
+                j.queryForList("SELECT minute FROM trader_beat WHERE kind = 'tick' AND market = 'KR' ORDER BY minute", String.class));
+        assertEquals(List.of("2026-10-19 09:01", "2026-10-19 09:02"),
+                j.queryForList("SELECT minute FROM trader_beat WHERE kind = 'scalp' AND market = 'KR' ORDER BY minute", String.class));
+        assertEquals(0, j.queryForObject("SELECT count(*) FROM trader_beat WHERE market = 'US'", Integer.class), "미국은 장 전");
+        Map<String, Object> s = j.queryForMap("SELECT open, close FROM trader_session WHERE market = 'KR' AND day = '2026-10-19'");
+        assertEquals("2026-10-19 09:00", s.get("open"));
+        assertEquals("2026-10-19 15:30", s.get("close"));
+
+        now = ZonedDateTime.of(2026, 10, 19, 15, 31, 0, 0, SEOUL);  // 장 마감 뒤: 기록 안 함
+        trader.tick();
+        assertEquals(2, j.queryForObject("SELECT count(*) FROM trader_beat WHERE kind = 'tick'", Integer.class));
+    }
+
     @Test
     void scalpIsOffByDefaultAndNeedsStopLoss() throws Exception {
         trader.scalper = (params, held) -> {

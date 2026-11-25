@@ -115,6 +115,35 @@ def close_sli(rows: list, now: datetime):
     return good, total
 
 
+def minutes_between(start: str, end: str) -> list:
+    """'yyyy-MM-dd HH:mm' start 이상 end 미만의 분 목록."""
+    t, stop = datetime.strptime(start, "%Y-%m-%d %H:%M"), datetime.strptime(end, "%Y-%m-%d %H:%M")
+    out = []
+    while t < stop:
+        out.append(t.strftime("%Y-%m-%d %H:%M"))
+        t += timedelta(minutes=1)
+    return out
+
+
+def beat_sli(sessions: list, beats: set, kind: str, now: datetime):
+    """trader.db: sessions [(market, open, close) KST], beats {(kind, market, minute)}. 정규장이 끝난 날만.
+    tick: 정규장 전체. scalp: 그날 한 번이라도 처리한 날만, 첫 분(5분 기록 전)과 마감 10분 전부터는 뺌 (Trader.CUTOFF_MINUTES)."""
+    good = total = 0
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    for market, open_, close in sessions:
+        if close > stamp:
+            continue
+        window = minutes_between(open_, close)
+        if kind == "scalp":
+            if market != "KR" or not any((kind, market, m) in beats for m in window):
+                continue
+            # ponytail: 장중에 단타를 켜고 끈 시간도 놓친 분으로 셈. 켠 시간 기록이 생기면 그걸로 분모를 줄이기
+            window = window[1:-10]
+        total += len(window)
+        good += sum((kind, market, m) in beats for m in window)
+    return good, total
+
+
 def query(path: str, sql: str, *args) -> list:
     """읽기 전용. 파일이 없으면 빈 목록 (그 기능을 안 쓰는 서버)."""
     if not os.path.exists(path):
@@ -178,7 +207,12 @@ def load_slis(data: str, now: datetime) -> list:
                      "SELECT day, count(DISTINCT code) FROM kosdaq_min1 WHERE day LIKE ? GROUP BY day", month))
     trades = query(os.path.join(data, "trader.db"),
                    "SELECT market, day, source, status, closed FROM trader_position WHERE bought IS NOT NULL AND day LIKE ?", month)
-    return [("러셀 2000 30분 기록", *russell_sli(russell, now), 0.93),
+    trader_db = os.path.join(data, "trader.db")
+    sessions = query(trader_db, "SELECT market, open, close FROM trader_session WHERE open LIKE ?", month)
+    beats = set(query(trader_db, "SELECT kind, market, minute FROM trader_beat WHERE minute LIKE ?", month))
+    return [("자동매매 5초 확인 (T0)", *beat_sli(sessions, beats, "tick", now), 0.995),
+            ("단타 1분 신호 처리 (T0)", *beat_sli(sessions, beats, "scalp", now), 0.99),
+            ("러셀 2000 30분 기록", *russell_sli(russell, now), 0.93),
             ("코스닥 1분봉 수집", *minutes_sli(got, listed, now), 0.99),
             ("장마감 전 매도 (T0)", *close_sli(trades, now), 1.0)] + access_slis(read_access(data, f"{now:%Y-%m}"))
 
@@ -241,6 +275,16 @@ def self_check():
     assert close_sli(rows, now) == (2, 4)
     assert close_sli(rows[:1], datetime(2026, 11, 25, 15, 0, tzinfo=KST)) == (0, 0)  # 장 마감 전이면 오늘은 아직
     assert missed([("a", 2, 4, 1.0), ("b", 0, 0, 0.99), ("c", 99, 100, 0.99)]) == ["a"]
+
+    # 5초 확인: 국내 09:00~15:30 = 390분 중 389분, 미국은 아직 장 중이라 뺌. 단타: 09:01~15:19 = 379분 중 378분
+    sessions = [("KR", "2026-11-25 09:00", "2026-11-25 15:30"), ("KR", "2026-11-24 09:00", "2026-11-24 15:30"),
+                ("US", "2026-11-25 23:30", "2026-11-26 06:00")]
+    kr = minutes_between("2026-11-25 09:00", "2026-11-25 15:30")
+    assert len(kr) == 390 and kr[-1] == "2026-11-25 15:29"
+    beats = {("tick", "KR", m) for m in kr if m != "2026-11-25 10:00"} | {("scalp", "KR", m) for m in kr if m != "2026-11-25 10:00"}
+    assert beat_sli(sessions, beats, "tick", now) == (389, 780)  # 11-24는 기록 0 → 하루 전체 놓침
+    assert beat_sli(sessions, beats, "scalp", now) == (378, 379)  # 11-24는 단타 안 켬 → 뺌
+    assert beat_sli(sessions, beats, "tick", datetime(2026, 11, 25, 15, 0, tzinfo=KST)) == (0, 390)  # 오늘은 아직
 
     log = ['2026-11-25 13:01:02 200 120000 "GET /api/monitor-quotes?cached=1 HTTP/1.1"',   # 캐시 0.12초: 좋음
            '2026-11-25 13:01:03 200 900000 "GET /api/heatmap?cached=1&market=kr HTTP/1.1"',  # 캐시 0.9초: 나쁨

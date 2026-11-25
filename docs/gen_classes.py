@@ -89,14 +89,14 @@ SLI = {
     "SimModules": ("T0", [
         ("검사(id·연산자·규칙 30개·조건 10개)를 통과한 저장 규칙 / 저장 규칙", "100% (틀린 POST는 400)", "실제 자동매매(시뮬레이션 전략)가 같은 규칙을 씀 → SimModulesTest")]),
     "Scalp": ("T0", [
-        ("단타 켠 정규장 분 중 Scalp.live 신호를 처리한 분 / 정규장 분", "99%", "Trader의 scalpDoneAt·scalpPhase (`/api/trader` 상태)"),
+        ("단타 켠 정규장 분 중 Scalp.live 신호를 처리한 분 / 정규장 분", "99%", "trader.db `trader_beat` kind=scalp (09:01~마감 10분 전) → error_budget.py"),
         ("후보·보유 종목 오늘 KB 1분봉 조회 성공 / 조회 (4개씩 동시에)", "99%", "Minutes.bars 실패 로그"),
         ("그날 실현 손익이 −dayLoss·+dayStop에 닿은 뒤 새 매수 · 단타 보유 합계 budget 초과 매수", "0건", "trader.log, trader.db `trader_position`"),
         ("/api/kosdaq-scalp 시뮬레이션 결과가 ScalpTest 기대값과 같음", "100%", "ScalpTest (minutes.db 1분봉 입력 품질은 Minutes SLI)")]),
     "Trader": ("T0", [
         ("같은 clientOrderId로 두 번 체결된 주문", "0건 (절대)", "trader.log, 토스 앱 체결 내역"),
         ("장마감 10분 전 매도 대상 중 마감 전에 팔린 비율 (closeSell 끈 종목 제외)", "100%", "trader.db `trader_position`"),
-        ("정규장 중 5초 확인이 성공한 분 / 정규장 분", "99.5% (월 약 41분)", "측정 없음 → 마지막 tick 시각 기록 필요"),
+        ("정규장 중 5초 확인이 성공한 분 / 정규장 분", "99.5% (월 약 41분)", "trader.db `trader_beat` kind=tick / `trader_session` → error_budget.py"),
         ("접수·의도된 거절 / 주문 요청", "99%", "trader.log `주문 거절`·`주문 응답 없음`"),
         ("기록이 간격+10분보다 오래됐는데 낸 주문 · 동시에 임대를 가진 프로세스", "0건", "trader_lease, trader.log `주문 담당`"),
         ("단타: 같은 종목 하루 두 번 매수", "0건", "trader_position UNIQUE (신호 SLI는 Scalp)")]),

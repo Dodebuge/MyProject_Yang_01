@@ -109,6 +109,8 @@ class Trader {
     private static final long RESEND_LIMIT_MS = 9 * 60_000;  // clientOrderId 멱등성은 10분: 그 안에서만 같은 키로 다시 보냄
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter AT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter MINUTE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    static final int BEAT_KEEP_DAYS = 60;              // SLI 기록(trader_beat) 보관
     private static final Gson GSON = new GsonBuilder().serializeNulls().setObjectToNumberStrategy(ToNumberPolicy.LONG_OR_DOUBLE).create();
     private static final Type MAP = new TypeToken<Map<String, Object>>() { }.getType();
     private static final String SCHEMA = "CREATE TABLE IF NOT EXISTS trader_config (k TEXT PRIMARY KEY, v TEXT NOT NULL);"
@@ -123,6 +125,9 @@ class Trader {
             + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, bought TEXT, UNIQUE (market, day, symbol));"
             + "CREATE TABLE IF NOT EXISTS trader_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, market TEXT NOT NULL, text TEXT NOT NULL);"
             + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL);"
+            // SLI (README 'SLO / SLI', deploy/jetson/error_budget.py): 정규장 중 확인(tick)·단타 신호 처리(scalp)가 성공한 분(KST), 그날 정규장(KST)
+            + "CREATE TABLE IF NOT EXISTS trader_beat (kind TEXT NOT NULL, market TEXT NOT NULL, minute TEXT NOT NULL, PRIMARY KEY (kind, market, minute));"
+            + "CREATE TABLE IF NOT EXISTS trader_session (market TEXT NOT NULL, day TEXT NOT NULL, open TEXT NOT NULL, close TEXT NOT NULL, PRIMARY KEY (market, day));"
             // 미장 연동 미국 티커: 모두 상승·하락인지 볼 종목
             + "CREATE TABLE IF NOT EXISTS trader_us_watch (signal TEXT PRIMARY KEY, added TEXT NOT NULL)";
 
@@ -147,6 +152,7 @@ class Trader {
     private volatile String scalpDoneAt;  // 이미 처리한 분 '2026-10-27 615'
     private final Map<String, String> phase = new ConcurrentHashMap<>();
     private final Map<String, String> lastError = new ConcurrentHashMap<>();
+    private final Map<String, String> beats = new ConcurrentHashMap<>();  // kind+시장 -> 마지막으로 쓴 분 (분마다 한 번만 씀)
     private volatile Boolean lastLeader;  // 주문 담당이 바뀔 때만 남기려고
     private volatile boolean leader;
     private volatile Map<String, Object> account;  // 토스 계좌 원화·달러 (accountSummary, ACCOUNT_SECONDS마다)
@@ -798,6 +804,11 @@ class Trader {
             try {
                 tickMarket(m, cfg);
                 lastError.remove(m);
+                Session s = sessions.get(m);
+                ZonedDateTime t = now();
+                if (s != null && s.open != null && !t.isBefore(s.open) && t.isBefore(s.close)) {
+                    beat("tick", m, s);
+                }
             } catch (IOException | RuntimeException e) {
                 String msg = e.getClass().getSimpleName() + ": " + e.getMessage();
                 if (!msg.equals(lastError.put(m, msg))) {  // 같은 오류를 5초마다 남기지 않게
@@ -1035,6 +1046,7 @@ class Trader {
         String head = "매매 중 · 실현 손익 약 " + round(realized) + "원";
         if (stopped) {
             setScalpPhase(m, head + " · 오늘 한도 도달로 새 매수 멈춤 · 매도 " + sold);
+            beat("scalp", m, s);
             return;
         }
         int bought = 0;
@@ -1067,6 +1079,27 @@ class Trader {
             bought++;
         }
         setScalpPhase(m, head + " · 매수 " + bought + " · 매도 " + sold + note);
+        beat("scalp", m, s);
+    }
+
+    /**
+     * SLI 기록 (README 'SLO / SLI'): 정규장 중 이 분에 kind(tick: 5초 확인, scalp: 단타 신호 처리)가 끝까지 성공했음.
+     * 분마다 한 번만 쓰고, 그날 정규장(KST)도 함께 남깁니다. 실패해도 주문 처리는 계속 (로그만).
+     */
+    private void beat(String kind, String m, Session s) {
+        String minute = now().format(MINUTE);
+        if (minute.equals(beats.put(kind + m, minute))) {
+            return;
+        }
+        try {
+            if (db.update("INSERT OR IGNORE INTO trader_session (market, day, open, close) VALUES (?, ?, ?, ?)", m, s.day,
+                    s.open.withZoneSameInstant(SEOUL).format(MINUTE), s.close.withZoneSameInstant(SEOUL).format(MINUTE)) > 0) {
+                db.update("DELETE FROM trader_beat WHERE minute < ?", now().minusDays(BEAT_KEEP_DAYS).format(MINUTE));
+            }
+            db.update("INSERT OR IGNORE INTO trader_beat (kind, market, minute) VALUES (?, ?, ?)", kind, m, minute);
+        } catch (RuntimeException e) {
+            log(m, "SLI 기록 실패: " + e.getMessage());
+        }
     }
 
     /** 단타 상황. 손익·매수·매도 수가 바뀔 때만 기록 (분마다 같으면 남기지 않음) */
