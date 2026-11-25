@@ -3,6 +3,7 @@ __pycache__/
 etf_snapshot.json
 deploy/tomcat-proxy/kb.war
 spring-app/build/
+spring-app/slo-monitor/build/
 spring-app/.gradle/
 spring-app/target/
 spring-app/bin/

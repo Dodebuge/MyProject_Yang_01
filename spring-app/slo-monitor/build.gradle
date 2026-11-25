@@ -1,0 +1,46 @@
+// SLO 모니터 (Spring Boot·Kotlin, 9090): kb-openapi-spring과 따로 도는 실행 JAR (README 'SLO 모니터 서버').
+//   ./gradlew :slo-monitor:bootJar   -> slo-monitor/build/libs/slo-monitor.jar
+//   ./gradlew :slo-monitor:test
+//   java -jar slo-monitor.jar                    서버 (http://localhost:9090)
+//   java -jar slo-monitor.jar check --max 100 --fail-slo   GitHub Actions 점검
+// 플러그인 버전은 상위(spring-app/build.gradle)와 같음.
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+group = 'kb'
+version = '1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.xerial:sqlite-jdbc'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+bootJar {
+    archiveFileName = 'slo-monitor.jar'
+}
+jar {
+    enabled = false
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

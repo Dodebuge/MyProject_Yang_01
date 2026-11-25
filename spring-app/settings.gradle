@@ -1,1 +1,4 @@
 rootProject.name = 'kb-openapi-spring'
+
+// SLO 모니터: 따로 도는 실행 JAR (slo-monitor/build.gradle)
+include 'slo-monitor'

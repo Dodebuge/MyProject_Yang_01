@@ -1,5 +1,6 @@
-# 평일 장 마감 뒤(16:00 KST) Jetson의 kosdaq.db로 이번 달 에러 예산을 계산해 Job Summary에 남깁니다 (README 'SLO / SLI').
-# 예산을 다 쓰거나 러셀 기록·1분봉·장마감 매도 SLI가 목표 미달이면 실패 → GitHub 실패 메일.
+# 평일 장 마감 뒤(16:00 KST) Jetson에서 이번 달 에러 예산과 SLI를 계산해 Job Summary에 남깁니다 (README 'SLO / SLI').
+# 계산은 SLO 모니터 JAR(spring-app/slo-monitor, 배포 때 빌드된 것)의 check 명령: 9090 화면과 같은 코드.
+# 예산을 다 쓰거나 SLI 하나라도 목표 미달이면 실패 → GitHub 실패 메일.
 name: 에러 예산
 
 on:
@@ -14,8 +15,7 @@ jobs:
   budget:
     runs-on: [self-hosted, jetson]
     timeout-minutes: 5
+    env:
+      KB_DATA_DIR: /home/jetson/yang/MyProject_Yang_01
     steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: deploy/jetson
-      - run: python3 deploy/jetson/error_budget.py --max 100 --fail-slo
+      - run: java -Dstdout.encoding=UTF-8 -jar "$KB_DATA_DIR/spring-app/slo-monitor/build/libs/slo-monitor.jar" check --max 100 --fail-slo

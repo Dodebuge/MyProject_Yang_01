@@ -125,7 +125,7 @@ class Trader {
             + " sell_qty REAL, sell_avg REAL, reason TEXT, note TEXT, opened TEXT, closed TEXT, bought TEXT, UNIQUE (market, day, symbol));"
             + "CREATE TABLE IF NOT EXISTS trader_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, market TEXT NOT NULL, text TEXT NOT NULL);"
             + "CREATE TABLE IF NOT EXISTS trader_lease (name TEXT PRIMARY KEY, owner TEXT NOT NULL, until INTEGER NOT NULL);"
-            // SLI (README 'SLO / SLI', deploy/jetson/error_budget.py): 정규장 중 확인(tick)·단타 신호 처리(scalp)가 성공한 분(KST), 그날 정규장(KST)
+            // SLI (README 'SLO / SLI', spring-app/slo-monitor가 읽음): 정규장 중 확인(tick)·단타 신호 처리(scalp)가 성공한 분(KST), 그날 정규장(KST)
             + "CREATE TABLE IF NOT EXISTS trader_beat (kind TEXT NOT NULL, market TEXT NOT NULL, minute TEXT NOT NULL, PRIMARY KEY (kind, market, minute));"
             + "CREATE TABLE IF NOT EXISTS trader_session (market TEXT NOT NULL, day TEXT NOT NULL, open TEXT NOT NULL, close TEXT NOT NULL, PRIMARY KEY (market, day));"
             // 미장 연동 미국 티커: 모두 상승·하락인지 볼 종목

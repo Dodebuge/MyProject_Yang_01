@@ -35,12 +35,14 @@ jobs:
     timeout-minutes: 600
     steps:
       # 에러 예산을 절반 넘게 썼으면 장중 수동 배포(now)를 막음 (README 'SLO / SLI'). 장 마감 뒤 배포는 고치는 배포라 막지 않음
-      - name: 에러 예산 스크립트 받기
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: deploy/jetson
+      # 지금 Jetson에 있는 SLO 모니터 JAR로 계산 (첫 배포처럼 JAR가 아직 없으면 건너뜀)
       - name: 에러 예산 50% 미만이어야 장중 배포
-        run: python3 deploy/jetson/error_budget.py ${{ inputs.now && '--max 50' || '' }}
+        env:
+          JAR: /home/jetson/yang/MyProject_Yang_01/spring-app/slo-monitor/build/libs/slo-monitor.jar
+          KB_DATA_DIR: /home/jetson/yang/MyProject_Yang_01
+        run: |
+          if [ ! -f "$JAR" ]; then echo "SLO 모니터 JAR가 아직 없어 에러 예산 확인을 건너뜁니다 (이번 배포에서 빌드됨)."; exit 0; fi
+          java -Dstdout.encoding=UTF-8 -jar "$JAR" check ${{ inputs.now && '--max 50' || '' }}
 
       - name: 장중이면 장 마감(15:40)까지 기다림
         if: ${{ !inputs.now }}

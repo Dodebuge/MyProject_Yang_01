@@ -21,8 +21,11 @@ if ! cmp -s deploy/jetson/$SERVICE.service /etc/systemd/system/$SERVICE.service;
   sudo systemctl daemon-reload
 fi
 
-# SLO 모니터 (9090): Spring과 따로 돌아 Spring 재시작 중의 응답 없음도 잼. 실패해도 Spring 배포는 계속
+# SLO 모니터 (9090, spring-app/slo-monitor): Spring과 따로 돌아 Spring 재시작 중의 응답 없음도 잼. 실패해도 Spring 배포는 계속
+# (테스트는 위 test가 slo-monitor까지 함께 돌림)
 MON=kb-slo-monitor
+echo "== $MON 빌드"
+./spring-app/gradlew -q --no-daemon -p spring-app :slo-monitor:bootJar || echo "!! $MON 빌드 실패 (기존 jar로 계속)" >&2
 if ! cmp -s deploy/jetson/$MON.service /etc/systemd/system/$MON.service; then
   echo "== $MON 서비스 파일 설치"
   { sudo install -m 644 deploy/jetson/$MON.service /etc/systemd/system/$MON.service \
