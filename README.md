@@ -343,6 +343,9 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 - **GitHub Actions에서 자동으로 셉니다** (`deploy/jetson/error_budget.py`). 5초 tick은 남는 기록이 없어, 매일 남는 **코스닥 5분 기록**(SLO 98%, 1슬롯 = 5분)을 장중 가용성의 대리 지표로 씁니다.
   허용 = 이번 달 평일 수 × 81 × 2% (약 34슬롯, 170분). 기록이 0인 평일은 휴장일과 구분하지 못해 예산에서 빼고 따로 표시합니다.
   - `error-budget.yml`: 평일 16:00 KST에 Jetson에서 계산해 Job Summary에 남기고, **100% 이상이면 실패**(GitHub 실패 메일).
+    같은 스크립트가 이번 달 끝난 날 기준 SLI 세 개도 표로 남기고, 하나라도 목표 미달이면 실패합니다(`--fail-slo`):
+    러셀 2000 30분 기록(저장 슬롯 / 기록 있는 날 × 14, 93%), 코스닥 1분봉 수집(`kosdaq_min1` 종목 / 그날 마지막 5분 기록 종목 수, 21:00 뒤, 99%),
+    장마감 전 매도(산 종목 중 그날 장 안에 CLOSED, 미국은 다음 날 07:30 KST까지, 미장 연동 제외, 100%).
   - `deploy-jetson.yml`: 매 배포마다 Summary에 남기고, **장중 수동 배포(`now`)는 50% 이상이면 막음**. 장 마감 뒤 배포는 고치는 배포라 막지 않습니다.
   - 점검: `python3 deploy/jetson/error_budget.py --offline`
 

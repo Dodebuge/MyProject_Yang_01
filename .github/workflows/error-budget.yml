@@ -1,5 +1,5 @@
 # 평일 장 마감 뒤(16:00 KST) Jetson의 kosdaq.db로 이번 달 에러 예산을 계산해 Job Summary에 남깁니다 (README 'SLO / SLI').
-# 예산을 다 쓰면 실패 → GitHub가 실패 메일을 보냄. 자동매매를 끄고 원인부터 고칩니다.
+# 예산을 다 쓰거나 러셀 기록·1분봉·장마감 매도 SLI가 목표 미달이면 실패 → GitHub 실패 메일.
 name: 에러 예산
 
 on:
@@ -18,4 +18,4 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: deploy/jetson
-      - run: python3 deploy/jetson/error_budget.py --max 100
+      - run: python3 deploy/jetson/error_budget.py --max 100 --fail-slo
