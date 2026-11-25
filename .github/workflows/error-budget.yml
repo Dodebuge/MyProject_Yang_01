@@ -1,5 +1,5 @@
 # 평일 장 마감 뒤(16:00 KST) Jetson에서 이번 달 에러 예산과 SLI를 계산해 Job Summary에 남깁니다 (README 'SLO / SLI').
-# 계산은 SLO 모니터 JAR(spring-app/slo-monitor, 배포 때 빌드된 것)의 check 명령: 9090 화면과 같은 코드.
+# 계산은 SLO 모니터 JAR(spring-app/slo-monitor, 배포 때 빌드된 것)의 check 명령: 22888 화면과 같은 코드.
 # 예산을 다 쓰거나 SLI 하나라도 목표 미달이면 실패 → GitHub 실패 메일.
 name: 에러 예산
 

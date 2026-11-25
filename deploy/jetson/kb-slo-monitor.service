@@ -1,4 +1,4 @@
-# Jetson용 SLO 모니터 (spring-app/slo-monitor, Spring Boot·Kotlin): Spring 서버(9080)와 따로 9090에서 돌아, Spring이 죽어도 화면·알림이 남습니다.
+# Jetson용 SLO 모니터 (spring-app/slo-monitor, Spring Boot·Kotlin): Spring 서버(9080)와 따로 22888에서 돌아, Spring이 죽어도 화면·알림이 남습니다.
 # deploy/jetson/deploy.sh가 배포마다 빌드·설치(파일이 바뀌었으면)·재시작합니다. 손으로 할 때:
 #   ./spring-app/gradlew -p spring-app :slo-monitor:bootJar
 #   sudo cp deploy/jetson/kb-slo-monitor.service /etc/systemd/system/
@@ -13,7 +13,7 @@ Wants=network-online.target
 User=jetson
 WorkingDirectory=/home/jetson/yang/MyProject_Yang_01
 Environment=KB_DATA_DIR=/home/jetson/yang/MyProject_Yang_01
-Environment=SLO_PORT=9090
+Environment=SLO_PORT=22888
 Environment=SLO_TARGET=http://127.0.0.1:9080/api/settings
 Environment=LANG=en_US.UTF-8
 # 작은 서버라 힙을 줄여 Spring 서버(같은 Jetson 8GB)와 메모리를 나눔

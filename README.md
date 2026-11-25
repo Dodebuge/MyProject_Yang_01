@@ -340,7 +340,7 @@ http://localhost:8000/volume?market=russell (거래량 페이지 위쪽의 **러
 - 예산을 절반 넘게 쓰면: 장중 수동 배포(`now`) 금지, 자동매매 새 기능 배포 보류, 원인부터 고칩니다.
 - 다 쓰면: 자동매매를 끄고(익절·손절·장마감 매도는 계속 돔) 원인 해결 뒤 다시 켭니다.
 - T0의 **0건 목표**(중복 체결, 오래된 기록 주문)는 예산이 아니라 한 건이라도 생기면 바로 장애로 봅니다.
-- **SLO 모니터가 자동으로 셉니다** (`spring-app/slo-monitor`, Spring Boot·Kotlin, 아래 'SLO 모니터 서버'). 화면(9090)과 GitHub Actions(`slo-monitor.jar check`)가 같은 코드를 씁니다. 5초 tick은 남는 기록이 없어, 매일 남는 **코스닥 5분 기록**(SLO 98%, 1슬롯 = 5분)을 장중 가용성의 대리 지표로 씁니다.
+- **SLO 모니터가 자동으로 셉니다** (`spring-app/slo-monitor`, Spring Boot·Kotlin, 아래 'SLO 모니터 서버'). 화면(22888)과 GitHub Actions(`slo-monitor.jar check`)가 같은 코드를 씁니다. 5초 tick은 남는 기록이 없어, 매일 남는 **코스닥 5분 기록**(SLO 98%, 1슬롯 = 5분)을 장중 가용성의 대리 지표로 씁니다.
   허용 = 이번 달 평일 수 × 81 × 2% (약 34슬롯, 170분). 기록이 0인 평일은 휴장일과 구분하지 못해 예산에서 빼고 따로 표시합니다.
   - `error-budget.yml`: 평일 16:00 KST에 Jetson에서 `java -jar slo-monitor.jar check --max 100 --fail-slo`로 계산해 Job Summary에 남기고, **100% 이상이면 실패**(GitHub 실패 메일).
     이번 달 끝난 날 기준 SLI도 표로 남기고, 하나라도 목표 미달이면 실패합니다(`--fail-slo`):
@@ -390,7 +390,7 @@ journalctl -u kb-openapi-spring --since today | grep -c "Started KB OpenAPI"
 | 외부 의존: KB OpenAPI, 토스, ntfy.sh | 모두 10초 타임아웃, KB만 5xx 재시도. KB 미국 시세는 15분 지연 | 의존 서비스 장애 시간은 내부 SLO에서 빼지 않고 그대로 셈 (사용자 입장 기준) |
 | SQLite 동시 쓰기 (Python·Java) | busy timeout 30초 안에 못 쓰면 그 슬롯 기록 실패 | 운영은 Spring 하나만 돌리기 |
 
-### SLO 모니터 서버 (9090)
+### SLO 모니터 서버 (22888)
 
 `spring-app/slo-monitor`: Spring 서버와 **따로 도는** Spring Boot·Kotlin 실행 JAR(`slo-monitor.jar`, 같은 Gradle 빌드의 하위 프로젝트)라 Spring이 죽거나 멈춰도 화면과 알림이 남습니다.
 Spring 서버의 SQLite·접근 로그는 읽기만 하고, 쓰는 곳은 데이터 폴더의 `slo.db`(git 제외) 하나입니다.
@@ -401,7 +401,7 @@ Spring 서버의 SQLite·접근 로그는 읽기만 하고, 쓰는 곳은 데이
 | `SloMonitor.kt` | 실행(`main`), 블랙박스 점검·ntfy 알림(`Probe`), 화면·JSON(`SloController`) |
 | `SloTest.kt` | 계산·보관 기간·점검 상태 단위 테스트 |
 
-- **화면** `http://<Jetson>:9090/`: 이번 달 에러 예산(사용률 막대, 81칸이 안 되는 날)과 SLI 표(값 · 좋은/전체 · 목표 · 충족/미달), 마지막 Spring 점검. 60초마다 새로 고침, 계산은 1분 캐시. JSON은 `/api/slo`.
+- **화면** `http://<Jetson>:22888/`: 이번 달 에러 예산(사용률 막대, 81칸이 안 되는 날)과 SLI 표(값 · 좋은/전체 · 목표 · 충족/미달), 마지막 Spring 점검. 60초마다 새로 고침, 계산은 1분 캐시. JSON은 `/api/slo`.
 - **블랙박스 점검**: 30초마다 `SLO_TARGET`(기본 `http://127.0.0.1:9080/api/settings`)을 직접 불러 `slo.db`의 `probe`(40일 보관)에 남기고, **Spring 응답** SLI(이번 달 성공 비율, 목표 99.5%)로 셉니다.
   배포 재시작·크래시·멈춤(10초 안에 응답 없음) 모두 실패로 잡힙니다.
 - **알림**: 3번 연속(90초) 실패하면 ntfy로 "[SLO] Spring 응답 없음"(우선순위 5), 돌아오면 "[SLO] Spring 복구". 주제는 시그널 알림과 같은 `.env`의 `NTFY_TOPIC`(없으면 로그만).
@@ -412,10 +412,10 @@ Spring 서버의 SQLite·접근 로그는 읽기만 하고, 쓰는 곳은 데이
   sudo cp deploy/jetson/kb-slo-monitor.service /etc/systemd/system/
   sudo systemctl daemon-reload && sudo systemctl enable --now kb-slo-monitor
   journalctl -u kb-slo-monitor -f
-  # PC에서: KB_DATA_DIR=.. SLO_PORT=9090 java -jar slo-monitor/build/libs/slo-monitor.jar
+  # PC에서: KB_DATA_DIR=.. SLO_PORT=22888 java -jar slo-monitor/build/libs/slo-monitor.jar
   ```
-- 환경변수: `KB_DATA_DIR`(데이터 폴더), `SLO_PORT`(기본 9090, Spring의 `PORT`와 따로), `SLO_TARGET`(점검 주소). 힙은 서비스에서 128MB.
-- 다른 기기에서 열려면 9090 포트가 열려 있어야 합니다. 계좌 금액은 없고 개수·비율만 보여 줍니다.
+- 환경변수: `KB_DATA_DIR`(데이터 폴더), `SLO_PORT`(기본 22888, Spring의 `PORT`와 따로), `SLO_TARGET`(점검 주소). 힙은 서비스에서 128MB.
+- 다른 기기에서 열려면 22888 포트가 열려 있어야 합니다. 계좌 금액은 없고 개수·비율만 보여 줍니다.
 
 ## 사용법
 

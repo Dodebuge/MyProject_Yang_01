@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.util.HtmlUtils
 
 /**
- * SLO 모니터 (README 'SLO 모니터 서버'): kb-openapi-spring(9080)과 따로 9090에서 도는 Spring Boot 서버.
+ * SLO 모니터 (README 'SLO 모니터 서버'): kb-openapi-spring(9080)과 따로 22888에서 도는 Spring Boot 서버.
  * Spring 서버가 죽거나 멈춰도 화면과 ntfy 알림이 남도록 프로세스·JAR를 나눴습니다.
  *
  *   GET /          이번 달 에러 예산과 SLI 표 (60초마다 새로 고침)

@@ -30,7 +30,7 @@ SLI = {
     "Sqlite": ("기반", [
         ("busy timeout 30초 안에 끝난 쓰기 / 쓰기", "99.9%", "로그의 `database is locked` (Python 서버와 같이 쓰면 늘어남)")]),
     "ApiController": ("T3", [
-        ("5xx가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)", "99%", "`access_log/access.*.log` → SLO 모니터 (9090, 매일 16:00 check)"),
+        ("5xx가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)", "99%", "`access_log/access.*.log` → SLO 모니터 (22888, 매일 16:00 check)"),
         ("KB 실조회 지연 p95", "히트맵 < 10s · 배당 < 30s · 주간 평균 첫 조회 < 90s", "같은 접근 로그 (%D µs), 목표 안 비율 95% = p95")]),
     "PageController": ("T3", [
         ("HTML 200 / 요청", "99.9%", "정적 파일이라 프로세스 가용성과 같음")]),

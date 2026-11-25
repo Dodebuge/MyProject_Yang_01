@@ -21,7 +21,7 @@ if ! cmp -s deploy/jetson/$SERVICE.service /etc/systemd/system/$SERVICE.service;
   sudo systemctl daemon-reload
 fi
 
-# SLO 모니터 (9090, spring-app/slo-monitor): Spring과 따로 돌아 Spring 재시작 중의 응답 없음도 잼. 실패해도 Spring 배포는 계속
+# SLO 모니터 (22888, spring-app/slo-monitor): Spring과 따로 돌아 Spring 재시작 중의 응답 없음도 잼. 실패해도 Spring 배포는 계속
 # (테스트는 위 test가 slo-monitor까지 함께 돌림)
 MON=kb-slo-monitor
 echo "== $MON 빌드"

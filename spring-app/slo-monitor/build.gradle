@@ -1,7 +1,7 @@
-// SLO 모니터 (Spring Boot·Kotlin, 9090): kb-openapi-spring과 따로 도는 실행 JAR (README 'SLO 모니터 서버').
+// SLO 모니터 (Spring Boot·Kotlin, 22888): kb-openapi-spring과 따로 도는 실행 JAR (README 'SLO 모니터 서버').
 //   ./gradlew :slo-monitor:bootJar   -> slo-monitor/build/libs/slo-monitor.jar
 //   ./gradlew :slo-monitor:test
-//   java -jar slo-monitor.jar                    서버 (http://localhost:9090)
+//   java -jar slo-monitor.jar                    서버 (http://localhost:22888)
 //   java -jar slo-monitor.jar check --max 100 --fail-slo   GitHub Actions 점검
 // 플러그인 버전은 상위(spring-app/build.gradle)와 같음.
 plugins {
