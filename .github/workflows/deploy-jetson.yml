@@ -34,6 +34,14 @@ jobs:
     runs-on: [self-hosted, jetson]
     timeout-minutes: 600
     steps:
+      # 에러 예산을 절반 넘게 썼으면 장중 수동 배포(now)를 막음 (README 'SLO / SLI'). 장 마감 뒤 배포는 고치는 배포라 막지 않음
+      - name: 에러 예산 스크립트 받기
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/jetson
+      - name: 에러 예산 50% 미만이어야 장중 배포
+        run: python3 deploy/jetson/error_budget.py ${{ inputs.now && '--max 50' || '' }}
+
       - name: 장중이면 장 마감(15:40)까지 기다림
         if: ${{ !inputs.now }}
         run: |

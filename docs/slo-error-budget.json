@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "SLO / SLI · 에러 예산 구조",
+    "output": "slo-error-budget.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "budget-path",
+        "label": "에러 예산 계산",
+        "focus": [
+          "ticks",
+          "dbs",
+          "budget",
+          "gha",
+          "deploy"
+        ],
+        "note": "코스닥 5분 기록 슬롯 수로 이번 달 예산 사용률을 계산하고, 매일 16:00 점검과 배포 전 확인에 씁니다."
+      },
+      {
+        "id": "t0-trader",
+        "label": "T0 자동매매",
+        "focus": [
+          "trader",
+          "toss",
+          "dbs",
+          "scalp"
+        ],
+        "note": "중복 체결 0건, 장마감 전 매도 100%, 5초 확인 99.5%, 단타 1분 신호 99%·한도 초과 매수 0건. clientOrderId와 trader.db 임대로 지킵니다."
+      },
+      {
+        "id": "deps",
+        "label": "외부 의존",
+        "focus": [
+          "web",
+          "ticks",
+          "trader",
+          "alerts",
+          "kb",
+          "toss",
+          "ntfy"
+        ],
+        "note": "KB OpenAPI·토스·ntfy.sh 장애도 사용자 기준이라 예산에서 빼지 않습니다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "화면·조회 API",
+      "sublabel": "히트맵 · 차트 · 내정보",
+      "tag": "T3 · 99%",
+      "pos": [
+        240,
+        60
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "ticks",
+      "type": "backend",
+      "label": "장중 기록",
+      "sublabel": "코스닥 5분 · 러셀 30분",
+      "tag": "T1 · 98%",
+      "pos": [
+        240,
+        210
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "trader",
+      "type": "backend",
+      "label": "Trader",
+      "sublabel": "5초 확인 · 주문",
+      "tag": "T0 · 99.5%",
+      "pos": [
+        240,
+        510
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "alerts",
+      "type": "backend",
+      "label": "시그널 알림",
+      "sublabel": "장중 5분",
+      "tag": "T2 · 99%",
+      "pos": [
+        240,
+        360
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "kb",
+      "type": "external",
+      "label": "KB OpenAPI",
+      "sublabel": "10s · 5xx 3회 재시도",
+      "pos": [
+        20,
+        135
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "toss",
+      "type": "external",
+      "label": "토스 OpenAPI",
+      "sublabel": "clientOrderId 10분",
+      "pos": [
+        20,
+        510
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "ntfy",
+      "type": "external",
+      "label": "ntfy.sh",
+      "sublabel": "휴대폰 푸시",
+      "pos": [
+        20,
+        360
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "dbs",
+      "type": "database",
+      "label": "SQLite 데이터 폴더",
+      "sublabel": "*.db · trader.log",
+      "pos": [
+        490,
+        285
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "budget",
+      "type": "security",
+      "label": "error_budget.py",
+      "sublabel": "월 약 34슬롯 허용",
+      "tag": "SLO 98%",
+      "pos": [
+        740,
+        285
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "gha",
+      "type": "cloud",
+      "label": "error-budget.yml",
+      "sublabel": "평일 16:00 · ≥100% 실패",
+      "pos": [
+        980,
+        150
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "deploy",
+      "type": "cloud",
+      "label": "deploy-jetson.yml",
+      "sublabel": "배포 전 Summary",
+      "tag": "now · ≥50% 차단",
+      "pos": [
+        980,
+        420
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "scalp",
+      "type": "backend",
+      "label": "Scalp 단타",
+      "sublabel": "KB 1분봉 · 5분 기록 후보",
+      "tag": "T0 · 99%",
+      "pos": [
+        560,
+        510
+      ],
+      "size": [
+        160,
+        70
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Jetson · Spring :9080 · self-hosted runner",
+      "wraps": [
+        "web",
+        "ticks",
+        "trader",
+        "alerts",
+        "dbs",
+        "budget",
+        "scalp"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ticks-kb",
+      "from": "ticks",
+      "to": "kb",
+      "label": "시세 조회"
+    },
+    {
+      "id": "web-kb",
+      "from": "web",
+      "to": "kb",
+      "label": "실조회"
+    },
+    {
+      "id": "trader-toss",
+      "from": "trader",
+      "to": "toss",
+      "label": "시장가 주문",
+      "variant": "security"
+    },
+    {
+      "id": "alerts-ntfy",
+      "from": "alerts",
+      "to": "ntfy",
+      "label": "푸시",
+      "variant": "dashed"
+    },
+    {
+      "id": "ticks-dbs",
+      "from": "ticks",
+      "to": "dbs",
+      "label": "슬롯 저장",
+      "variant": "emphasis"
+    },
+    {
+      "id": "trader-dbs",
+      "from": "trader",
+      "to": "dbs",
+      "label": "임대 · 로그"
+    },
+    {
+      "id": "alerts-dbs",
+      "from": "alerts",
+      "to": "dbs",
+      "label": "alerts.db",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "dbs-budget",
+      "from": "dbs",
+      "to": "budget",
+      "label": "kosdaq_tick",
+      "variant": "emphasis"
+    },
+    {
+      "id": "budget-gha",
+      "from": "budget",
+      "to": "gha",
+      "label": "사용률"
+    },
+    {
+      "id": "budget-deploy",
+      "from": "budget",
+      "to": "deploy",
+      "label": "사용률"
+    },
+    {
+      "id": "trader-scalp",
+      "from": "trader",
+      "to": "scalp",
+      "label": "1분 신호"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "T0 자동매매 · T1 기록",
+      "items": [
+        "중복 체결 0건 · 장마감 전 매도 100%",
+        "5초 확인 99.5% · 단타 1분 신호 99%",
+        "단타 dayLoss·budget 초과 매수 0건",
+        "코스닥 81슬롯/일 98% · 러셀 14슬롯 93%"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "에러 예산 운용",
+      "items": [
+        "50% 이상: 장중 수동 배포(now) 차단",
+        "100%: 16:00 점검 실패 → 메일, 자동매매 끔",
+        "기록 0인 평일은 휴장/장애 구분 못 해 제외"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "T2 알림 · T3 화면",
+      "items": [
+        "ntfy 전송 99% · 확인 후 2분 안",
+        "캐시 응답 99% · p95 < 500ms",
+        "KB·토스·ntfy 장애도 예산에서 안 뺌"
+      ]
+    }
+  ]
+}
