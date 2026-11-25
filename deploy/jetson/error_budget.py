@@ -26,6 +26,7 @@ import os
 import re
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
 SLO = 0.98
@@ -56,16 +57,37 @@ def budget(counts: dict, now: datetime) -> dict:
             unknown.append(d.isoformat())
             continue
         missing += max(0, want - got)
-    return {"allowed": allowed, "missing": missing, "used_pct": 100 * missing / allowed, "unknown": unknown}
+    return {"allowed": allowed, "missing": missing, "used_pct": 100 * missing / allowed, "unknown": unknown,
+            "short": short_days(counts, now)}
 
 
-def load_counts(db_path: str, month: str) -> dict:
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+TICK_KEEP_DAYS = 14   # Ticks.KEEP_DAYS: 저장할 때마다 '지금 − 14일'보다 이른 기록을 시각 단위로 지워, 14일 전 날은 잘려 있음
+
+
+def safe_since(today: date) -> str:
+    """이 날부터는 보관 중 잘리지 않은 온전한 날 (하루 여유: 뉴욕 날짜는 한국보다 하루 늦을 수 있음)."""
+    return (today - timedelta(days=TICK_KEEP_DAYS - 2)).isoformat()
+
+
+def day_counts(data: str, db_name: str, table: str, month: str, today: date) -> dict:
+    """{날짜: 슬롯 수}. 온전한 날만 세어 slo.db day_count에 쌓고, 쌓인 이번 달 전체를 돌려줌 (14일이 지나도 남게).
+    한 번도 쌓지 못하고 지워진 날은 없음 = '기록 0인 평일'로 보임."""
+    since = safe_since(today)
+    fresh = {d: n for d, n in query(os.path.join(data, db_name),
+                                    f"SELECT substr(at,1,10), count(*) FROM {table} WHERE at LIKE ? GROUP BY 1", month + "%") if d >= since}
     try:
-        rows = con.execute("SELECT substr(at,1,10), count(*) FROM kosdaq_tick WHERE at LIKE ? GROUP BY 1", (month + "%",))
-        return dict(rows.fetchall())
-    finally:
-        con.close()
+        with closing(sqlite3.connect(os.path.join(data, "slo.db"))) as c, c:  # closing: 닫기, c: 커밋
+            c.execute("CREATE TABLE IF NOT EXISTS day_count (tbl TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (tbl, day))")
+            c.executemany("INSERT OR REPLACE INTO day_count VALUES (?, ?, ?)", [(table, d, n) for d, n in fresh.items()])
+            kept = dict(c.execute("SELECT day, n FROM day_count WHERE tbl = ? AND day LIKE ?", (table, month + "%")).fetchall())
+    except sqlite3.Error:  # slo.db에 못 써도 지금 보관 중인 값으로는 셈
+        kept = {}
+    return {**kept, **fresh}
+
+
+def short_days(counts: dict, now: datetime) -> list:
+    """오늘 전 평일 중 81칸이 안 되는 날 [(날짜, 수)] (기록 0인 날은 따로 'unknown')."""
+    return sorted((d, n) for d, n in counts.items() if 0 < n < PER_DAY and d < now.date().isoformat())
 
 
 RUSSELL_PER_DAY = 14              # 10:00~16:30 뉴욕, 30분 간격
@@ -199,8 +221,7 @@ def read_access(data: str, month: str):
 def load_slis(data: str, now: datetime) -> list:
     """[(이름, 좋은 이벤트, 전체, 목표)]"""
     month = f"{now:%Y-%m}%"
-    russell = dict(query(os.path.join(data, "russell.db"),
-                         "SELECT substr(at,1,10), count(*) FROM russell_tick WHERE at LIKE ? GROUP BY 1", month))
+    russell = day_counts(data, "russell.db", "russell_tick", f"{now:%Y-%m}", now.date())
     listed = {at[:10]: len(json.loads(p)) for at, p in query(os.path.join(data, "kosdaq.db"),
               "SELECT at, payload FROM kosdaq_tick WHERE at IN (SELECT max(at) FROM kosdaq_tick WHERE at LIKE ? GROUP BY substr(at,1,10))", month)}
     got = dict(query(os.path.join(data, "minutes.db"),
@@ -240,6 +261,8 @@ def report(b: dict, now: datetime) -> str:
     ]
     if b["unknown"]:
         lines.append(f"- 기록 0인 평일 (휴장일이 아니면 하루 전체 장애, 예산에서 뺌): {', '.join(b['unknown'])}")
+    if b["short"]:
+        lines.append("- 81칸이 안 되는 날: " + ", ".join(f"{d} ({n}/{PER_DAY})" for d, n in b["short"]))
     if b["used_pct"] >= 100:
         lines.append("- **예산 소진**: 자동매매를 끄고 원인부터 고치세요 (README '에러 예산 운용').")
     elif b["used_pct"] >= 50:
@@ -286,6 +309,23 @@ def self_check():
     assert beat_sli(sessions, beats, "scalp", now) == (378, 379)  # 11-24는 단타 안 켬 → 뺌
     assert beat_sli(sessions, beats, "tick", datetime(2026, 11, 25, 15, 0, tzinfo=KST)) == (0, 390)  # 오늘은 아직
 
+    # 보관 기간: 14일 전 날(11-11)은 시각 단위로 잘려 15:40 한 칸만 남음 → 세지 않음. 예전에 쌓아 둔 날(11-05)은 slo.db에서
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        with closing(sqlite3.connect(os.path.join(d, "kosdaq.db"))) as c, c:
+            c.execute("CREATE TABLE kosdaq_tick (at TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            slots = [f"2026-11-20T{9 + i * 5 // 60:02d}:{i * 5 % 60:02d}" for i in range(PER_DAY)]
+            c.executemany("INSERT INTO kosdaq_tick VALUES (?, '[]')", [(t,) for t in ["2026-11-11T15:40"] + slots])
+        with closing(sqlite3.connect(os.path.join(d, "slo.db"))) as c, c:
+            c.execute("CREATE TABLE day_count (tbl TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (tbl, day))")
+            c.execute("INSERT INTO day_count VALUES ('kosdaq_tick', '2026-11-05', 80)")
+        assert slots[-1] == "2026-11-20T15:40"
+        counts = day_counts(d, "kosdaq.db", "kosdaq_tick", "2026-11", now.date())
+        assert counts == {"2026-11-05": 80, "2026-11-20": 81}, counts
+        assert day_counts(d, "kosdaq.db", "kosdaq_tick", "2026-11", now.date()) == counts, "다시 불러도 같음"
+        assert budget(counts, now)["short"] == [("2026-11-05", 80)]
+        assert day_counts(d, "없음.db", "kosdaq_tick", "2026-11", now.date()) == {"2026-11-05": 80, "2026-11-20": 81}, "보관 중 값이 없어도 쌓인 값"
+
     log = ['2026-11-25 13:01:02 200 120000 "GET /api/monitor-quotes?cached=1 HTTP/1.1"',   # 캐시 0.12초: 좋음
            '2026-11-25 13:01:03 200 900000 "GET /api/heatmap?cached=1&market=kr HTTP/1.1"',  # 캐시 0.9초: 나쁨
            '2026-11-25 13:01:09 200 6000000 "GET /api/heatmap?market=kr HTTP/1.1"',         # 히트맵 6초: 좋음
@@ -313,7 +353,7 @@ def main():
 
     now = datetime.now(KST)
     data = os.environ.get("KB_DATA_DIR", "/home/jetson/yang/MyProject_Yang_01")
-    b = budget(load_counts(os.path.join(data, "kosdaq.db"), f"{now:%Y-%m}"), now)
+    b = budget(day_counts(data, "kosdaq.db", "kosdaq_tick", f"{now:%Y-%m}", now.date()), now)
     slis = load_slis(data, now)
     text = report(b, now) + "\n" + sli_report(slis)
     print(text)
