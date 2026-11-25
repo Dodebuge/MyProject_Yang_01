@@ -385,9 +385,27 @@ journalctl -u kb-openapi-spring --since today | grep -c "Started KB OpenAPI"
 | Jetson 한 대·한 프로세스 (SPOF) | 정전·네트워크 끊김이면 T0·T1 전부 멈춤. 임대는 중복 주문만 막고 대신 돌 서버는 없음 | 같은 데이터 폴더를 쓰는 대기 서버는 임대로 이미 안전함. 필요해지면 그때 추가 |
 | 배포 확인이 `/api/settings`만 봄 | 스케줄러·KB 토큰·토스 키가 망가져도 "배포 완료" | 배포 뒤 다음 기록 슬롯에 `kosdaq_tick` 개수가 늘었는지 확인 |
 | 기록 누락을 아무도 알려 주지 않음 | T1은 다음 날 화면을 보고서야 앎 (KB가 지난 값을 안 줘 복구 불가) | 위 SQL을 장 마감 뒤 한 번 돌려 81 미만이면 ntfy로 보내기 (이미 있는 ntfy 재사용) |
-| `Restart=on-failure`만 있음 | 프로세스는 살았는데 스케줄 스레드가 멈추면(8개 풀이 오래 걸리는 작업에 묶임) 감지 못 함 | 마지막 tick 시각이 15초보다 오래되면 로그 경고 → 나중에 systemd watchdog |
+| `Restart=on-failure`만 있음 | 프로세스는 살았는데 스케줄 스레드가 멈추면(8개 풀이 오래 걸리는 작업에 묶임) 감지 못 함 | HTTP가 멈추면 SLO 모니터(아래)가 90초 안에 ntfy로 알림. 스케줄 스레드만 멈춘 경우는 `trader_beat`가 끊겨 다음 16:00 점검에서 보임 |
 | 외부 의존: KB OpenAPI, 토스, ntfy.sh | 모두 10초 타임아웃, KB만 5xx 재시도. KB 미국 시세는 15분 지연 | 의존 서비스 장애 시간은 내부 SLO에서 빼지 않고 그대로 셈 (사용자 입장 기준) |
 | SQLite 동시 쓰기 (Python·Java) | busy timeout 30초 안에 못 쓰면 그 슬롯 기록 실패 | 운영은 Spring 하나만 돌리기 |
+
+### SLO 모니터 서버 (9090)
+
+Spring과 **따로 도는** 작은 웹 서버(`deploy/jetson/slo_server.py`, Python 표준 라이브러리만)라 Spring이 죽거나 멈춰도 화면과 알림이 남습니다.
+
+- **화면** `http://<Jetson>:9090/`: 이번 달 에러 예산(사용률 막대)과 SLI 표(값 · 좋은/전체 · 목표 · 충족/미달), 마지막 Spring 점검. 60초마다 새로 고침.
+  계산은 매일 16:00 GitHub Actions 점검과 같은 `error_budget.py`를 그대로 불러 씁니다(1분 캐시). JSON은 `/api/slo`.
+- **블랙박스 점검**: 30초마다 `http://127.0.0.1:9080/api/settings`를 직접 불러 데이터 폴더 `slo.db`(40일 보관, git 제외)에 남기고, **Spring 응답** SLI(이번 달 성공 비율, 목표 99.5%)로 셉니다.
+  배포 재시작·크래시·멈춤(10초 안에 응답 없음) 모두 실패로 잡힙니다.
+- **알림**: 3번 연속(90초) 실패하면 ntfy로 "[SLO] Spring 응답 없음"(우선순위 5), 돌아오면 "[SLO] Spring 복구". 주제는 시그널 알림과 같은 `.env`의 `NTFY_TOPIC`(없으면 로그만).
+- **설치·실행**: 배포(`deploy/jetson/deploy.sh`)가 `kb-slo-monitor` 서비스를 설치(파일이 바뀌었으면)·재시작합니다. 실패해도 Spring 배포는 계속됩니다. 손으로는:
+  ```bash
+  sudo cp deploy/jetson/kb-slo-monitor.service /etc/systemd/system/
+  sudo systemctl daemon-reload && sudo systemctl enable --now kb-slo-monitor
+  journalctl -u kb-slo-monitor -f
+  python3 deploy/jetson/slo_server.py --offline   # 자체 점검
+  ```
+- 다른 기기에서 열려면 9090 포트가 열려 있어야 합니다. 계좌 금액은 없고 개수·비율만 보여 줍니다.
 
 ## 사용법
 

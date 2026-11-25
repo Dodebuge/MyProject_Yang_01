@@ -21,6 +21,16 @@ if ! cmp -s deploy/jetson/$SERVICE.service /etc/systemd/system/$SERVICE.service;
   sudo systemctl daemon-reload
 fi
 
+# SLO 모니터 (9090): Spring과 따로 돌아 Spring 재시작 중의 응답 없음도 잼. 실패해도 Spring 배포는 계속
+MON=kb-slo-monitor
+if ! cmp -s deploy/jetson/$MON.service /etc/systemd/system/$MON.service; then
+  echo "== $MON 서비스 파일 설치"
+  { sudo install -m 644 deploy/jetson/$MON.service /etc/systemd/system/$MON.service \
+    && sudo systemctl daemon-reload && sudo systemctl enable $MON; } || echo "!! $MON 설치 실패 (sudo 권한 확인)" >&2
+fi
+echo "== $MON 재시작"
+sudo systemctl restart $MON || echo "!! $MON 재시작 실패: journalctl -u $MON -n 50" >&2
+
 echo "== 재시작"
 sudo systemctl restart "$SERVICE"
 

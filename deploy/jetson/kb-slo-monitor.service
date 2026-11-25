@@ -1,0 +1,21 @@
+# Jetson용 SLO 모니터 (deploy/jetson/slo_server.py): Spring(9080)과 따로 9090에서 돌아, Spring이 죽어도 화면·알림이 남습니다.
+# deploy/jetson/deploy.sh가 배포마다 설치(파일이 바뀌었으면)·재시작합니다. 손으로 할 때:
+#   sudo cp deploy/jetson/kb-slo-monitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kb-slo-monitor
+#   journalctl -u kb-slo-monitor -f      # 점검·알림 로그
+[Unit]
+Description=KB OpenAPI SLO monitor (Jetson)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=jetson
+WorkingDirectory=/home/jetson/yang/MyProject_Yang_01
+Environment=KB_DATA_DIR=/home/jetson/yang/MyProject_Yang_01
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 deploy/jetson/slo_server.py --port 9090 --target http://127.0.0.1:9080/api/settings
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
