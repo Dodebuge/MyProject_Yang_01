@@ -15,12 +15,15 @@ SLI (이번 달, 끝난 날만):
   러셀 2000 30분 기록   russell.db russell_tick 저장 슬롯 / 기록 있는 날 × 14       93%
   코스닥 1분봉 수집     minutes.db kosdaq_min1 종목 / 그날 마지막 5분 기록 종목 수   99%
   장마감 전 매도        trader.db trader_position 산 날(미국은 다음 날 07:30 KST) 안에 CLOSED / 산 종목   100%
+  /api 응답 5xx 아님    access_log/access.*.log 평일 08:50~16:00 /api/* 중 5xx 아님      99%
+  응답 시간             같은 로그, 목표 시간 안 비율 (= p95): 캐시 0.5초, 히트맵 10초, 배당 30초, 주간 평균 90초   95%
 데이터 폴더: KB_DATA_DIR (기본 /home/jetson/yang/MyProject_Yang_01)
 """
 import argparse
 import calendar
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -125,6 +128,45 @@ def query(path: str, sql: str, *args) -> list:
         con.close()
 
 
+# 접근 로그 (application.properties server.tomcat.accesslog): 2026-11-25 13:01:02 200 12345 "GET /api/heatmap?market=kr HTTP/1.1"
+ACCESS = re.compile(r'^(\d{4}-\d\d-\d\d) (\d\d:\d\d):\d\d (\d{3}) (\d+) "\S+ (\S+)')
+# (이름, 경로 앞부분 (None이면 ?cached=1), 목표 ms) — 목표 안 비율 95% = p95가 목표보다 짧음
+LATENCY = [("캐시 응답 0.5초 안", None, 500), ("히트맵 10초 안", "/api/heatmap", 10_000),
+           ("배당 30초 안", "/api/dividends", 30_000), ("주간 평균 90초 안", "/api/kosdaq-volume", 90_000)]
+
+
+def access_slis(lines) -> list:
+    """평일 08:50~16:00 KST의 /api/* 요청만. [(이름, 좋은 이벤트, 전체, 목표)]"""
+    ok = api = 0
+    lat = {name: [0, 0] for name, _, _ in LATENCY}
+    for line in lines:
+        m = ACCESS.match(line)
+        if not m:
+            continue
+        day, hhmm, status, micros, url = m.groups()
+        if not url.startswith("/api/") or date.fromisoformat(day).weekday() >= 5 or not "08:50" <= hhmm < "16:00":
+            continue
+        api += 1
+        ok += int(status) < 500
+        cached = "cached=1" in url
+        for name, prefix, limit in LATENCY:
+            if (prefix is None and cached) or (prefix and not cached and url.split("?")[0] == prefix):
+                lat[name][1] += 1
+                lat[name][0] += int(micros) / 1000 < limit
+    return [("/api 응답 5xx 아님 (T3)", ok, api, 0.99)] + [(name, *lat[name], 0.95) for name, _, _ in LATENCY]
+
+
+def read_access(data: str, month: str):
+    """이번 달 access.yyyy-MM-dd.log 줄 (오늘 것까지). 없으면 빈 목록."""
+    folder = os.path.join(data, "access_log")
+    if not os.path.isdir(folder):
+        return
+    for name in sorted(os.listdir(folder)):
+        if name.startswith(f"access.{month}"):
+            with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
+                yield from f
+
+
 def load_slis(data: str, now: datetime) -> list:
     """[(이름, 좋은 이벤트, 전체, 목표)]"""
     month = f"{now:%Y-%m}%"
@@ -138,7 +180,7 @@ def load_slis(data: str, now: datetime) -> list:
                    "SELECT market, day, source, status, closed FROM trader_position WHERE bought IS NOT NULL AND day LIKE ?", month)
     return [("러셀 2000 30분 기록", *russell_sli(russell, now), 0.93),
             ("코스닥 1분봉 수집", *minutes_sli(got, listed, now), 0.99),
-            ("장마감 전 매도 (T0)", *close_sli(trades, now), 1.0)]
+            ("장마감 전 매도 (T0)", *close_sli(trades, now), 1.0)] + access_slis(read_access(data, f"{now:%Y-%m}"))
 
 
 def sli_report(slis: list) -> str:
@@ -199,6 +241,20 @@ def self_check():
     assert close_sli(rows, now) == (2, 4)
     assert close_sli(rows[:1], datetime(2026, 11, 25, 15, 0, tzinfo=KST)) == (0, 0)  # 장 마감 전이면 오늘은 아직
     assert missed([("a", 2, 4, 1.0), ("b", 0, 0, 0.99), ("c", 99, 100, 0.99)]) == ["a"]
+
+    log = ['2026-11-25 13:01:02 200 120000 "GET /api/monitor-quotes?cached=1 HTTP/1.1"',   # 캐시 0.12초: 좋음
+           '2026-11-25 13:01:03 200 900000 "GET /api/heatmap?cached=1&market=kr HTTP/1.1"',  # 캐시 0.9초: 나쁨
+           '2026-11-25 13:01:09 200 6000000 "GET /api/heatmap?market=kr HTTP/1.1"',         # 히트맵 6초: 좋음
+           '2026-11-25 13:02:00 502 31000000 "GET /api/dividends?year=2026 HTTP/1.1"',      # 5xx, 31초: 나쁨
+           '2026-11-25 13:02:00 404 100 "GET /api/kosdaq-volume?cached=1 HTTP/1.1"',        # 캐시 404: 5xx 아님
+           '2026-11-25 13:03:00 200 1000 "GET /trader HTTP/1.1"',                           # /api 아님: 뺌
+           '2026-11-25 07:00:00 500 1000 "GET /api/heatmap HTTP/1.1"',                      # 장 전: 뺌
+           '2026-11-28 13:00:00 500 1000 "GET /api/heatmap HTTP/1.1"',                      # 토요일: 뺌
+           'garbage']
+    got = {name: (good, total) for name, good, total, _ in access_slis(log)}
+    assert got["/api 응답 5xx 아님 (T3)"] == (4, 5)
+    assert got["캐시 응답 0.5초 안"] == (2, 3)
+    assert got["히트맵 10초 안"] == (1, 1) and got["배당 30초 안"] == (0, 1) and got["주간 평균 90초 안"] == (0, 0)
     print("ok")
 
 

@@ -30,13 +30,13 @@ SLI = {
     "Sqlite": ("기반", [
         ("busy timeout 30초 안에 끝난 쓰기 / 쓰기", "99.9%", "로그의 `database is locked` (Python 서버와 같이 쓰면 늘어남)")]),
     "ApiController": ("T3", [
-        ("502가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)", "99%", "접근 로그 없음 → `server.tomcat.accesslog.enabled=true` 필요"),
-        ("KB 실조회 지연 p95", "히트맵 < 10s · 배당 < 30s · 주간 평균 첫 조회 < 90s", "같은 접근 로그 (%D)")]),
+        ("5xx가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)", "99%", "`access_log/access.*.log` → error_budget.py 매일 16:00"),
+        ("KB 실조회 지연 p95", "히트맵 < 10s · 배당 < 30s · 주간 평균 첫 조회 < 90s", "같은 접근 로그 (%D µs), 목표 안 비율 95% = p95")]),
     "PageController": ("T3", [
         ("HTML 200 / 요청", "99.9%", "정적 파일이라 프로세스 가용성과 같음")]),
     "LastResponseFilter": ("T3", [
         ("`?cached=1` 200 / `?cached=1` 요청 (처음 실행 뒤)", "95%", "404면 화면이 KB 응답까지 빈 채로 기다림"),
-        ("캐시 응답 지연 p95", "< 500ms", "접근 로그")]),
+        ("캐시 응답 지연 p95", "< 500ms", "접근 로그 `?cached=1` → error_budget.py")]),
     "LastResponse": ("T3", [
         ("마지막 조회가 1거래일 안인 last_api 파일 / 파일", "95%", "`ls -l last_api/` 수정 시각")]),
     "KBClient": ("기반", [

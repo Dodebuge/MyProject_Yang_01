@@ -455,7 +455,7 @@ final class Sqlite {
   GET·POST /api/monitor            시장 모니터 지수 칸 + 추가한 종목 (monitor_items.json, POST는 목록 통째로)
   GET /api/monitor-quotes          5분마다 kb.db에 저장한 모니터 시세 (?refresh=1이면 지금 KB에서 다시 받아 저장)
   내정보 API는 ?refresh=1 이면 저장된 오늘 값을 건너뛰고 KB에서 다시 조회합니다 (Spring은 &quot;1&quot;을 true로 변환).</div>
-<details open class="sli"><summary>SLI <b class="tier t-T3">T3</b></summary><table><thead><tr><th>SLI</th><th>목표 (SLO)</th><th>측정</th></tr></thead><tbody><tr><td>502가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)</td><td>99%</td><td>접근 로그 없음 → `server.tomcat.accesslog.enabled=true` 필요</td></tr><tr><td>KB 실조회 지연 p95</td><td>히트맵 &lt; 10s · 배당 &lt; 30s · 주간 평균 첫 조회 &lt; 90s</td><td>같은 접근 로그 (%D)</td></tr></tbody></table></details>
+<details open class="sli"><summary>SLI <b class="tier t-T3">T3</b></summary><table><thead><tr><th>SLI</th><th>목표 (SLO)</th><th>측정</th></tr></thead><tbody><tr><td>5xx가 아닌 /api/* 응답 / 전체 (평일 08:50~16:00)</td><td>99%</td><td>`access_log/access.*.log` → error_budget.py 매일 16:00</td></tr><tr><td>KB 실조회 지연 p95</td><td>히트맵 &lt; 10s · 배당 &lt; 30s · 주간 평균 첫 조회 &lt; 90s</td><td>같은 접근 로그 (%D µs), 목표 안 비율 95% = p95</td></tr></tbody></table></details>
 <details open><summary>흐름도</summary><pre class="mermaid">flowchart TD
   Q[&quot;HTTP /api/*&quot;] --&gt; F{&quot;LastResponseFilter&lt;br&gt;?cached=1 ?&quot;}
   F --&gt;|예| L[&quot;last_api/*.txt 바로 응답&quot;]
@@ -843,7 +843,7 @@ class PageController {
 <div class="doc">마지막 API 응답 (화면 첫 로딩용). 컨트롤러 앞에서 처리합니다.
   ?cached=1 : last_api/*.txt의 마지막으로 성공한 응답을 KB 조회 없이 바로 돌려줌 (없으면 404)
   그 밖     : 컨트롤러 응답이 200이면 last_api/*.txt에 저장</div>
-<details open class="sli"><summary>SLI <b class="tier t-T3">T3</b></summary><table><thead><tr><th>SLI</th><th>목표 (SLO)</th><th>측정</th></tr></thead><tbody><tr><td>`?cached=1` 200 / `?cached=1` 요청 (처음 실행 뒤)</td><td>95%</td><td>404면 화면이 KB 응답까지 빈 채로 기다림</td></tr><tr><td>캐시 응답 지연 p95</td><td>&lt; 500ms</td><td>접근 로그</td></tr></tbody></table></details>
+<details open class="sli"><summary>SLI <b class="tier t-T3">T3</b></summary><table><thead><tr><th>SLI</th><th>목표 (SLO)</th><th>측정</th></tr></thead><tbody><tr><td>`?cached=1` 200 / `?cached=1` 요청 (처음 실행 뒤)</td><td>95%</td><td>404면 화면이 KB 응답까지 빈 채로 기다림</td></tr><tr><td>캐시 응답 지연 p95</td><td>&lt; 500ms</td><td>접근 로그 `?cached=1` → error_budget.py</td></tr></tbody></table></details>
 <details open><summary>흐름도</summary><pre class="mermaid">flowchart TD
   R[요청] --&gt; P{&quot;저장 대상 API?&lt;br&gt;LastResponse.file&quot;}
   P --&gt;|아니오| C[컨트롤러로 통과]

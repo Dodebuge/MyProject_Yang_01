@@ -25,6 +25,7 @@ trader.log
 trader.log.1
 recent_searches.txt
 last_api/
+access_log/
 chart_settings.json
 certs/
 monitor_items.json
