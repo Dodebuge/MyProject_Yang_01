@@ -403,6 +403,7 @@ Spring 서버의 SQLite·접근 로그는 읽기만 하고, 쓰는 곳은 데이
 
 - **화면** `http://<Jetson>:22888/`: 이번 달 에러 예산(사용률 막대, 81칸이 안 되는 날)과 SLI 표(값 · 좋은/전체 · 목표 · 충족/미달), 마지막 Spring 점검. 60초마다 새로 고침, 계산은 1분 캐시. JSON은 `/api/slo`.
 - **블랙박스 점검**: 30초마다 `SLO_TARGET`(기본 `http://127.0.0.1:9080/api/settings`)을 직접 불러 `slo.db`의 `probe`(40일 보관)에 남기고, **Spring 응답** SLI(이번 달 성공 비율, 목표 99.5%)로 셉니다.
+- **외부 연결 점검**: 같은 30초 점검에서 `SLO_EXTERNAL`(기본 `https://developer.kbsec.com:32484`, `https://openapi.tossinvest.com`)에 HEAD를 보내 응답이 오면(상태 코드 상관없음) `probe.ext`=1. **외부 연결 KB·토스** SLI(목표 99.5%)로 세고, 매일 `check --fail-slo`는 **지난 평일 점검 이후 90초 넘게 끊긴 구간이 하나라도 있으면 실패**하고 Job Summary에 "외부 연결 끊김: 시작 ~ 끝 (약 N분)"을 남깁니다. 2026-11-26 08:36~10:19 인터넷 끊김(Spring은 살아 있어 Spring 응답 SLI는 100%) 때 자동매매·코스닥 기록이 멈춘 걸 원인째 보이게 하려는 것. 끊긴 동안은 GitHub에 닿지 못해 Actions 잡도 못 받으므로, 다음 날 점검(또는 복구 뒤 밀린 잡)에서 드러납니다.
   배포 재시작·크래시·멈춤(10초 안에 응답 없음) 모두 실패로 잡힙니다.
 - **알림**: 3번 연속(90초) 실패하면 ntfy로 "[SLO] Spring 응답 없음"(우선순위 5), 돌아오면 "[SLO] Spring 복구". 주제는 시그널 알림과 같은 `.env`의 `NTFY_TOPIC`(없으면 로그만).
 - **GitHub Actions 점검**: `java -jar slo-monitor.jar check [--max 50] [--fail-slo]`는 서버를 띄우지 않고 계산만 해서 출력·Job Summary에 남기고 종료 코드로 알려 줍니다.

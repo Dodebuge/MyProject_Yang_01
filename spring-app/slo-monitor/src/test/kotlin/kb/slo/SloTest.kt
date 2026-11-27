@@ -117,7 +117,7 @@ class SloTest {
     fun emptyDataDirStillRenders(@TempDir dir: Path) {
         val store = Store(dir)
         val slis = store.slis(now)
-        assertEquals(11, slis.size)
+        assertEquals(12, slis.size)
         assertTrue(slis.all { it.met == null })
         val page = render(Snapshot("2026-11-25 16:00:00", "2026-11", store.budget(now), null, slis))
         assertTrue("SLO 모니터" in page && "확인 전" in page && "셀 이벤트 없음" in page)
@@ -132,5 +132,33 @@ class SloTest {
         assertEquals(Triple(true, 3, "down"), nextState(false, 2, false))
         assertEquals(Triple(true, 4, null), nextState(true, 3, false), "장애 중에는 다시 알리지 않음")
         assertEquals(Triple(false, 0, "recovered"), nextState(true, 4, true))
+    }
+
+    /** 11-26처럼 Spring은 살아 있고 인터넷만 끊긴 경우: SLI는 목표를 넘어도 check가 끊김으로 실패해야 함 */
+    @Test
+    fun externalOutageFailsDailyCheck(@TempDir dir: Path) {
+        assertEquals(listOf(Outage("b", "d", 3)), outages(listOf("a" to true, "b" to false, "c" to false, "d" to false, "e" to true, "f" to false, "g" to false)))
+        assertEquals(LocalDateTime.of(2026, 11, 27, 16, 0), lastCheck(LocalDateTime.of(2026, 11, 30, 16, 0)), "월요일 → 금요일")
+        val store = Store(dir)
+        store.write { c ->
+            c.createStatement().use { it.execute("CREATE TABLE probe (at TEXT PRIMARY KEY, ok INTEGER NOT NULL, ms INTEGER NOT NULL, ext INTEGER)") }
+            c.prepareStatement("INSERT INTO probe VALUES (?, 1, 5, ?)").use { st ->
+                var t = LocalDateTime.of(2026, 11, 24, 16, 0)
+                while (t < now) {
+                    st.setString(1, t.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
+                    // 11-25 08:36~10:19 끊김
+                    st.setInt(2, if (t >= LocalDateTime.of(2026, 11, 25, 8, 36) && t < LocalDateTime.of(2026, 11, 25, 10, 20)) 0 else 1)
+                    st.executeUpdate()
+                    t = t.plusSeconds(30)
+                }
+            }
+        }
+        val sli = store.externalSli("2026-11")
+        assertEquals(2880 - 208, sli.good)
+        val cut = store.externalOutages(lastCheck(now))
+        assertEquals(listOf(Outage("2026-11-25 08:36:00", "2026-11-25 10:19:30", 208)), cut)
+        assertTrue("외부 연결 끊김" in report(store.budget(now), store.slis(now), now, cut))
+        assertEquals(1, check(arrayOf("check", "--fail-slo"), dir, now))
+        assertEquals(0, check(arrayOf("check", "--max", "50"), dir, now), "배포 전 확인은 예산만 봄")
     }
 }

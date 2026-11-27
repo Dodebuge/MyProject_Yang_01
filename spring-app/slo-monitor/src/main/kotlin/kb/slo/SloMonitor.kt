@@ -55,11 +55,15 @@ fun nextState(down: Boolean, fails: Int, ok: Boolean): Triple<Boolean, Int, Stri
 
 data class ProbeResult(val at: String, val ok: Boolean, val ms: Long, val error: String, val down: Boolean)
 
-/** 30초마다 Spring(slo.target)을 직접 불러 slo.db probe(at KST, ok, ms)에 남기고, 장애·복구를 ntfy로 알림. */
+/**
+ * 30초마다 Spring(slo.target)을 직접 불러 slo.db probe(at KST, ok, ms, ext)에 남기고, 장애·복구를 ntfy로 알림.
+ * ext: 외부(slo.external, KB·토스)에 닿았는지 (HTTP 응답이 오면 상태 코드와 상관없이 1). 11-26처럼 인터넷만 끊기면 Spring은 살아 있어 ok만으로는 모름.
+ */
 @Component
 class Probe(
     @Value("\${kb.data-dir}") dataDir: String,
     @Value("\${slo.target}") val target: String,
+    @Value("\${slo.external:https://developer.kbsec.com:32484,https://openapi.tossinvest.com}") externals: String,
     @Value("\${NTFY_TOPIC:}") private val topic: String,
     @Value("\${NTFY_SERVER:https://ntfy.sh}") private val server: String,
 ) {
@@ -74,13 +78,19 @@ class Probe(
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
     private var down = false
     private var fails = 0
+    private val external = externals.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    private var extError = ""
 
     @Volatile
     var last: ProbeResult? = null
         private set
 
     init {
-        store.write { c -> c.createStatement().use { it.execute("CREATE TABLE IF NOT EXISTS probe (at TEXT PRIMARY KEY, ok INTEGER NOT NULL, ms INTEGER NOT NULL)") } }
+        store.write { c -> c.createStatement().use { it.execute("CREATE TABLE IF NOT EXISTS probe (at TEXT PRIMARY KEY, ok INTEGER NOT NULL, ms INTEGER NOT NULL, ext INTEGER)") } }
+        try {  // ext 전에 만든 slo.db
+            store.write { c -> c.createStatement().use { it.execute("ALTER TABLE probe ADD COLUMN ext INTEGER") } }
+        } catch (e: java.sql.SQLException) {  // 이미 있음
+        }
         log.info("SLO 모니터: 점검 대상 {}, 데이터 {}, ntfy {}", target, dataDir, topic.ifEmpty { "(없음, 로그만)" })
     }
 
@@ -95,11 +105,16 @@ class Probe(
         }
         val ok = error.isEmpty()
         val ms = (System.nanoTime() - t0) / 1_000_000
+        val ext = external.map { reach(it) }.filter { it.isNotEmpty() }.joinToString("; ")
+        if (ext != extError && (ext.isEmpty() || extError.isEmpty())) log.warn(if (ext.isEmpty()) "외부 연결 복구" else "외부 연결 실패: $ext")
+        extError = ext
         val now = LocalDateTime.now(KST)
         try {
             store.write { c ->
-                c.prepareStatement("INSERT OR REPLACE INTO probe VALUES (?, ?, ?)").use {
-                    it.setString(1, now.format(AT)); it.setInt(2, if (ok) 1 else 0); it.setLong(3, ms); it.executeUpdate()
+                c.prepareStatement("INSERT OR REPLACE INTO probe (at, ok, ms, ext) VALUES (?, ?, ?, ?)").use {
+                    it.setString(1, now.format(AT)); it.setInt(2, if (ok) 1 else 0); it.setLong(3, ms)
+                    if (external.isEmpty()) it.setNull(4, java.sql.Types.INTEGER) else it.setInt(4, if (ext.isEmpty()) 1 else 0)
+                    it.executeUpdate()
                 }
                 c.prepareStatement("DELETE FROM probe WHERE at < ?").use { it.setString(1, now.minusDays(KEEP_DAYS).format(AT)); it.executeUpdate() }
             }
@@ -114,6 +129,15 @@ class Probe(
             "down" -> notify("Spring 응답 없음", "$target ${fails}번 연속 실패 (${fails * 30}초)\n$error", 5)
             "recovered" -> notify("Spring 복구", "$target 다시 응답 (${ms}ms)", 3)
         }
+    }
+
+    /** 닿으면 "", 아니면 오류 (주소 못 찾음·연결 실패·시간 초과). */
+    private fun reach(url: String): String = try {
+        http.send(HttpRequest.newBuilder(URI.create(url)).method("HEAD", HttpRequest.BodyPublishers.noBody()).timeout(Duration.ofSeconds(10)).build(),
+            HttpResponse.BodyHandlers.discarding())
+        ""
+    } catch (e: Exception) {
+        "$url ${e.javaClass.simpleName}: ${e.message}"
     }
 
     private fun notify(title: String, message: String, priority: Int) {

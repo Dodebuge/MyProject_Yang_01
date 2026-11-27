@@ -18,6 +18,8 @@ import org.sqlite.SQLiteConfig
  * 에러 예산: 코스닥 5분 기록(kosdaq.db kosdaq_tick) 평일 09:00~15:40 하루 81슬롯, SLO 98%. 허용 = 이번 달 평일 수 × 81 × 2%.
  * SLI (이번 달, 끝난 날만):
  *   Spring 응답          slo.db probe: 30초마다 블랙박스 점검 성공 / 점검                                   99.5%
+ *   외부 연결 (KB·토스)   slo.db probe.ext: 같은 30초 점검에서 KB·토스에 닿음 / 점검                           99.5%
+ *                       + check는 지난 평일 점검 이후 3번(90초) 넘게 이어진 끊김이 있으면 실패 (--fail-slo)
  *   자동매매 5초 확인     trader.db trader_beat(tick) / trader_session 정규장 분                              99.5%
  *   단타 1분 신호 처리    trader_beat(scalp) / 단타 쓴 날 09:01~마감 10분 전                                  99%
  *   러셀 2000 30분 기록   russell_tick 저장 슬롯 / 기록 있는 날 × 14                                          93%
@@ -35,6 +37,7 @@ const val PAIR = "미장 연동"           // Trader.PAIR: 장마감 매도를 �
 val KST: ZoneId = ZoneId.of("Asia/Seoul")
 val MINUTE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 private val HHMM = DateTimeFormatter.ofPattern("HH:mm")
+private val SECOND = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 private val YM = DateTimeFormatter.ofPattern("yyyy-MM")
 
 data class Budget(val allowed: Double, val missing: Int, val usedPct: Double, val unknown: List<String>, val short: Map<String, Int>)
@@ -175,6 +178,28 @@ fun accessSlis(lines: Sequence<String>): List<Sli> {
     return listOf(Sli("/api 응답 5xx 아님 (T3)", ok, api, 0.99)) + LATENCY.map { Sli(it.first, lat.getValue(it.first)[0], lat.getValue(it.first)[1], 0.95) }
 }
 
+/** 점검 끊김 구간 (첫 실패, 마지막 실패, 실패 점검 수). */
+data class Outage(val start: String, val end: String, val n: Int)
+
+/** (시각, 성공) 시각순에서 min번 넘게 이어진 실패 구간. */
+fun outages(rows: List<Pair<String, Boolean>>, min: Int = 3): List<Outage> {
+    val out = mutableListOf<Outage>()
+    var run = mutableListOf<String>()
+    for ((at, ok) in rows + ("" to true)) {
+        if (!ok) { run += at; continue }
+        if (run.size >= min) out += Outage(run.first(), run.last(), run.size)
+        run = mutableListOf()
+    }
+    return out
+}
+
+/** 지난 평일 같은 시각 (월요일이면 금요일): 매일 점검이 그 사이 끊김을 놓치지 않게. */
+fun lastCheck(now: LocalDateTime): LocalDateTime {
+    var t = now.minusDays(1)
+    while (t.dayOfWeek.value > 5) t = t.minusDays(1)
+    return t
+}
+
 /** 데이터 폴더(KB_DATA_DIR)의 SQLite·로그. Spring 서버 파일은 읽기만, slo.db에만 씁니다. */
 class Store(val data: Path) {
 
@@ -241,6 +266,19 @@ class Store(val data: Path) {
         return Sli("Spring 응답 (블랙박스, 30초)", good, total, 0.995)
     }
 
+    /** 같은 점검의 외부(KB·토스) 연결. ext 없는 예전 줄은 빼고 셈. */
+    fun externalSli(month: String): Sli {
+        val (good, total) = query("slo.db", "SELECT coalesce(sum(ext), 0), count(ext) FROM probe WHERE at LIKE ?", "$month%") {
+            it.getInt(1) to it.getInt(2)
+        }.firstOrNull() ?: (0 to 0)
+        return Sli("외부 연결 KB·토스 (30초)", good, total, 0.995)
+    }
+
+    fun externalOutages(since: LocalDateTime): List<Outage> = outages(
+        query("slo.db", "SELECT at, ext FROM probe WHERE ext IS NOT NULL AND at >= ? ORDER BY at", since.format(SECOND)) {
+            it.getString(1) to (it.getInt(2) == 1)
+        })
+
     fun slis(now: LocalDateTime): List<Sli> {
         val month = now.format(YM)
         val like = "$month%"
@@ -264,6 +302,7 @@ class Store(val data: Path) {
         fun sli(name: String, p: Pair<Int, Int>, slo: Double) = Sli(name, p.first, p.second, slo)
         return listOf(
             probeSli(month),
+            externalSli(month),
             sli("자동매매 5초 확인 (T0)", beatSli(sessions, beats, "tick", now), 0.995),
             sli("단타 1분 신호 처리 (T0)", beatSli(sessions, beats, "scalp", now), 0.99),
             sli("러셀 2000 30분 기록", russellSli(russell, now), 0.93),
@@ -281,7 +320,7 @@ class Store(val data: Path) {
 }
 
 /** GitHub Actions Job Summary용 Markdown. */
-fun report(b: Budget, slis: List<Sli>, now: LocalDateTime): String = buildString {
+fun report(b: Budget, slis: List<Sli>, now: LocalDateTime, cut: List<Outage> = emptyList()): String = buildString {
     val left = maxOf(0.0, b.allowed - b.missing)
     appendLine("### 에러 예산 ${now.format(YM)} (코스닥 5분 기록, SLO ${(SLO * 100).toInt()}%)")
     appendLine()
@@ -291,6 +330,7 @@ fun report(b: Budget, slis: List<Sli>, now: LocalDateTime): String = buildString
     if (b.short.isNotEmpty()) appendLine("- 81칸이 안 되는 날: " + b.short.entries.joinToString(", ") { "${it.key} (${it.value}/$PER_DAY)" })
     if (b.usedPct >= 100) appendLine("- **예산 소진**: 자동매매를 끄고 원인부터 고치세요 (README '에러 예산 운용').")
     else if (b.usedPct >= 50) appendLine("- **절반 넘게 사용**: 장중 수동 배포(now) 금지, 자동매매 새 기능 배포 보류.")
+    for (o in cut) appendLine("- **외부 연결 끊김** (KB·토스에 닿지 못함, 자동매매·기록 멈춤): ${o.start} ~ ${o.end} (약 ${(o.n + 1) / 2}분)")
     appendLine()
     appendLine("| SLI | 값 | 목표 | |")
     appendLine("|---|---|---|---|")
@@ -304,21 +344,22 @@ fun report(b: Budget, slis: List<Sli>, now: LocalDateTime): String = buildString
 
 /**
  * `java -jar slo-monitor.jar check [--max 50] [--fail-slo]` (GitHub Actions): 출력하고 Job Summary에 덧붙임.
- * --max: 예산을 이 % 이상 썼으면 1, --fail-slo: SLI 하나라도 목표 미달이면 1.
+ * --max: 예산을 이 % 이상 썼으면 1, --fail-slo: SLI 하나라도 목표 미달이거나 지난 평일 점검 이후 외부 연결이 끊겼으면 1.
  */
 fun check(args: Array<String>, data: Path, now: LocalDateTime = LocalDateTime.now(KST)): Int {
     val max = args.indexOf("--max").takeIf { it >= 0 }?.let { args[it + 1].toDouble() }
     val store = Store(data)
     val b = store.budget(now)
     val slis = store.slis(now)
-    val text = report(b, slis, now)
+    val cut = store.externalOutages(lastCheck(now))
+    val text = report(b, slis, now, cut)
     print(text)
     System.getenv("GITHUB_STEP_SUMMARY")?.let { Files.writeString(Path.of(it), text, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND) }
     if (max != null && b.usedPct >= max) {
         System.err.println("에러 예산 ${"%.1f".format(b.usedPct)}% 사용 (기준 ${max}%)")
         return 1
     }
-    val missed = slis.filter { it.met == false }.map { it.name }
+    val missed = slis.filter { it.met == false }.map { it.name } + cut.map { "외부 연결 끊김 ${it.start}~${it.end.substring(11)}" }
     if ("--fail-slo" in args && missed.isNotEmpty()) {
         System.err.println("SLO 미달: ${missed.joinToString(", ")}")
         return 1
